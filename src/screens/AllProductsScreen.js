@@ -1,110 +1,502 @@
-// ─── AllProductsScreen — MarketHub Niger ───────────────────────────────────────
-// Page "Voir tout" modernisée avec filtres et animations
+﻿// ─── AllProductsScreen v2 PREMIUM ─ MarketHub Niger ──────────────────────────
+// Layout éditorial : Hero card + grille 2 col · Header shrink au scroll
+// Filtre prix slider · Favoris · Animations staggerées · 100% tokens P.*
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View, Text, StyleSheet, FlatList, TouchableOpacity, Image,
-  RefreshControl, ActivityIndicator, Dimensions, StatusBar, Animated,
-  ScrollView,
+  RefreshControl, ActivityIndicator, Dimensions, StatusBar,
+  Animated, Modal, ScrollView, PanResponder,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
-import { COLORS } from '../utils/constants';
 import { apiClient } from '../api/auth';
+import { useAuth } from '../contexts/AuthContext';
+import { getFavoriteIds, toggleFavorite } from '../api/favorites';
+import AlertModal from '../components/AlertModal';
+import { MOBILE_COLORS as P } from '../theme/colors';
 
 const { width } = Dimensions.get('window');
+const CARD_WIDTH = (width - 48) / 2;
+const HERO_HEIGHT = 220;
+const HEADER_MAX = 110;
+const HEADER_MIN = 56;
 
-// ─── PALETTE ───────────────────────────────────────────────────────────────────
-const P = {
-  terra:    '#C1440E',
-  amber:    '#E8832A',
-  gold:     '#F0A500',
-  brown:    '#3D1C02',
-  charcoal: '#1A1210',
-  cream:    '#FDF6EC',
-  sand:     '#F5E6C8',
-  surface:  '#FFFAF3',
-  muted:    '#9C8872',
-  dim:      'rgba(61,28,2,0.06)',
-  white:    '#FFFFFF',
-};
-
-// Extraire le nom de la ville depuis la localisation
-const getCityName = (location) => {
-  if (!location) return '';
-  return location.split(',')[0].trim();
-};
+// ─── Utilitaires ──────────────────────────────────────────────────────────────
+const getCityName = (loc) => (loc ? loc.split(',')[0].trim() : 'Niger');
+const fmtPrice    = (p)   => p ? `${parseInt(p).toLocaleString()} FCFA` : 'À discuter';
+const getProductId = (item) => item?._id || item?.id;
 
 // ─────────────────────────────────────────────────────────────────────────────
-// COMPOSANTS
+// SLIDER DE PRIX (custom, sans lib externe)
 // ─────────────────────────────────────────────────────────────────────────────
+function PriceSlider({ min, max, values, onChange, trackWidth }) {
+  const tw     = trackWidth || (width - 80);
+  const toX    = (v) => ((v - min) / (max - min)) * tw;
+  const toVal  = (x) => Math.round(min + (Math.max(0, Math.min(tw, x)) / tw) * (max - min));
 
-function ProductCard({ item, onPress }) {
-  const sc = useRef(new Animated.Value(1)).current;
-  const isService = item.type === 'service';
+  const leftX  = useRef(new Animated.Value(toX(values[0]))).current;
+  const rightX = useRef(new Animated.Value(toX(values[1]))).current;
+  const [left,  setLeft]  = useState(values[0]);
+  const [right, setRight] = useState(values[1]);
+
+  const makePan = (isLeft) => PanResponder.create({
+    onStartShouldSetPanResponder: () => true,
+    onPanResponderMove: (_, g) => {
+      const base = isLeft ? toX(left) : toX(right);
+      const nx   = base + g.dx;
+      const nv   = toVal(nx);
+      if (isLeft) {
+        if (nv >= min && nv < right - 1000) {
+          (leftX  ).setValue(Math.max(0, Math.min(toX(right) - 24, nx)));
+          setLeft(nv);
+        }
+      } else {
+        if (nv <= max && nv > left + 1000) {
+          (rightX ).setValue(Math.max(toX(left) + 24, Math.min(tw, nx)));
+          setRight(nv);
+        }
+      }
+    },
+    onPanResponderRelease: () => onChange([left, right]),
+  });
+
+  const panLeft  = useRef(makePan(true)).current;
+  const panRight = useRef(makePan(false)).current;
+
+  const fillLeft  = leftX;
+  const fillWidth = Animated.subtract(rightX, leftX);
+
   return (
-    <TouchableOpacity
-      activeOpacity={1}
-      onPress={onPress}
-      onPressIn={() => Animated.spring(sc, { toValue: 0.96, useNativeDriver: true, speed: 28 }).start()}
-      onPressOut={() => Animated.spring(sc, { toValue: 1, useNativeDriver: true, speed: 28 }).start()}
-    >
-      <Animated.View style={[s.card, { transform: [{ scale: sc }] }]}>
-        <View style={s.cardImgWrap}>
-          <Image
-            source={{ uri: item.images?.[0] || 'https://via.placeholder.com/200x145/F5E6C8/C1440E?text=MarketHub' }}
-            style={s.cardImg}
-            resizeMode="cover"
-          />
-          <LinearGradient colors={['transparent', 'rgba(26,18,16,0.38)']} style={StyleSheet.absoluteFill} />
-          <View style={[s.typeBadge, { backgroundColor: isService ? P.terra : P.amber }]}>
-            <Text style={s.typeBadgeTxt}>{isService ? '🛠 Service' : '📦 Produit'}</Text>
-          </View>
-        </View>
-        <View style={s.cardBody}>
-          <Text style={s.cardTitle} numberOfLines={2}>{item.title}</Text>
-          <Text style={s.cardLoc} numberOfLines={1}>📍 {getCityName(item.location) || 'Niger'}</Text>
-          <View style={s.cardBottom}>
-            <Text style={s.cardPrice}>
-              {item.price ? `${parseInt(item.price).toLocaleString()} FCFA` : 'Prix à discuter'}
-            </Text>
-          </View>
-        </View>
+    <View style={{ width: tw, height: 40, justifyContent: 'center' }}>
+      {/* Track fond */}
+      <View style={sl.track} />
+      {/* Track actif */}
+      <Animated.View style={[sl.trackFill, { left: fillLeft, width: fillWidth }]} />
+      {/* Thumb gauche */}
+      <Animated.View
+        style={[sl.thumb, { left: Animated.subtract(leftX, 11) }]}
+        {...panLeft.panHandlers}
+      >
+        <View style={sl.thumbInner} />
       </Animated.View>
-    </TouchableOpacity>
+      {/* Thumb droit */}
+      <Animated.View
+        style={[sl.thumb, { left: Animated.subtract(rightX, 11) }]}
+        {...panRight.panHandlers}
+      >
+        <View style={sl.thumbInner} />
+      </Animated.View>
+    </View>
   );
 }
 
-export default function AllProductsScreen({ route, navigation }) {
-  const insets = useSafeAreaInsets();
-  const { type } = route.params; // 'product' ou 'service'
-  const [products, setProducts] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [sortBy, setSortBy] = useState('recent'); // 'recent', 'price-asc', 'price-desc'
+const sl = StyleSheet.create({
+  track:      { position: 'absolute', left: 0, right: 0, height: 4, borderRadius: 2, backgroundColor: P.dim },
+  trackFill:  { position: 'absolute', height: 4, borderRadius: 2, backgroundColor: P.terra },
+  thumb:      { position: 'absolute', width: 22, height: 22, borderRadius: 11, backgroundColor: P.white, borderWidth: 2.5, borderColor: P.terra, justifyContent: 'center', alignItems: 'center', shadowColor: P.terra, shadowOpacity: 0.25, shadowOffset: { width: 0, height: 3 }, shadowRadius: 6, elevation: 4 },
+  thumbInner: { width: 8, height: 8, borderRadius: 4, backgroundColor: P.terra },
+});
 
-  const fade = useRef(new Animated.Value(0)).current;
+// ─────────────────────────────────────────────────────────────────────────────
+// HERO CARD — première annonce, pleine largeur
+// ─────────────────────────────────────────────────────────────────────────────
+function HeroCard({ item, onPress, isFav, onFavToggle, fadeAnim }) {
+  const sc = useRef(new Animated.Value(1)).current;
+  if (!item) return null;
+  const isService = item.type === 'service';
+  return (
+    <Animated.View style={{ opacity: fadeAnim, transform: [{ scale: sc }] }}>
+      <TouchableOpacity
+        activeOpacity={1}
+        onPress={onPress}
+        onPressIn ={() => Animated.spring(sc, { toValue: 0.97, useNativeDriver: true, speed: 28 }).start()}
+        onPressOut={() => Animated.spring(sc, { toValue: 1,    useNativeDriver: true, speed: 28 }).start()}
+      >
+        <View style={h.card}>
+          {/* Image */}
+          <Image
+            source={{ uri: item.images?.[0] || 'https://via.placeholder.com/400x220/F5E6C8/C1440E?text=MarketHub' }}
+            style={h.img}
+            resizeMode="cover"
+          />
+          {/* Gradient overlay */}
+          <LinearGradient
+            colors={['transparent', P.charcoal]}
+            style={StyleSheet.absoluteFill}
+          />
+          {/* Badge type */}
+          <View style={[h.badge, { backgroundColor: isService ? P.terra : P.gold }]}>
+            <Text style={h.badgeTxt}>{isService ? '🛠 Service' : '📦 Produit'}</Text>
+          </View>
+          {/* Favori */}
+          <TouchableOpacity style={h.favBtn} onPress={onFavToggle} activeOpacity={0.8}>
+            <Text style={h.favIcon}>{isFav ? '❤️' : '🤍'}</Text>
+          </TouchableOpacity>
+          {/* Infos bas */}
+          <View style={h.info}>
+            <View style={h.tagHero}>
+              <Text style={h.tagTxt}>⭐ À la une</Text>
+            </View>
+            <Text style={h.title} numberOfLines={2}>{item.title}</Text>
+            <View style={h.row}>
+              <Text style={h.loc}>📍 {getCityName(item.location)}</Text>
+              <Text style={h.price}>{fmtPrice(item.price)}</Text>
+            </View>
+          </View>
+        </View>
+      </TouchableOpacity>
+    </Animated.View>
+  );
+}
+
+const h = StyleSheet.create({
+  card:    { marginHorizontal: 16, marginBottom: 16, borderRadius: 24, overflow: 'hidden', height: HERO_HEIGHT, shadowColor: P.charcoal, shadowOpacity: 0.18, shadowOffset: { width: 0, height: 8 }, shadowRadius: 20, elevation: 10 },
+  img:     { width: '100%', height: '100%', position: 'absolute' },
+  badge:   { position: 'absolute', top: 14, left: 14, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 8 },
+  badgeTxt:{ fontSize: 10, fontWeight: '800', color: P.white },
+  favBtn:  { position: 'absolute', top: 10, right: 14, width: 36, height: 36, borderRadius: 18, backgroundColor: P.glassWhite25, justifyContent: 'center', alignItems: 'center' },
+  favIcon: { fontSize: 18 },
+  info:    { position: 'absolute', bottom: 0, left: 0, right: 0, padding: 16 },
+  tagHero: { alignSelf: 'flex-start', backgroundColor: P.terra, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6, marginBottom: 6 },
+  tagTxt:  { fontSize: 9, fontWeight: '800', color: P.white, letterSpacing: 0.5 },
+  title:   { fontSize: 18, fontWeight: '900', color: P.white, marginBottom: 8, lineHeight: 24 },
+  row:     { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  loc:     { fontSize: 12, color: P.orange200, fontWeight: '500' },
+  price:   { fontSize: 16, fontWeight: '900', color: P.amber },
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PRODUCT CARD — grille 2 colonnes
+// ─────────────────────────────────────────────────────────────────────────────
+function ProductCard({ item, onPress, isFav, onFavToggle, index, listFade }) {
+  const sc        = useRef(new Animated.Value(1)).current;
+  const itemFade  = useRef(new Animated.Value(0)).current;
+  const itemSlide = useRef(new Animated.Value(20)).current;
+  const isService = item.type === 'service';
 
   useEffect(() => {
-    Animated.timing(fade, { toValue: 1, duration: 400, useNativeDriver: true }).start();
+    Animated.parallel([
+      Animated.timing(itemFade,  { toValue: 1, duration: 350, delay: index * 60, useNativeDriver: true }),
+      Animated.spring(itemSlide, { toValue: 0, tension: 80, friction: 10, delay: index * 60, useNativeDriver: true }),
+    ]).start();
   }, []);
 
-  const title = type === 'service' ? 'Tous les Services' : 'Tous les Produits';
+  return (
+    <Animated.View style={{ opacity: itemFade, transform: [{ translateY: itemSlide }, { scale: sc }] }}>
+      <TouchableOpacity
+        activeOpacity={1}
+        onPress={onPress}
+        onPressIn ={() => Animated.spring(sc, { toValue: 0.95, useNativeDriver: true, speed: 28 }).start()}
+        onPressOut={() => Animated.spring(sc, { toValue: 1,    useNativeDriver: true, speed: 28 }).start()}
+      >
+        <View style={c.card}>
+          {/* Image */}
+          <View style={c.imgWrap}>
+            <Image
+              source={{ uri: item.images?.[0] || 'https://via.placeholder.com/200x130/F5E6C8/C1440E?text=M' }}
+              style={c.img}
+              resizeMode="cover"
+            />
+            {/* Favori */}
+            <TouchableOpacity style={c.favBtn} onPress={onFavToggle} activeOpacity={0.8}>
+              <Text style={c.favIcon}>{isFav ? '❤️' : '🤍'}</Text>
+            </TouchableOpacity>
+            {/* Badge type */}
+            <View style={[c.badge, { backgroundColor: isService ? P.terra : P.gold }]}>
+              <Text style={c.badgeTxt}>{isService ? '🛠' : '📦'}</Text>
+            </View>
+          </View>
+          {/* Body */}
+          <View style={c.body}>
+            <Text style={c.title} numberOfLines={2}>{item.title}</Text>
+            <Text style={c.loc} numberOfLines={1}>📍 {getCityName(item.location)}</Text>
+            <View style={c.footer}>
+              <Text style={c.price}>{fmtPrice(item.price)}</Text>
+            </View>
+          </View>
+        </View>
+      </TouchableOpacity>
+    </Animated.View>
+  );
+}
+
+const c = StyleSheet.create({
+  card:    { width: CARD_WIDTH, backgroundColor: P.white, borderRadius: 18, overflow: 'hidden', marginBottom: 12, shadowColor: P.charcoal, shadowOpacity: 0.08, shadowOffset: { width: 0, height: 4 }, shadowRadius: 10, elevation: 4, borderWidth: 1, borderColor: P.dim },
+  imgWrap: { height: 130, backgroundColor: P.sand, position: 'relative' },
+  img:     { width: '100%', height: '100%' },
+  favBtn:  { position: 'absolute', top: 8, right: 8, width: 30, height: 30, borderRadius: 15, backgroundColor: P.glassWhite25, justifyContent: 'center', alignItems: 'center' },
+  favIcon: { fontSize: 14 },
+  badge:   { position: 'absolute', bottom: 8, left: 8, width: 24, height: 24, borderRadius: 12, justifyContent: 'center', alignItems: 'center' },
+  badgeTxt:{ fontSize: 11 },
+  body:    { padding: 10 },
+  title:   { fontSize: 13, fontWeight: '700', color: P.charcoal, lineHeight: 18, marginBottom: 4, minHeight: 36 },
+  loc:     { fontSize: 10, color: P.muted, marginBottom: 8 },
+  footer:  { borderTopWidth: 1, borderTopColor: P.dim, paddingTop: 8 },
+  price:   { fontSize: 13, fontWeight: '900', color: P.terra },
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MODAL FILTRE PRIX
+// ─────────────────────────────────────────────────────────────────────────────
+function PriceFilterModal({ visible, onClose, priceRange, onApply, maxPrice }) {
+  const insets = useSafeAreaInsets();
+  const [range, setRange] = useState(priceRange);
+  const slideAnim = useRef(new Animated.Value(300)).current;
+
+  useEffect(() => {
+    if (visible) {
+      setRange(priceRange);
+      Animated.spring(slideAnim, { toValue: 0, tension: 80, friction: 12, useNativeDriver: true }).start();
+    } else {
+      Animated.timing(slideAnim, { toValue: 300, duration: 200, useNativeDriver: true }).start();
+    }
+  }, [visible]);
+
+  return (
+    <Modal visible={visible} transparent animationType="none" onRequestClose={onClose}>
+      <View style={fm.root}>
+        {/* Backdrop */}
+        <TouchableOpacity style={fm.backdrop} activeOpacity={1} onPress={onClose} />
+        {/* Sheet */}
+        <Animated.View style={[fm.sheet, { transform: [{ translateY: slideAnim }], paddingBottom: Math.max(insets.bottom, 16) }]}>
+          <View style={fm.handle} />
+          <View style={fm.head}>
+            <Text style={fm.title}>Filtre par prix</Text>
+            <TouchableOpacity onPress={onClose} style={fm.closeBtn}>
+              <Text style={fm.closeTxt}>✕</Text>
+            </TouchableOpacity>
+          </View>
+
+          {/* Valeurs */}
+          <View style={fm.valRow}>
+            <View style={fm.valBox}>
+              <Text style={fm.valLabel}>MIN</Text>
+              <Text style={fm.valNum}>{range[0].toLocaleString()}</Text>
+              <Text style={fm.valUnit}>FCFA</Text>
+            </View>
+            <View style={fm.valSep} />
+            <View style={fm.valBox}>
+              <Text style={fm.valLabel}>MAX</Text>
+              <Text style={fm.valNum}>{range[1].toLocaleString()}</Text>
+              <Text style={fm.valUnit}>FCFA</Text>
+            </View>
+          </View>
+
+          {/* Slider */}
+          <View style={{ paddingHorizontal: 20, marginTop: 8, marginBottom: 24 }}>
+            <PriceSlider
+              min={0}
+              max={maxPrice}
+              values={range}
+              onChange={setRange}
+              trackWidth={width - 80}
+            />
+          </View>
+
+          {/* Boutons rapides */}
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={fm.chips}>
+            {[
+              { label: 'Tout',          v: [0, maxPrice] },
+              { label: '< 5 000',       v: [0, 5000] },
+              { label: '5k – 50k',      v: [5000, 50000] },
+              { label: '50k – 200k',    v: [50000, 200000] },
+              { label: '> 200k',        v: [200000, maxPrice] },
+            ].map((chip, i) => {
+              const active = range[0] === chip.v[0] && range[1] === chip.v[1];
+              return (
+                <TouchableOpacity
+                  key={i}
+                  style={[fm.chip, active && fm.chipActive]}
+                  onPress={() => setRange(chip.v)}
+                  activeOpacity={0.8}
+                >
+                  <Text style={[fm.chipTxt, active && fm.chipTxtActive]}>{chip.label}</Text>
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+
+          {/* Appliquer */}
+          <View style={{ paddingHorizontal: 20, marginTop: 8 }}>
+            <TouchableOpacity
+              style={fm.applyBtn}
+              onPress={() => { onApply(range); onClose(); }}
+              activeOpacity={0.88}
+            >
+              <LinearGradient colors={[P.orange500, P.orange700]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={fm.applyGrad}>
+                <Text style={fm.applyTxt}>Appliquer le filtre</Text>
+              </LinearGradient>
+            </TouchableOpacity>
+          </View>
+        </Animated.View>
+      </View>
+    </Modal>
+  );
+}
+
+const fm = StyleSheet.create({
+  root:        { flex: 1, justifyContent: 'flex-end' },
+  backdrop:    { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: P.shadow, opacity: 0.5 },
+  sheet:       { backgroundColor: P.white, borderTopLeftRadius: 28, borderTopRightRadius: 28 },
+  handle:      { width: 36, height: 4, borderRadius: 2, backgroundColor: P.dim, alignSelf: 'center', marginTop: 12, marginBottom: 4 },
+  head:        { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 22, paddingVertical: 16, borderBottomWidth: 1, borderBottomColor: P.dim },
+  title:       { fontSize: 18, fontWeight: '900', color: P.charcoal },
+  closeBtn:    { width: 30, height: 30, borderRadius: 15, backgroundColor: P.surface, alignItems: 'center', justifyContent: 'center' },
+  closeTxt:    { fontSize: 13, color: P.muted, fontWeight: '700' },
+  valRow:      { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 16 },
+  valBox:      { flex: 1, alignItems: 'center' },
+  valLabel:    { fontSize: 10, fontWeight: '700', color: P.muted, letterSpacing: 1, marginBottom: 4 },
+  valNum:      { fontSize: 22, fontWeight: '900', color: P.terra },
+  valUnit:     { fontSize: 10, color: P.muted, fontWeight: '600' },
+  valSep:      { width: 1, height: 40, backgroundColor: P.dim, marginHorizontal: 16 },
+  chips:       { paddingHorizontal: 20, gap: 8 },
+  chip:        { paddingHorizontal: 16, paddingVertical: 9, borderRadius: 20, backgroundColor: P.surface, borderWidth: 1.5, borderColor: P.dim },
+  chipActive:  { backgroundColor: P.peachSoft, borderColor: P.terra },
+  chipTxt:     { fontSize: 13, fontWeight: '600', color: P.muted },
+  chipTxtActive:{ color: P.terra, fontWeight: '800' },
+  applyBtn:    { borderRadius: 14, overflow: 'hidden', shadowColor: P.terra, shadowOpacity: 0.3, shadowOffset: { width: 0, height: 4 }, shadowRadius: 10, elevation: 6 },
+  applyGrad:   { paddingVertical: 16, alignItems: 'center' },
+  applyTxt:    { fontSize: 16, fontWeight: '800', color: P.white },
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ÉCRAN PRINCIPAL
+// ─────────────────────────────────────────────────────────────────────────────
+export default function AllProductsScreen({ route, navigation }) {
+  const insets = useSafeAreaInsets();
+  const { type } = route.params;
+  const { isAuthenticated } = useAuth();
+
+  const [products,      setProducts]      = useState([]);
+  const [loading,       setLoading]       = useState(true);
+  const [refreshing,    setRefreshing]    = useState(false);
+  const [sortBy,        setSortBy]        = useState('recent');
+  const [priceRange,    setPriceRange]    = useState([0, 1000000]);
+  const [showFilter,    setShowFilter]    = useState(false);
+  const [favorites,     setFavorites]     = useState(new Set());
+  const [filterActive,  setFilterActive]  = useState(false);
+  const [alert,         setAlert]         = useState({
+    visible: false,
+    type: 'info',
+    title: '',
+    message: '',
+    buttons: [{ text: 'OK', onPress: () => {} }],
+  });
+
+  // Animations
+  const scrollY     = useRef(new Animated.Value(0)).current;
+  const heroFade    = useRef(new Animated.Value(0)).current;
+  const headerFade  = useRef(new Animated.Value(0)).current;
+
+  const title = type === 'service' ? 'Services' : 'Produits';
   const emoji = type === 'service' ? '🛠️' : '📦';
 
+  // Header qui se compresse
+  const headerHeight = scrollY.interpolate({
+    inputRange: [0, 80],
+    outputRange: [HEADER_MAX, HEADER_MIN],
+    extrapolate: 'clamp',
+  });
+  const heroScale = scrollY.interpolate({
+    inputRange: [0, 80],
+    outputRange: [1, 0.85],
+    extrapolate: 'clamp',
+  });
+  const titleSize = scrollY.interpolate({
+    inputRange: [0, 80],
+    outputRange: [26, 18],
+    extrapolate: 'clamp',
+  });
+
+  useEffect(() => {
+    navigation.setOptions({ headerShown: false });
+    Animated.parallel([
+      Animated.timing(heroFade,   { toValue: 1, duration: 500, useNativeDriver: true }),
+      Animated.timing(headerFade, { toValue: 1, duration: 400, useNativeDriver: true }),
+    ]).start();
+  }, []);
+
+  useEffect(() => {
+    loadFavorites();
+  }, [isAuthenticated]);
+
+  // ── Favoris ────────────────────────────────────────────────────────────────
+  const loadFavorites = async () => {
+    try {
+      if (!isAuthenticated) {
+        setFavorites(new Set());
+        return;
+      }
+      const ids = await getFavoriteIds();
+      setFavorites(new Set((ids || []).map(String)));
+    } catch (e) {
+      console.error('Erreur favoris:', e);
+    }
+  };
+
+  const toggleFav = async (item) => {
+    const id = getProductId(item);
+    if (!id) return;
+
+    if (!isAuthenticated) {
+      setAlert({
+        visible: true,
+        type: 'info',
+        title: 'Connexion requise',
+        message: 'Connectez-vous pour liker une annonce',
+        buttons: [
+          { text: 'Annuler', onPress: () => {} },
+          { text: 'Se connecter', onPress: () => navigation.navigate('Login') },
+        ],
+      });
+      return;
+    }
+
+    const key = String(id);
+    const wasFavorite = favorites.has(key);
+
+    // Optimistic UI update
+    setFavorites(prev => {
+      const next = new Set(prev);
+      wasFavorite ? next.delete(key) : next.add(key);
+      return next;
+    });
+
+    try {
+      await toggleFavorite(id, wasFavorite);
+    } catch (e) {
+      // Rollback on API error
+      setFavorites(prev => {
+        const next = new Set(prev);
+        wasFavorite ? next.add(key) : next.delete(key);
+        return next;
+      });
+      setAlert({
+        visible: true,
+        type: 'error',
+        title: 'Erreur',
+        message: e.message || 'Impossible de mettre à jour le favori',
+        buttons: [{ text: 'OK', onPress: () => {} }],
+      });
+    }
+  };
+
+  // ── Données ────────────────────────────────────────────────────────────────
   const fetchProducts = async () => {
     try {
-      const response = await apiClient.get('/products');
-      const allProducts = response.data.data || response.data;
-      
-      // Filtrer selon le type
-      const filtered = type === 'service' 
-        ? allProducts.filter(item => item.type === 'service')
-        : allProducts.filter(item => item.type !== 'service');
-      
-      setProducts(filtered);
-    } catch (error) {
-      console.error('Erreur chargement produits:', error);
+      const res  = await apiClient.get('/products');
+      const all  = res.data.data || res.data;
+      const filt = type === 'service'
+        ? all.filter(i => i.type === 'service')
+        : all.filter(i => i.type !== 'service');
+      setProducts(filt);
+      // Init range prix
+      const prices = filt.map(i => parseInt(i.price || 0));
+      const maxP   = Math.max(...prices, 1000000);
+      setPriceRange([0, maxP]);
+    } catch (e) {
+      console.error('Erreur chargement:', e);
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -114,176 +506,232 @@ export default function AllProductsScreen({ route, navigation }) {
   useEffect(() => { fetchProducts(); }, [type]);
   const onRefresh = useCallback(() => { setRefreshing(true); fetchProducts(); }, [type]);
 
-  // Tri
-  const sortedProducts = [...products].sort((a, b) => {
-    if (sortBy === 'price-asc') return parseInt(a.price || 0) - parseInt(b.price || 0);
-    if (sortBy === 'price-desc') return parseInt(b.price || 0) - parseInt(a.price || 0);
-    return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
-  });
+  // ── Tri + filtre ───────────────────────────────────────────────────────────
+  const maxPrice = Math.max(...products.map(i => parseInt(i.price || 0)), 1000000);
 
-  // Configuration du header
-  useEffect(() => {
-    navigation.setOptions({ headerShown: false });
-  }, [navigation]);
+  const processed = [...products]
+    .filter(i => {
+      const p = parseInt(i.price || 0);
+      return p >= priceRange[0] && p <= priceRange[1];
+    })
+    .sort((a, b) => {
+      if (sortBy === 'price-asc')  return parseInt(a.price || 0) - parseInt(b.price || 0);
+      if (sortBy === 'price-desc') return parseInt(b.price || 0) - parseInt(a.price || 0);
+      return new Date(b.createdAt) - new Date(a.createdAt);
+    });
 
+  // Séparer hero + reste
+  const heroItem  = processed[0] || null;
+  const gridItems = processed.slice(1);
+
+  // ── Loading ────────────────────────────────────────────────────────────────
   if (loading) {
     return (
-      <View style={{ flex: 1 }}>
-        <LinearGradient colors={[P.terra, P.amber]} style={s.loadScreen}>
-          <View style={s.loadLogoBox}><Text style={s.loadLogoTxt}>M</Text></View>
+      <View style={s.loadScreen}>
+        <LinearGradient colors={[P.charcoal, P.brown]} style={s.loadInner}>
+          <LinearGradient colors={[P.gold, P.amber]} style={s.loadLogoBox}>
+            <Text style={s.loadLogoTxt}>M</Text>
+          </LinearGradient>
           <Text style={s.loadBrand}>MarketHub</Text>
-          <ActivityIndicator size="large" color={P.cream} style={{ marginTop: 24 }} />
+          <ActivityIndicator size="large" color={P.amber} style={{ marginTop: 24 }} />
         </LinearGradient>
       </View>
     );
   }
 
+  // ── Rendu ──────────────────────────────────────────────────────────────────
   return (
     <View style={s.screen}>
-      <StatusBar barStyle="light-content" backgroundColor={P.terra} />
+      <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
 
-      {/* ══════════════ HERO HEADER ═══════════════════════════════════════════ */}
-      <LinearGradient
-        colors={[P.terra, '#8A2400', P.charcoal]}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 1 }}
-        style={[s.hero, { paddingTop: (insets.top || 0) + 14 }]}
-      >
-        <View style={s.deco1} />
-        <View style={s.deco2} />
+      {/* ══ HEADER SHRINKABLE ═══════════════════════════════════════════════ */}
+      <Animated.View style={[s.header, { height: Animated.add(headerHeight, insets.top || 0) }]}>
+        <LinearGradient colors={[P.brown, P.charcoal]} style={StyleSheet.absoluteFill} />
+        <View style={s.headerAccent} />
 
-        <Animated.View style={{ opacity: fade }}>
-          <View style={s.heroTop}>
-            <TouchableOpacity
-              style={s.backBtn}
-              onPress={() => navigation.goBack()}
-              activeOpacity={0.7}
-            >
-              <Text style={s.backIcon}>←</Text>
+        <Animated.View style={[s.headerInner, { paddingTop: (insets.top || 0) + 6, opacity: headerFade }]}>
+          {/* Ligne principale */}
+          <View style={s.headerRow}>
+            <TouchableOpacity style={s.backBtn} onPress={() => navigation.goBack()} activeOpacity={0.8}>
+              <Text style={s.backBtnTxt}>←</Text>
             </TouchableOpacity>
-            <View style={{ flex: 1, marginLeft: 12 }}>
-              <View style={s.heroTitleRow}>
-                <Text style={s.heroEmoji}>{emoji}</Text>
-                <Text style={s.heroTitle}>{title}</Text>
-              </View>
-              <Text style={s.heroSub}>
-                {sortedProducts.length} annonce{sortedProducts.length > 1 ? 's' : ''} disponible{sortedProducts.length > 1 ? 's' : ''}
-              </Text>
+
+            <Animated.View style={[s.headerCenter, { transform: [{ scale: heroScale }] }]}>
+              <Animated.Text style={[s.headerTitle, { fontSize: titleSize }]}>
+                {emoji} {title}
+              </Animated.Text>
+              <Text style={s.headerCount}>{processed.length} annonce{processed.length > 1 ? 's' : ''}</Text>
+            </Animated.View>
+
+            <View style={s.headerActions}>
+              {/* Tri rapide */}
+              <TouchableOpacity
+                style={s.actionBtn}
+                activeOpacity={0.8}
+                onPress={() => setSortBy(s => s === 'recent' ? 'price-asc' : s === 'price-asc' ? 'price-desc' : 'recent')}
+              >
+                <Text style={s.actionBtnTxt}>
+                  {sortBy === 'recent' ? '🕐' : sortBy === 'price-asc' ? '↑' : '↓'}
+                </Text>
+              </TouchableOpacity>
+              {/* Filtre prix */}
+              <TouchableOpacity
+                style={[s.actionBtn, filterActive && s.actionBtnActive]}
+                activeOpacity={0.8}
+                onPress={() => setShowFilter(true)}
+              >
+                <Text style={s.actionBtnTxt}>⚖️</Text>
+                {filterActive && <View style={s.actionDot} />}
+              </TouchableOpacity>
             </View>
           </View>
         </Animated.View>
-      </LinearGradient>
 
-      {/* ══════════════ TRI ════════════════════════════════════════════════════ */}
-      <View style={s.sortWrap}>
-        <TouchableOpacity
-          style={s.sortBtn}
-          onPress={() => {
-            const nextSort = sortBy === 'recent' ? 'price-asc' : sortBy === 'price-asc' ? 'price-desc' : 'recent';
-            setSortBy(nextSort);
-          }}
-          activeOpacity={0.7}
-        >
-          <Text style={s.sortIcon}>
-            {sortBy === 'recent' ? '🕐' : sortBy === 'price-asc' ? '↑' : '↓'}
-          </Text>
-          <Text style={s.sortLabel}>
-            {sortBy === 'recent' ? 'Récent' : sortBy === 'price-asc' ? 'Prix ↑' : 'Prix ↓'}
-          </Text>
-        </TouchableOpacity>
-      </View>
+        {/* Glow ligne */}
+        <LinearGradient
+          colors={[P.charcoal, P.terra, P.charcoal]}
+          start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
+          style={s.headerGlow}
+        />
+      </Animated.View>
 
-      {/* ══════════════ GRILLE PRODUITS ════════════════════════════════════════ */}
-      <FlatList
-        data={sortedProducts}
-        renderItem={({ item }) => (
-          <ProductCard
-            item={item}
-            onPress={() => navigation.navigate('ProductDetail', { productId: item.id })}
-          />
-        )}
-        keyExtractor={(item, index) => item.id?.toString() || `product-${index}`}
-        contentContainerStyle={{ paddingBottom: 80 + Math.max(insets.bottom, 8), padding: 12 }}
+      {/* ══ LISTE ════════════════════════════════════════════════════════════ */}
+      <Animated.FlatList
+        data={gridItems}
+        keyExtractor={(item, i) => String(getProductId(item) || `g-${i}`)}
         numColumns={2}
         columnWrapperStyle={s.row}
+        contentContainerStyle={{
+          paddingTop: HEADER_MAX + (insets.top || 0) + 8,
+          paddingHorizontal: 16,
+          paddingBottom: 80 + Math.max(insets.bottom, 12),
+        }}
+        onScroll={Animated.event(
+          [{ nativeEvent: { contentOffset: { y: scrollY } } }],
+          { useNativeDriver: false }
+        )}
+        scrollEventThrottle={16}
         refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={onRefresh}
-            colors={[P.terra]}
-            tintColor={P.terra}
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[P.terra]} tintColor={P.terra} />
+        }
+        ListHeaderComponent={
+          <>
+            {/* Hero card */}
+            {heroItem && (
+              <HeroCard
+                item={heroItem}
+                onPress={() => navigation.navigate('ProductDetail', { productId: getProductId(heroItem) })}
+                isFav={favorites.has(String(getProductId(heroItem)))}
+                onFavToggle={() => toggleFav(heroItem)}
+                fadeAnim={heroFade}
+              />
+            )}
+            {/* Séparateur section grille */}
+            {gridItems.length > 0 && (
+              <View style={s.sectionHead}>
+                <View style={s.sectionLine} />
+                <Text style={s.sectionLabel}>Toutes les annonces</Text>
+                <View style={s.sectionLine} />
+              </View>
+            )}
+          </>
+        }
+        renderItem={({ item, index }) => (
+          <ProductCard
+            item={item}
+            index={index}
+            onPress={() => navigation.navigate('ProductDetail', { productId: getProductId(item) })}
+            isFav={favorites.has(String(getProductId(item)))}
+            onFavToggle={() => toggleFav(item)}
           />
-        }
+        )}
         ListEmptyComponent={
-          <View style={s.empty}>
-            <Text style={{ fontSize: 64 }}>📭</Text>
-            <Text style={s.emptyTitle}>Aucune annonce</Text>
-            <Text style={s.emptySub}>
-              Pas {type === 'service' ? 'de services' : 'de produits'} pour le moment
-            </Text>
-            <TouchableOpacity
-              style={s.emptyBtn}
-              onPress={() => navigation.navigate('CreateProduct')}
-              activeOpacity={0.85}
-            >
-              <Text style={s.emptyBtnTxt}>📣  Publier une annonce</Text>
-            </TouchableOpacity>
-          </View>
+          !heroItem ? (
+            <View style={s.empty}>
+              <Text style={{ fontSize: 64 }}>📭</Text>
+              <Text style={s.emptyTitle}>Aucune annonce</Text>
+              <Text style={s.emptySub}>
+                Pas {type === 'service' ? 'de services' : 'de produits'} pour le moment.
+              </Text>
+              <TouchableOpacity
+                style={s.emptyBtn}
+                onPress={() => navigation.navigate('CreateProduct')}
+                activeOpacity={0.85}
+              >
+                <LinearGradient colors={[P.orange500, P.orange700]} style={s.emptyBtnGrad}>
+                  <Text style={s.emptyBtnTxt}>📣 Publier une annonce</Text>
+                </LinearGradient>
+              </TouchableOpacity>
+            </View>
+          ) : null
         }
+      />
+
+      {/* ══ MODAL FILTRE PRIX ════════════════════════════════════════════════ */}
+      <PriceFilterModal
+        visible={showFilter}
+        onClose={() => setShowFilter(false)}
+        priceRange={priceRange}
+        maxPrice={maxPrice}
+        onApply={(range) => {
+          setPriceRange(range);
+          setFilterActive(range[0] > 0 || range[1] < maxPrice);
+        }}
+      />
+
+      <AlertModal
+        visible={alert.visible}
+        type={alert.type}
+        title={alert.title}
+        message={alert.message}
+        buttons={alert.buttons}
+        onDismiss={() => setAlert({ ...alert, visible: false })}
       />
     </View>
   );
 }
 
-// ─── STYLES ───────────────────────────────────────────────────────────────────
+// ─── STYLES PRINCIPAUX ── 100% tokens P.* ────────────────────────────────────
 const s = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: P.cream },
+  screen: { flex: 1, backgroundColor: P.sand },
 
   // Loading
-  loadScreen:   { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  loadLogoBox:  { width: 74, height: 74, borderRadius: 22, backgroundColor: P.gold, justifyContent: 'center', alignItems: 'center', marginBottom: 16 },
-  loadLogoTxt:  { fontSize: 40, fontWeight: '900', color: P.brown },
-  loadBrand:    { fontSize: 28, fontWeight: '900', color: P.cream, letterSpacing: -1 },
+  loadScreen:  { flex: 1 },
+  loadInner:   { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  loadLogoBox: { width: 74, height: 74, borderRadius: 22, justifyContent: 'center', alignItems: 'center', marginBottom: 16 },
+  loadLogoTxt: { fontSize: 40, fontWeight: '900', color: P.brown },
+  loadBrand:   { fontSize: 28, fontWeight: '900', color: P.white, letterSpacing: -1 },
 
-  // Hero
-  hero:  { paddingHorizontal: 20, paddingBottom: 20, overflow: 'hidden' },
-  deco1: { position: 'absolute', top: -60, right: -60, width: 180, height: 180, borderRadius: 90, backgroundColor: 'rgba(240,165,0,0.10)' },
-  deco2: { position: 'absolute', bottom: -30, left: -40, width: 130, height: 130, borderRadius: 65, backgroundColor: 'rgba(193,68,14,0.14)' },
+  // Header shrinkable
+  header:       { position: 'absolute', top: 0, left: 0, right: 0, zIndex: 100, overflow: 'hidden' },
+  headerAccent: { position: 'absolute', top: 0, left: 0, right: 0, height: 3, backgroundColor: P.terra, zIndex: 1 },
+  headerInner:  { flex: 1, paddingHorizontal: 16, paddingBottom: 8 },
+  headerRow:    { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  backBtn:      { width: 38, height: 38, borderRadius: 19, backgroundColor: P.glassWhite25, justifyContent: 'center', alignItems: 'center' },
+  backBtnTxt:   { fontSize: 18, fontWeight: '700', color: P.white },
+  headerCenter: { flex: 1, alignItems: 'center' },
+  headerTitle:  { fontWeight: '900', color: P.white, letterSpacing: -0.5 },
+  headerCount:  { fontSize: 11, color: P.amber, fontWeight: '600', marginTop: 2 },
+  headerActions:{ flexDirection: 'row', gap: 8 },
+  actionBtn:    { width: 38, height: 38, borderRadius: 19, backgroundColor: P.glassWhite25, justifyContent: 'center', alignItems: 'center', position: 'relative' },
+  actionBtnActive:{ backgroundColor: P.terra },
+  actionBtnTxt: { fontSize: 16 },
+  actionDot:    { position: 'absolute', top: 6, right: 6, width: 8, height: 8, borderRadius: 4, backgroundColor: P.amber, borderWidth: 1.5, borderColor: P.charcoal },
+  headerGlow:   { height: 1.5, position: 'absolute', bottom: 0, left: 0, right: 0 },
 
-  heroTop: { flexDirection: 'row', alignItems: 'center' },
-  backBtn: { width: 44, height: 44, borderRadius: 22, backgroundColor: 'rgba(255,255,255,0.15)', justifyContent: 'center', alignItems: 'center' },
-  backIcon: { fontSize: 22, color: P.cream, fontWeight: '700' },
-
-  heroTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  heroEmoji: { fontSize: 28 },
-  heroTitle: { fontSize: 22, fontWeight: '900', color: P.cream, letterSpacing: -0.6, flex: 1 },
-  heroSub: { fontSize: 12, color: 'rgba(253,246,236,0.62)', marginTop: 4, marginLeft: 38 },
-
-  // Tri
-  sortWrap: { paddingHorizontal: 16, paddingVertical: 12, backgroundColor: P.surface, borderBottomWidth: 1, borderBottomColor: P.dim },
-  sortBtn: { flexDirection: 'row', alignItems: 'center', backgroundColor: P.cream, paddingHorizontal: 14, paddingVertical: 9, borderRadius: 20, gap: 6, borderWidth: 1.5, borderColor: 'rgba(193,68,14,0.15)', alignSelf: 'flex-start' },
-  sortIcon: { fontSize: 14 },
-  sortLabel: { fontSize: 13, fontWeight: '700', color: P.brown },
+  // Section header grille
+  sectionHead:  { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 14, marginTop: 4 },
+  sectionLine:  { flex: 1, height: 1, backgroundColor: P.dim },
+  sectionLabel: { fontSize: 12, fontWeight: '700', color: P.muted, textTransform: 'uppercase', letterSpacing: 0.8 },
 
   // Grille
-  row: { justifyContent: 'space-between' },
-
-  // Cartes
-  card:       { width: (width / 2) - 18, backgroundColor: P.cream, borderRadius: 20, overflow: 'hidden', marginBottom: 12, borderWidth: 1, borderColor: 'rgba(157,136,114,0.18)', shadowColor: P.brown, shadowOpacity: 0.11, shadowOffset: { width: 0, height: 4 }, shadowRadius: 12, elevation: 5 },
-  cardImgWrap:{ height: 145, backgroundColor: P.sand, position: 'relative' },
-  cardImg:    { width: '100%', height: '100%' },
-  typeBadge:  { position: 'absolute', bottom: 10, left: 10, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6 },
-  typeBadgeTxt:{ fontSize: 9, fontWeight: '800', color: P.white },
-  cardBody:   { padding: 13 },
-  cardTitle:  { fontSize: 14, fontWeight: '700', color: P.charcoal, lineHeight: 20, marginBottom: 7, minHeight: 40 },
-  cardLoc:    { fontSize: 11, color: P.muted, marginBottom: 10 },
-  cardBottom: { borderTopWidth: 1, borderTopColor: P.dim, paddingTop: 10 },
-  cardPrice:  { fontSize: 14, fontWeight: '900', color: P.terra },
+  row: { justifyContent: 'space-between', gap: 0 },
 
   // Empty
-  empty:      { alignItems: 'center', justifyContent: 'center', paddingVertical: 80, paddingHorizontal: 40 },
-  emptyTitle: { fontSize: 20, fontWeight: '900', color: P.charcoal, marginTop: 16, marginBottom: 8 },
-  emptySub:   { fontSize: 14, color: P.muted, textAlign: 'center', lineHeight: 21, marginBottom: 24 },
-  emptyBtn:   { backgroundColor: P.terra, borderRadius: 14, paddingVertical: 14, paddingHorizontal: 24, shadowColor: P.terra, shadowOpacity: 0.3, shadowOffset: { width: 0, height: 6 }, shadowRadius: 14, elevation: 8 },
-  emptyBtnTxt:{ fontSize: 15, fontWeight: '800', color: P.white, letterSpacing: 0.2 },
+  empty:       { alignItems: 'center', paddingVertical: 60, paddingHorizontal: 32 },
+  emptyTitle:  { fontSize: 20, fontWeight: '900', color: P.charcoal, marginTop: 16, marginBottom: 8 },
+  emptySub:    { fontSize: 14, color: P.muted, textAlign: 'center', lineHeight: 21, marginBottom: 24 },
+  emptyBtn:    { borderRadius: 14, overflow: 'hidden', shadowColor: P.terra, shadowOpacity: 0.3, shadowOffset: { width: 0, height: 6 }, shadowRadius: 14, elevation: 8 },
+  emptyBtnGrad:{ paddingVertical: 14, paddingHorizontal: 24 },
+  emptyBtnTxt: { fontSize: 15, fontWeight: '800', color: P.white, letterSpacing: 0.2 },
 });

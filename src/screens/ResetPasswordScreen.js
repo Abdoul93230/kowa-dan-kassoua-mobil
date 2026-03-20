@@ -1,369 +1,418 @@
-import React, { useState } from 'react';
+﻿// ─── ResetPasswordScreen v2 PREMIUM ─ MarketHub Niger ────────────────────────
+// Design 100% cohérent avec RegisterScreen, LoginScreen & ForgotPasswordScreen
+// Zéro valeur hex brute — uniquement les tokens MOBILE_COLORS
+
+import React, { useState, useRef, useEffect } from 'react';
 import {
-  View,
-  Text,
-  TextInput,
-  StyleSheet,
-  TouchableOpacity,
-  Alert,
-  ActivityIndicator,
-  KeyboardAvoidingView,
-  Platform,
-  ScrollView,
+  View, Text, StyleSheet, TextInput, TouchableOpacity,
+  ScrollView, StatusBar, Animated, KeyboardAvoidingView,
+  Platform, ActivityIndicator,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Ionicons } from '@expo/vector-icons';
 import { resetPassword } from '../api/auth';
+import { MOBILE_COLORS as P } from '../theme/colors';
+import AlertModal from '../components/AlertModal';
 
-// Palette Saharienne
-const P = {
-  terra: '#C1440E',
-  amber: '#E8832A',
-  gold: '#F4A261',
-  brown: '#8B4513',
-  charcoal: '#2C2C2C',
-  sand: '#E9D8B8',
-  cream: '#F5EFE6',
-  dim: '#9B9B9B',
-  muted: '#6B6B6B',
-  white: '#FFFFFF',
-};
-
-/**
- * Écran de réinitialisation du mot de passe (Étape 3)
- * Après vérification du code OTP
- * 
- * @param {object} route.params
- * @param {string} route.params.identifier - Email ou téléphone
- * @param {string} route.params.code - Code OTP vérifié
- */
+// ─────────────────────────────────────────────────────────────────────────────
 export default function ResetPasswordScreen({ navigation, route }) {
   const { identifier, code } = route.params || {};
+  const insets = useSafeAreaInsets();
 
-  const [newPassword, setNewPassword] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
-  const [showNewPassword, setShowNewPassword] = useState(false);
-  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
+  const [newPassword,      setNewPassword]      = useState('');
+  const [confirmPassword,  setConfirmPassword]  = useState('');
+  const [showNewPwd,       setShowNewPwd]       = useState(false);
+  const [showConfirmPwd,   setShowConfirmPwd]   = useState(false);
+  const [loading,          setLoading]          = useState(false);
+  const [error,            setError]            = useState('');
+  const [alert, setAlert] = useState({
+    visible: false,
+    type: 'info',
+    title: '',
+    message: '',
+    buttons: [{ text: 'OK', onPress: () => {} }],
+  });
 
-  // Vérifier que les params sont présents
-  if (!identifier || !code) {
-    Alert.alert(
-      'Erreur',
-      'Informations manquantes. Veuillez recommencer le processus.',
-      [{ text: 'OK', onPress: () => navigation.replace('ForgotPassword') }]
-    );
-    return null;
-  }
+  // Animations
+  const fadeAnim  = useRef(new Animated.Value(0)).current;
+  const slideAnim = useRef(new Animated.Value(24)).current;
 
-  /**
-   * Valider les mots de passe
-   */
-  const validatePasswords = () => {
-    if (!newPassword) {
-      setError('Le mot de passe est requis');
-      return false;
-    }
-
-    if (newPassword.length < 6) {
-      setError('Le mot de passe doit contenir au moins 6 caractères');
-      return false;
-    }
-
-    if (newPassword !== confirmPassword) {
-      setError('Les mots de passe ne correspondent pas');
-      return false;
-    }
-
-    return true;
-  };
-
-  /**
-   * Réinitialiser le mot de passe
-   */
-  const handleResetPassword = async () => {
-    if (!validatePasswords()) {
+  useEffect(() => {
+    // Vérification des params requis
+    if (!identifier || !code) {
+      setAlert({
+        visible: true,
+        type: 'error',
+        title: 'Erreur',
+        message: 'Informations manquantes. Veuillez recommencer.',
+        buttons: [{ text: 'OK', onPress: () => navigation.replace('ForgotPassword') }],
+      });
       return;
     }
+    Animated.parallel([
+      Animated.timing(fadeAnim,  { toValue: 1, duration: 500, useNativeDriver: true }),
+      Animated.spring(slideAnim, { toValue: 0, tension: 80, friction: 10, useNativeDriver: true }),
+    ]).start();
+  }, []);
 
+  // ── Force du mot de passe (même logique que Register) ────────────────────
+  const pwdStrength = () => {
+    const p = newPassword;
+    if (!p) return 0;
+    let score = 0;
+    if (p.length >= 6)         score++;
+    if (p.length >= 10)        score++;
+    if (/[A-Z]/.test(p))       score++;
+    if (/[0-9]/.test(p))       score++;
+    if (/[@$!%*?&]/.test(p))   score++;
+    return score;
+  };
+
+  const strengthColor = () => {
+    const s = pwdStrength();
+    if (s <= 1) return P.error;
+    if (s <= 3) return P.yellow;
+    return P.green;
+  };
+
+  const strengthLabel = () => {
+    const s = pwdStrength();
+    if (s <= 1) return 'Faible';
+    if (s <= 3) return 'Moyen';
+    return 'Fort 💪';
+  };
+
+  // ── Validation ────────────────────────────────────────────────────────────
+  const validate = () => {
+    if (!newPassword)
+      return 'Le mot de passe est requis';
+    if (newPassword.length < 6)
+      return 'Minimum 6 caractères requis';
+    if (newPassword !== confirmPassword)
+      return 'Les mots de passe ne correspondent pas';
+    return null;
+  };
+
+  // ── Soumission ────────────────────────────────────────────────────────────
+  const handleReset = async () => {
+    const err = validate();
+    if (err) { setError(err); return; }
     setLoading(true);
     setError('');
-
     try {
       const result = await resetPassword(identifier, code, newPassword);
-
       if (result.success) {
-        // Succès
-        Alert.alert(
-          'Mot de passe réinitialisé',
-          'Votre mot de passe a été réinitialisé avec succès. Vous pouvez maintenant vous connecter.',
-          [
-            {
-              text: 'Se connecter',
-              onPress: () => navigation.replace('Login'),
-            },
-          ]
-        );
+        setAlert({
+          visible: true,
+          type: 'success',
+          title: 'Mot de passe réinitialisé',
+          message: 'Votre mot de passe a été mis à jour. Vous pouvez maintenant vous connecter.',
+          buttons: [{ text: 'Se connecter', onPress: () => navigation.replace('Login') }],
+        });
       }
-    } catch (err) {
-      console.error('❌ Erreur réinitialisation mot de passe:', err);
-      setError(err.message || 'Erreur lors de la réinitialisation du mot de passe');
+    } catch (e) {
+      setError(e.message || 'Erreur lors de la réinitialisation du mot de passe');
     } finally {
       setLoading(false);
     }
   };
 
+  if (!identifier || !code) return null;
+
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <KeyboardAvoidingView
+      style={s.container}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'padding'}
+    >
+      <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
+
+      {/* ── HEADER ardoise ── identique Login/Register ───────────────── */}
       <LinearGradient
-        colors={[P.cream, P.sand, P.gold]}
-        style={styles.gradient}
+        colors={[P.brown, P.charcoal]}
+        style={[s.header, { paddingTop: (insets.top || 0) + 6 }]}
       >
-        <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-          style={styles.container}
-        >
-          <ScrollView contentContainerStyle={styles.scrollContent}>
-            {/* Header */}
-            <View style={styles.header}>
-              <TouchableOpacity
-                onPress={() => navigation.goBack()}
-                style={styles.backButton}
-              >
-                <Ionicons name="arrow-back" size={24} color={P.charcoal} />
-              </TouchableOpacity>
-            </View>
+        <View style={s.headerAccent} />
 
-            {/* Content */}
-            <View style={styles.content}>
-              {/* Icon */}
-              <View style={styles.iconContainer}>
-                <Ionicons name="shield-checkmark-outline" size={60} color={P.terra} />
-              </View>
+        <View style={s.headerRow}>
+          <TouchableOpacity
+            style={s.backBtn}
+            onPress={() => navigation.goBack()}
+            activeOpacity={0.8}
+          >
+            <Text style={s.backBtnTxt}>←</Text>
+          </TouchableOpacity>
 
-              {/* Title */}
-              <Text style={styles.title}>Nouveau mot de passe</Text>
-              <Text style={styles.subtitle}>
-                Choisissez un nouveau mot de passe sécurisé
-              </Text>
+          <View style={s.headerCenter}>
+            <LinearGradient colors={[P.orange500, P.orange700]} style={s.logoMini}>
+              <Text style={s.logoMiniTxt}>M</Text>
+            </LinearGradient>
+            <Text style={s.headerBrand}>MarketHub</Text>
+          </View>
 
-              {/* New Password */}
-              <View style={styles.inputContainer}>
-                <Text style={styles.label}>Nouveau mot de passe *</Text>
-                <View style={styles.inputWrapper}>
-                  <Ionicons name="lock-closed-outline" size={20} color={P.muted} style={styles.icon} />
-                  <TextInput
-                    style={[styles.input, styles.inputPassword]}
-                    placeholder="Minimum 6 caractères"
-                    placeholderTextColor={P.dim}
-                    value={newPassword}
-                    onChangeText={(text) => {
-                      setNewPassword(text);
-                      setError('');
-                    }}
-                    secureTextEntry={!showNewPassword}
-                    autoCapitalize="none"
-                    editable={!loading}
-                    autoFocus
-                  />
-                  <TouchableOpacity
-                    onPress={() => setShowNewPassword(!showNewPassword)}
-                    style={styles.eyeButton}
-                  >
-                    <Ionicons
-                      name={showNewPassword ? 'eye-off-outline' : 'eye-outline'}
-                      size={20}
-                      color={P.muted}
-                    />
-                  </TouchableOpacity>
-                </View>
-              </View>
+          <View style={{ width: 38 }} />
+        </View>
 
-              {/* Confirm Password */}
-              <View style={styles.inputContainer}>
-                <Text style={styles.label}>Confirmer le mot de passe *</Text>
-                <View style={styles.inputWrapper}>
-                  <Ionicons name="lock-closed-outline" size={20} color={P.muted} style={styles.icon} />
-                  <TextInput
-                    style={[styles.input, styles.inputPassword]}
-                    placeholder="Confirmer le mot de passe"
-                    placeholderTextColor={P.dim}
-                    value={confirmPassword}
-                    onChangeText={(text) => {
-                      setConfirmPassword(text);
-                      setError('');
-                    }}
-                    secureTextEntry={!showConfirmPassword}
-                    autoCapitalize="none"
-                    editable={!loading}
-                  />
-                  <TouchableOpacity
-                    onPress={() => setShowConfirmPassword(!showConfirmPassword)}
-                    style={styles.eyeButton}
-                  >
-                    <Ionicons
-                      name={showConfirmPassword ? 'eye-off-outline' : 'eye-outline'}
-                      size={20}
-                      color={P.muted}
-                    />
-                  </TouchableOpacity>
-                </View>
-                {error ? (
-                  <View style={styles.errorContainer}>
-                    <Ionicons name="alert-circle" size={16} color={P.terra} />
-                    <Text style={styles.errorText}>{error}</Text>
-                  </View>
-                ) : null}
-              </View>
-
-              {/* Reset Button */}
-              <TouchableOpacity
-                style={[styles.button, loading && styles.buttonDisabled]}
-                onPress={handleResetPassword}
-                disabled={loading}
-              >
-                {loading ? (
-                  <ActivityIndicator color={P.white} />
-                ) : (
-                  <Text style={styles.buttonText}>Réinitialiser le mot de passe</Text>
-                )}
-              </TouchableOpacity>
-
-              {/* Back to Login */}
-              <View style={styles.loginContainer}>
-                <Text style={styles.loginLabel}>Vous vous souvenez ? </Text>
-                <TouchableOpacity onPress={() => navigation.replace('Login')}>
-                  <Text style={styles.loginLink}>Se connecter</Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-          </ScrollView>
-        </KeyboardAvoidingView>
+        <LinearGradient
+          colors={[P.charcoal, P.terra, P.charcoal]}
+          start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
+          style={s.headerGlow}
+        />
       </LinearGradient>
-    </SafeAreaView>
+
+      {/* ── CONTENU ── */}
+      <ScrollView
+        style={{ flex: 1 }}
+        contentContainerStyle={s.scrollContent}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+        keyboardDismissMode="interactive"
+      >
+        <Animated.View style={{ opacity: fadeAnim, transform: [{ translateY: slideAnim }] }}>
+
+          {/* ── Hero ── */}
+          <View style={s.hero}>
+            <View style={s.heroIconWrap}>
+              <LinearGradient colors={[P.orange500, P.orange700]} style={s.heroIconGrad}>
+                <Text style={s.heroIconTxt}>🛡️</Text>
+              </LinearGradient>
+              <View style={s.heroRing} />
+            </View>
+            <Text style={s.heroTitle}>Nouveau mot de passe</Text>
+            <Text style={s.heroSub}>Choisissez un mot de passe sécurisé</Text>
+          </View>
+
+          {/* ── Nouveau mot de passe ── */}
+          <View style={s.fieldZone}>
+            <Text style={s.fieldLabel}>Nouveau mot de passe</Text>
+            <View style={s.pwdWrap}>
+              <TextInput
+                style={s.pwdInput}
+                placeholder="Minimum 6 caractères"
+                placeholderTextColor={P.muted}
+                value={newPassword}
+                onChangeText={v => { setNewPassword(v); setError(''); }}
+                secureTextEntry={!showNewPwd}
+                autoCapitalize="none"
+                autoFocus
+                editable={!loading}
+              />
+              <TouchableOpacity style={s.eyeBtn} onPress={() => setShowNewPwd(p => !p)}>
+                <Text style={s.eyeBtnTxt}>{showNewPwd ? '🙈' : '👁'}</Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* Indicateur de force — identique Register */}
+            {newPassword.length > 0 && (
+              <View style={s.strengthWrap}>
+                <View style={s.strengthBar}>
+                  {[1, 2, 3, 4, 5].map(i => (
+                    <View
+                      key={i}
+                      style={[
+                        s.strengthSeg,
+                        i <= pwdStrength() && { backgroundColor: strengthColor() },
+                      ]}
+                    />
+                  ))}
+                </View>
+                <Text style={[s.strengthLabel, { color: strengthColor() }]}>
+                  {strengthLabel()}
+                </Text>
+              </View>
+            )}
+
+            {/* Critères — identique Register */}
+            {newPassword.length > 0 && (
+              <View style={s.criteriaWrap}>
+                {[
+                  { ok: newPassword.length >= 6,        txt: '6 caractères min' },
+                  { ok: /[A-Z]/.test(newPassword),      txt: 'Majuscule' },
+                  { ok: /[0-9]/.test(newPassword),      txt: 'Chiffre' },
+                  { ok: /[@$!%*?&]/.test(newPassword),  txt: 'Caractère spécial' },
+                ].map((c, i) => (
+                  <View key={i} style={s.criteriaItem}>
+                    <Text style={[s.criteriaDot, c.ok && { color: P.green }]}>
+                      {c.ok ? '✓' : '○'}
+                    </Text>
+                    <Text style={[s.criteriaTxt, c.ok && s.criteriaTxtOk]}>{c.txt}</Text>
+                  </View>
+                ))}
+              </View>
+            )}
+          </View>
+
+          {/* ── Confirmation mot de passe ── */}
+          <View style={s.fieldZone}>
+            <Text style={s.fieldLabel}>Confirmer le mot de passe</Text>
+            <View style={s.pwdWrap}>
+              <TextInput
+                style={s.pwdInput}
+                placeholder="Retapez votre mot de passe"
+                placeholderTextColor={P.muted}
+                value={confirmPassword}
+                onChangeText={v => { setConfirmPassword(v); setError(''); }}
+                secureTextEntry={!showConfirmPwd}
+                autoCapitalize="none"
+                editable={!loading}
+              />
+              <TouchableOpacity style={s.eyeBtn} onPress={() => setShowConfirmPwd(p => !p)}>
+                <Text style={s.eyeBtnTxt}>{showConfirmPwd ? '🙈' : '👁'}</Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* Badge match — identique Register */}
+            {confirmPassword.length > 0 && (
+              <View style={[
+                s.matchBadge,
+                { backgroundColor: newPassword === confirmPassword ? P.successSoft : P.errorSoft },
+              ]}>
+                <Text style={{
+                  fontSize: 13, fontWeight: '700',
+                  color: newPassword === confirmPassword ? P.greenDark : P.error,
+                }}>
+                  {newPassword === confirmPassword ? '✓ Identiques' : '✕ Différents'}
+                </Text>
+              </View>
+            )}
+          </View>
+
+          {/* ── Erreur ── */}
+          {error ? (
+            <View style={s.errorWrap}>
+              <Text style={s.errorTxt}>⚠ {error}</Text>
+            </View>
+          ) : null}
+
+          {/* ── Lien connexion ── */}
+          <View style={s.loginRow}>
+            <Text style={s.loginRowTxt}>Vous vous souvenez ? </Text>
+            <TouchableOpacity onPress={() => navigation.replace('Login')} activeOpacity={0.7}>
+              <Text style={s.loginRowLink}>Se connecter</Text>
+            </TouchableOpacity>
+          </View>
+
+        </Animated.View>
+      </ScrollView>
+
+      {/* ── FOOTER bouton ── identique tous les écrans ───────────────── */}
+      <View style={[s.footer, { paddingBottom: Math.max(insets.bottom, 12) + 4 }]}>
+        <TouchableOpacity
+          onPress={handleReset}
+          disabled={loading}
+          activeOpacity={0.88}
+          style={s.resetBtn}
+        >
+          <LinearGradient
+            colors={[P.orange500, P.orange700]}
+            start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
+            style={s.resetBtnGrad}
+          >
+            {loading
+              ? <ActivityIndicator color={P.white} />
+              : <Text style={s.resetBtnTxt}>✓ Réinitialiser le mot de passe</Text>
+            }
+          </LinearGradient>
+        </TouchableOpacity>
+      </View>
+
+      <AlertModal
+        visible={alert.visible}
+        type={alert.type}
+        title={alert.title}
+        message={alert.message}
+        buttons={alert.buttons}
+        onDismiss={() => setAlert({ ...alert, visible: false })}
+      />
+    </KeyboardAvoidingView>
   );
 }
 
-const styles = StyleSheet.create({
-  safeArea: {
-    flex: 1,
-    backgroundColor: P.cream,
+// ─── STYLES ── 100% tokens P.* de MOBILE_COLORS ──────────────────────────────
+const s = StyleSheet.create({
+  container: { flex: 1, backgroundColor: P.white },
+
+  // ── Header ardoise ──
+  header:       { paddingHorizontal: 18, paddingBottom: 14, overflow: 'hidden', position: 'relative' },
+  headerAccent: { position: 'absolute', top: 0, left: 0, right: 0, height: 3, backgroundColor: P.terra },
+  headerRow:    { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 },
+  backBtn:      { width: 38, height: 38, borderRadius: 19, backgroundColor: P.glassWhite25, justifyContent: 'center', alignItems: 'center' },
+  backBtnTxt:   { fontSize: 18, fontWeight: '700', color: P.white },
+  headerCenter: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  logoMini:     { width: 28, height: 28, borderRadius: 8, justifyContent: 'center', alignItems: 'center' },
+  logoMiniTxt:  { fontSize: 16, fontWeight: '900', color: P.white },
+  headerBrand:  { fontSize: 16, fontWeight: '800', color: P.white },
+  headerGlow:   { height: 1.5 },
+
+  // ── Scroll ──
+  scrollContent: { paddingHorizontal: 24, paddingTop: 28, paddingBottom: 16 },
+
+  // ── Hero ──
+  hero:         { alignItems: 'center', marginBottom: 32 },
+  heroIconWrap: { position: 'relative', marginBottom: 18 },
+  heroIconGrad: {
+    width: 80, height: 80, borderRadius: 24,
+    justifyContent: 'center', alignItems: 'center',
+    shadowColor: P.terra, shadowOpacity: 0.3,
+    shadowOffset: { width: 0, height: 6 }, shadowRadius: 16, elevation: 10,
   },
-  gradient: {
-    flex: 1,
+  heroIconTxt:  { fontSize: 36 },
+  heroRing:     {
+    position: 'absolute', top: -8, left: -8, right: -8, bottom: -8,
+    borderRadius: 32, borderWidth: 1.5, borderColor: P.orange300,
   },
-  container: {
-    flex: 1,
+  heroTitle:    { fontSize: 26, fontWeight: '900', color: P.charcoal, letterSpacing: -0.5, marginBottom: 8, textAlign: 'center' },
+  heroSub:      { fontSize: 14, color: P.muted, textAlign: 'center' },
+
+  // ── Champs underline ──
+  fieldZone:  { marginBottom: 24 },
+  fieldLabel: {
+    fontSize: 12, fontWeight: '700', color: P.muted,
+    marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.5,
   },
-  scrollContent: {
-    flexGrow: 1,
+
+  // ── Password ── identique Register ──
+  pwdWrap:   { position: 'relative' },
+  pwdInput:  {
+    fontSize: 18, fontWeight: '600', color: P.charcoal,
+    borderBottomWidth: 2.5, borderBottomColor: P.terra,
+    paddingVertical: 10, paddingRight: 44,
   },
-  header: {
-    paddingHorizontal: 16,
-    paddingTop: 8,
+  eyeBtn:    { position: 'absolute', right: 0, top: 6, padding: 8 },
+  eyeBtnTxt: { fontSize: 18 },
+
+  // ── Force mot de passe ── identique Register ──
+  strengthWrap: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 14 },
+  strengthBar:  { flex: 1, flexDirection: 'row', gap: 4 },
+  strengthSeg:  { flex: 1, height: 4, borderRadius: 2, backgroundColor: P.dim },
+  strengthLabel:{ fontSize: 12, fontWeight: '700', minWidth: 50 },
+
+  // ── Critères ── identique Register ──
+  criteriaWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 12 },
+  criteriaItem: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: P.surface, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 20 },
+  criteriaDot:  { fontSize: 12, color: P.muted, fontWeight: '700' },
+  criteriaTxt:  { fontSize: 11, color: P.muted, fontWeight: '500' },
+  criteriaTxtOk:{ color: P.greenDark, fontWeight: '700' },
+
+  // ── Badge match ── identique Register ──
+  matchBadge: { marginTop: 10, alignSelf: 'flex-start', paddingHorizontal: 12, paddingVertical: 5, borderRadius: 8 },
+
+  // ── Erreur ──
+  errorWrap: {
+    backgroundColor: P.errorSoft, borderRadius: 10,
+    paddingHorizontal: 14, paddingVertical: 10,
+    borderWidth: 1, borderColor: P.errorBorder,
+    marginBottom: 20,
   },
-  backButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: P.white,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  content: {
-    flex: 1,
-    paddingHorizontal: 24,
-    paddingTop: 40,
-  },
-  iconContainer: {
-    alignItems: 'center',
-    marginBottom: 24,
-  },
-  title: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    color: P.charcoal,
-    marginBottom: 12,
-  },
-  subtitle: {
-    fontSize: 16,
-    color: P.muted,
-    marginBottom: 32,
-  },
-  inputContainer: {
-    marginBottom: 24,
-  },
-  label: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: P.charcoal,
-    marginBottom: 8,
-  },
-  inputWrapper: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: P.white,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: P.dim,
-    paddingHorizontal: 12,
-  },
-  icon: {
-    marginRight: 8,
-  },
-  input: {
-    flex: 1,
-    height: 50,
-    fontSize: 16,
-    color: P.charcoal,
-  },
-  inputPassword: {
-    paddingRight: 40,
-  },
-  eyeButton: {
-    position: 'absolute',
-    right: 12,
-    padding: 8,
-  },
-  errorContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 8,
-  },
-  errorText: {
-    color: P.terra,
-    fontSize: 14,
-    marginLeft: 8,
-  },
-  button: {
-    backgroundColor: P.terra,
-    borderRadius: 12,
-    paddingVertical: 16,
-    alignItems: 'center',
-    marginBottom: 24,
-  },
-  buttonDisabled: {
-    backgroundColor: P.dim,
-  },
-  buttonText: {
-    color: P.white,
-    fontSize: 18,
-    fontWeight: 'bold',
-  },
-  loginContainer: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  loginLabel: {
-    fontSize: 14,
-    color: P.muted,
-  },
-  loginLink: {
-    fontSize: 14,
-    color: P.terra,
-    fontWeight: 'bold',
-  },
+  errorTxt: { fontSize: 13, color: P.error, fontWeight: '600' },
+
+  // ── Lien connexion ──
+  loginRow:     { flexDirection: 'row', justifyContent: 'center', alignItems: 'center', marginTop: 4 },
+  loginRowTxt:  { fontSize: 14, color: P.muted },
+  loginRowLink: { fontSize: 14, color: P.terra, fontWeight: '700' },
+
+  // ── Footer ──
+  footer:       { paddingHorizontal: 20, paddingTop: 12, backgroundColor: P.white, borderTopWidth: 1, borderTopColor: P.dim },
+  resetBtn:     { borderRadius: 14, overflow: 'hidden', shadowColor: P.terra, shadowOpacity: 0.3, shadowOffset: { width: 0, height: 4 }, shadowRadius: 10, elevation: 6 },
+  resetBtnGrad: { paddingVertical: 16, alignItems: 'center' },
+  resetBtnTxt:  { fontSize: 16, fontWeight: '800', color: P.white, letterSpacing: 0.2 },
 });

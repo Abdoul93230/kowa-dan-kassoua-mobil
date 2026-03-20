@@ -1,11 +1,13 @@
-import React from 'react';
-import { NavigationContainer } from '@react-navigation/native';
+import React, { useCallback, useEffect, useState } from 'react';
+import { NavigationContainer, getFocusedRouteNameFromRoute } from '@react-navigation/native';
 import { createStackNavigator } from '@react-navigation/stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { useAuth } from '../contexts/AuthContext';
-import { ActivityIndicator, View, StyleSheet, Text, TouchableOpacity, Platform } from 'react-native';
+import { ActivityIndicator, View, StyleSheet, Text, TouchableOpacity, Platform, StatusBar } from 'react-native';
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { LinearGradient } from 'expo-linear-gradient';
 import { COLORS } from '../utils/constants';
+import { MOBILE_COLORS as P } from '../theme/colors';
 import { TabBarIcon } from '../components/TabBarIcon';
 
 // Écrans
@@ -17,13 +19,75 @@ import ForgotPasswordScreen from '../screens/ForgotPasswordScreen';
 import ResetPasswordScreen from '../screens/ResetPasswordScreen';
 import ProductsListScreen from '../screens/ProductsListScreen';
 import ProfileScreen from '../screens/ProfileScreen';
+import FavoritesScreen from '../screens/FavoritesScreen';
+import PublishScreen from '../screens/PublishScreen';
+import MyListingsScreen from '../screens/MyListingsScreen';
 import CategoryProductsScreen from '../screens/CategoryProductsScreen';
 import AllProductsScreen from '../screens/AllProductsScreen';
 import ProductDetailScreen from '../screens/ProductDetailScreen';
 import SellerProfileScreen from '../screens/SellerProfileScreen';
+import MessagesListScreen from '../screens/MessagesListScreen';
+import ConversationScreen from '../screens/ConversationScreen';
+import { getUnreadCount } from '../api/messaging';
+import { useSocket } from '../hooks/useSocket';
 
 const Stack = createStackNavigator();
 const Tab = createBottomTabNavigator();
+const MessagesStack = createStackNavigator();
+const BASE_TAB_BAR_STYLE = {
+  position: 'absolute',
+  bottom: 0,
+  left: 0,
+  right: 0,
+  backgroundColor: '#111827',
+  borderTopWidth: 0,
+  borderTopColor: 'transparent',
+  elevation: 0,
+  shadowOpacity: 0,
+};
+
+// ─── Fond sombre de la tab bar ────────────────────────────────────────────────
+function TabBarBackground() {
+  return (
+    <View style={StyleSheet.absoluteFill}>
+      <LinearGradient
+        colors={['#111827', '#0d1420']}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 0, y: 1 }}
+        style={StyleSheet.absoluteFill}
+      />
+      {/* Ligne accent orange en haut */}
+      <LinearGradient
+        colors={['transparent', P.terra, 'transparent']}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 0 }}
+        style={{
+          position: 'absolute',
+          top: 0, left: 0, right: 0,
+          height: 1.5,
+        }}
+      />
+    </View>
+  );
+}
+
+function MessagesNavigator() {
+  return (
+    <MessagesStack.Navigator
+      screenOptions={{
+        headerShown: false,
+        cardStyle: { backgroundColor: '#111827' },
+      }}
+    >
+      <MessagesStack.Screen name="MessagesList" component={MessagesListScreen} />
+      <MessagesStack.Screen
+        name="Conversation"
+        component={ConversationScreen}
+        options={{ headerShown: true }}
+      />
+    </MessagesStack.Navigator>
+  );
+}
 
 // Écran temporaire pour les onglets non implémentés
 function PlaceholderScreen({ route, navigation }) {
@@ -78,7 +142,6 @@ function PlaceholderScreen({ route, navigation }) {
         <Text style={styles.placeholderEmoji}>{info.emoji}</Text>
         <Text style={styles.placeholderTitle}>{info.title}</Text>
         <Text style={styles.placeholderText}>{info.description}</Text>
-        
         {info.action && (
           <View style={styles.actionButtonContainer}>
             <TouchableOpacity 
@@ -94,45 +157,102 @@ function PlaceholderScreen({ route, navigation }) {
   );
 }
 
-// Navigation principale avec onglets
+// ─── Navigation principale avec onglets ───────────────────────────────────────
 function MainTabs() {
+  const { isAuthenticated, token, user } = useAuth();
   const insets = useSafeAreaInsets();
-  
+  const TAB_HEIGHT = 64 + Math.max(insets.bottom, 8);
+  const [unreadCount, setUnreadCount] = useState(0);
+
+  const { isConnected, on, off } = useSocket({
+    enabled: isAuthenticated,
+    token,
+  });
+
+  const loadUnreadCount = useCallback(async () => {
+    if (!isAuthenticated) {
+      setUnreadCount(0);
+      return;
+    }
+
+    try {
+      const response = await getUnreadCount();
+      setUnreadCount(Number(response?.data?.unreadCount || 0));
+    } catch (error) {
+      console.error('Erreur chargement compteur non lus:', error);
+    }
+  }, [isAuthenticated]);
+
+  useEffect(() => {
+    loadUnreadCount();
+  }, [loadUnreadCount]);
+
+  useEffect(() => {
+    if (!isConnected) return;
+
+    const handleUnreadChanged = () => {
+      loadUnreadCount();
+    };
+
+    const handleNewMessage = (message) => {
+      const currentUserId = String(user?.id || '');
+      const senderIdStr = String(message?.senderId || '');
+      if (senderIdStr && senderIdStr !== currentUserId) {
+        setUnreadCount((prev) => prev + 1);
+      }
+    };
+
+    const handleMessageRead = () => {
+      loadUnreadCount();
+    };
+
+    const handleConversationUpdated = () => {
+      loadUnreadCount();
+    };
+
+    on('unreadCount:changed', handleUnreadChanged);
+    on('message:new', handleNewMessage);
+    on('message:read', handleMessageRead);
+    on('conversation:updated', handleConversationUpdated);
+
+    return () => {
+      off('unreadCount:changed', handleUnreadChanged);
+      off('message:new', handleNewMessage);
+      off('message:read', handleMessageRead);
+      off('conversation:updated', handleConversationUpdated);
+    };
+  }, [isConnected, loadUnreadCount, off, on, user?.id]);
+
   return (
     <Tab.Navigator
       screenOptions={{
         headerShown: false,
-        tabBarActiveTintColor: COLORS.primary,
-        tabBarInactiveTintColor: COLORS.gray[500],
+
+        // ── Couleurs ──────────────────────────────────────────────────────────
+        tabBarActiveTintColor:   P.amber,
+        tabBarInactiveTintColor: 'rgba(255,255,255,0.38)',
+
+        // ── Style de la barre ─────────────────────────────────────────────────
+        // backgroundColor EN DUR ici — c'est lui qui écrase le blanc par défaut
         tabBarStyle: {
-          backgroundColor: COLORS.white,
-          borderTopWidth: 0,
-          paddingBottom: Math.max(insets.bottom, 8),
-          paddingTop: 12,
-          height: 60 + Math.max(insets.bottom, 8),
-          elevation: 20,
-          shadowColor: '#000',
-          shadowOffset: { width: 0, height: -4 },
-          shadowOpacity: 0.15,
-          shadowRadius: 12,
-          position: 'absolute',
-          borderTopLeftRadius: 20,
-          borderTopRightRadius: 20,
+          ...BASE_TAB_BAR_STYLE,
+          height: TAB_HEIGHT,
         },
+
+        // ── Fond personnalisé (gradient + ligne orange) ───────────────────────
+        tabBarBackground: () => <TabBarBackground />,
+
+        // ── Labels ────────────────────────────────────────────────────────────
         tabBarLabelStyle: {
           fontSize: 10,
           fontWeight: '600',
+          letterSpacing: 0.2,
           marginTop: -2,
-          marginBottom: 4,
+          marginBottom: Platform.OS === 'ios' ? 0 : 6,
         },
         tabBarItemStyle: {
-          paddingVertical: 0,
+          paddingTop: 6,
           height: 60,
-          justifyContent: 'center',
-        },
-        tabBarIconStyle: {
-          marginTop: 4,
-          marginBottom: 0,
         },
       }}
     >
@@ -148,7 +268,7 @@ function MainTabs() {
       />
       <Tab.Screen
         name="Favorites"
-        component={PlaceholderScreen}
+        component={FavoritesScreen}
         options={{
           tabBarLabel: 'Favoris',
           tabBarIcon: ({ focused, color }) => (
@@ -158,22 +278,38 @@ function MainTabs() {
       />
       <Tab.Screen
         name="Publish"
-        component={PlaceholderScreen}
+        component={PublishScreen}
         options={{
           tabBarLabel: '',
-          tabBarIcon: ({ focused, color }) => (
-            <TabBarIcon name="publish" focused={focused} color={color} />
+          tabBarIcon: ({ focused }) => (
+            <TabBarIcon name="publish" focused={focused} />
           ),
         }}
       />
       <Tab.Screen
         name="Messages"
-        component={PlaceholderScreen}
-        options={{
-          tabBarLabel: 'Messages',
-          tabBarIcon: ({ focused, color }) => (
-            <TabBarIcon name="messages" focused={focused} color={color} badge={0} />
-          ),
+        component={MessagesNavigator}
+        options={({ route }) => {
+          const routeName = getFocusedRouteNameFromRoute(route) || 'MessagesList';
+          const hideTabBar = routeName === 'Conversation';
+
+          return {
+            tabBarLabel: 'Messages',
+            tabBarStyle: hideTabBar
+              ? { display: 'none' }
+              : {
+                  ...BASE_TAB_BAR_STYLE,
+                  height: TAB_HEIGHT,
+                },
+            tabBarIcon: ({ focused, color }) => (
+              <TabBarIcon
+                name="messages"
+                focused={focused}
+                color={color}
+                badge={unreadCount > 0 ? unreadCount : 0}
+              />
+            ),
+          };
         }}
       />
       <Tab.Screen
@@ -192,15 +328,14 @@ function MainTabs() {
 
 /**
  * Navigation principale de l'application
- * Affiche toujours la navigation à onglets, la connexion est accessible via le profil
  */
 export default function AppNavigator() {
   const { loading } = useAuth();
 
-  // Afficher un loader pendant la vérification de l'auth
   if (loading) {
     return (
       <SafeAreaProvider>
+        <StatusBar barStyle="light-content" backgroundColor="#111827" />
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color={COLORS.primary} />
         </View>
@@ -210,96 +345,21 @@ export default function AppNavigator() {
 
   return (
     <SafeAreaProvider>
+      <StatusBar barStyle="light-content" backgroundColor="#111827" />
       <NavigationContainer>
         <Stack.Navigator screenOptions={{ headerShown: false }}>
-          {/* Navigation principale avec tabs - toujours visible */}
           <Stack.Screen name="MainTabs" component={MainTabs} />
-          
-          {/* Écrans de navigation pour les produits */}
-          <Stack.Screen 
-            name="CategoryProducts" 
-            component={CategoryProductsScreen}
-            options={{ 
-              headerShown: false,
-            }}
-          />
-          <Stack.Screen 
-            name="AllProducts" 
-            component={AllProductsScreen}
-            options={{ 
-              headerShown: false,
-            }}
-          />
-          <Stack.Screen 
-            name="ProductDetail" 
-            component={ProductDetailScreen}
-            options={{ 
-              headerShown: false,
-            }}
-          />
-          <Stack.Screen 
-            name="SellerProfile" 
-            component={SellerProfileScreen}
-            options={{ 
-              headerShown: false,
-            }}
-          />
-          
-          {/* Écrans modaux pour l'authentification */}
-          <Stack.Screen 
-            name="Login" 
-            component={LoginScreen}
-            options={{ 
-              presentation: Platform.OS === 'ios' ? 'modal' : 'card',
-              headerShown: false,
-              animationEnabled: true,
-            }}
-          />
-          <Stack.Screen 
-            name="Register" 
-            component={RegisterScreen}
-            options={{ 
-              presentation: Platform.OS === 'ios' ? 'modal' : 'card',
-              headerShown: false,
-              animationEnabled: true,
-            }}
-          />
-          <Stack.Screen 
-            name="RegisterStep2" 
-            component={RegisterStep2Screen}
-            options={{ 
-              presentation: Platform.OS === 'ios' ? 'modal' : 'card',
-              headerShown: false,
-              animationEnabled: true,
-            }}
-          />
-          <Stack.Screen 
-            name="VerifyOTP" 
-            component={VerifyOTPScreen}
-            options={{ 
-              presentation: Platform.OS === 'ios' ? 'modal' : 'card',
-              headerShown: false,
-              animationEnabled: true,
-            }}
-          />
-          <Stack.Screen 
-            name="ForgotPassword" 
-            component={ForgotPasswordScreen}
-            options={{ 
-              presentation: Platform.OS === 'ios' ? 'modal' : 'card',
-              headerShown: false,
-              animationEnabled: true,
-            }}
-          />
-          <Stack.Screen 
-            name="ResetPassword" 
-            component={ResetPasswordScreen}
-            options={{ 
-              presentation: Platform.OS === 'ios' ? 'modal' : 'card',
-              headerShown: false,
-              animationEnabled: true,
-            }}
-          />
+          <Stack.Screen name="CategoryProducts" component={CategoryProductsScreen} options={{ headerShown: false }} />
+          <Stack.Screen name="AllProducts" component={AllProductsScreen} options={{ headerShown: false }} />
+          <Stack.Screen name="ProductDetail" component={ProductDetailScreen} options={{ headerShown: false }} />
+          <Stack.Screen name="SellerProfile" component={SellerProfileScreen} options={{ headerShown: false }} />
+          <Stack.Screen name="MyListings" component={MyListingsScreen} options={{ headerShown: false }} />
+          <Stack.Screen name="Login" component={LoginScreen} options={{ presentation: Platform.OS === 'ios' ? 'modal' : 'card', headerShown: false }} />
+          <Stack.Screen name="Register" component={RegisterScreen} options={{ presentation: Platform.OS === 'ios' ? 'modal' : 'card', headerShown: false }} />
+          <Stack.Screen name="RegisterStep2" component={RegisterStep2Screen} options={{ presentation: Platform.OS === 'ios' ? 'modal' : 'card', headerShown: false }} />
+          <Stack.Screen name="VerifyOTP" component={VerifyOTPScreen} options={{ presentation: Platform.OS === 'ios' ? 'modal' : 'card', headerShown: false }} />
+          <Stack.Screen name="ForgotPassword" component={ForgotPasswordScreen} options={{ presentation: Platform.OS === 'ios' ? 'modal' : 'card', headerShown: false }} />
+          <Stack.Screen name="ResetPassword" component={ResetPasswordScreen} options={{ presentation: Platform.OS === 'ios' ? 'modal' : 'card', headerShown: false }} />
         </Stack.Navigator>
       </NavigationContainer>
     </SafeAreaProvider>
@@ -311,7 +371,7 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: COLORS.white,
+    backgroundColor: '#111827',
   },
   placeholderContainer: {
     flex: 1,

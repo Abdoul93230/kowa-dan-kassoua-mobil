@@ -1,4 +1,4 @@
-// ─── SellerProfileScreen — MarketHub Niger ────────────────────────────────────
+﻿// ─── SellerProfileScreen — MarketHub Niger ────────────────────────────────────
 // Profil public d'un vendeur avec ses annonces
 
 import React, { useState, useEffect, useRef } from 'react';
@@ -9,23 +9,12 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { apiClient } from '../api/auth';
+import { MOBILE_COLORS as P } from '../theme/colors';
 
 const { width } = Dimensions.get('window');
 
 // ─── PALETTE ──────────────────────────────────────────────────────────────────
-const P = {
-  terra:    '#C1440E',
-  amber:    '#E8832A',
-  gold:     '#F0A500',
-  brown:    '#3D1C02',
-  charcoal: '#1A1210',
-  cream:    '#FDF6EC',
-  sand:     '#F5E6C8',
-  surface:  '#FFFAF3',
-  muted:    '#9C8872',
-  dim:      'rgba(61,28,2,0.06)',
-  white:    '#FFFFFF',
-};
+
 
 // Extraire le nom de la ville
 const getCityName = (location) => {
@@ -86,7 +75,7 @@ function ProductCardMini({ item, onPress }) {
           />
           {/* Gradient subtle sur l'image */}
           <LinearGradient
-            colors={['transparent', 'rgba(26,18,16,0.3)']}
+            colors={['transparent', 'rgba(17,24,39,0.26)']}
             style={s.productImgOverlay}
           />
           {/* Badge type */}
@@ -246,7 +235,7 @@ export default function SellerProfileScreen({ route, navigation }) {
         ListHeaderComponent={() => (
           <>
             {/* ══════════════ HEADER HERO ═══════════════════════════════════════ */}
-            <LinearGradient colors={[P.terra, P.charcoal]} style={[s.hero, { paddingTop: insets.top + 66 }]}>
+            <LinearGradient colors={[P.orange700, P.orange500]} style={[s.hero, { paddingTop: insets.top + 66 }]}>
               <Animated.View style={[s.heroContent, { opacity: fadeAnim }]}>
                 {/* Avatar */}
                 <View style={s.avatarWrap}>
@@ -357,7 +346,7 @@ const s = StyleSheet.create({
 
   // Header flottant
   headerFloat: { position: 'absolute', top: 0, left: 0, right: 0, zIndex: 20, paddingHorizontal: 14 },
-  backBtn: { width: 44, height: 44, borderRadius: 22, backgroundColor: 'rgba(255,255,255,0.25)', justifyContent: 'center', alignItems: 'center', shadowColor: '#000', shadowOpacity: 0.2, shadowOffset: { width: 0, height: 2 }, shadowRadius: 8, elevation: 5 },
+  backBtn: { width: 44, height: 44, borderRadius: 22, backgroundColor: P.glassWhite25, justifyContent: 'center', alignItems: 'center', shadowColor: P.shadow, shadowOpacity: 0.2, shadowOffset: { width: 0, height: 2 }, shadowRadius: 8, elevation: 5 },
   backBtnTxt: { fontSize: 22, color: P.white, fontWeight: '700' },
 
   // Hero
@@ -369,7 +358,7 @@ const s = StyleSheet.create({
   avatarImg: { width: 80, height: 80, borderRadius: 40, borderWidth: 3, borderColor: P.white },
   avatarPlaceholder: { width: 80, height: 80, borderRadius: 40, backgroundColor: P.gold, justifyContent: 'center', alignItems: 'center', borderWidth: 3, borderColor: P.white },
   avatarInitials: { fontSize: 28, fontWeight: '900', color: P.white },
-  verifiedBadge: { position: 'absolute', bottom: -2, right: -2, width: 26, height: 26, borderRadius: 13, backgroundColor: '#22C55E', justifyContent: 'center', alignItems: 'center', borderWidth: 2.5, borderColor: P.white },
+  verifiedBadge: { position: 'absolute', bottom: -2, right: -2, width: 26, height: 26, borderRadius: 13, backgroundColor: P.green, justifyContent: 'center', alignItems: 'center', borderWidth: 2.5, borderColor: P.white },
   verifiedIcon: { fontSize: 13, color: P.white, fontWeight: '900' },
 
   // Hero text
@@ -418,7 +407,7 @@ const s = StyleSheet.create({
   productImgWrap: { position: 'relative', width: '100%', aspectRatio: 1, backgroundColor: P.sand },
   productImg: { width: '100%', height: '100%' },
   productImgOverlay: { position: 'absolute', bottom: 0, left: 0, right: 0, height: '40%' },
-  productTypeBadge: { position: 'absolute', top: 10, right: 10, width: 32, height: 32, borderRadius: 16, justifyContent: 'center', alignItems: 'center', shadowColor: '#000', shadowOpacity: 0.2, shadowOffset: { width: 0, height: 2 }, shadowRadius: 4, elevation: 3 },
+  productTypeBadge: { position: 'absolute', top: 10, right: 10, width: 32, height: 32, borderRadius: 16, justifyContent: 'center', alignItems: 'center', shadowColor: P.shadow, shadowOpacity: 0.2, shadowOffset: { width: 0, height: 2 }, shadowRadius: 4, elevation: 3 },
   productTypeIcon: { fontSize: 15 },
   productInfo: { padding: 12 },
   productTitle: { fontSize: 14, fontWeight: '800', color: P.charcoal, lineHeight: 19, marginBottom: 6, minHeight: 38 },
@@ -432,3 +421,5 @@ const s = StyleSheet.create({
   emptyTitle: { fontSize: 18, fontWeight: '900', color: P.charcoal, marginTop: 16, marginBottom: 8 },
   emptyText: { fontSize: 13, color: P.muted, textAlign: 'center' },
 });
+
+

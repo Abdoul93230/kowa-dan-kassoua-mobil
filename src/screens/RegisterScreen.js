@@ -1,637 +1,620 @@
-// ─── RegisterScreen — Étape 1: Numéro de téléphone ──────────────────────────
-// Saisie du numéro de téléphone et envoi de l'OTP
+﻿// ─── RegisterScreen v2 PREMIUM ─ MarketHub Niger ─────────────────────────────
+// Micro-étapes animées — une question à la fois, ultra user-friendly
 
 import React, { useState, useRef, useEffect } from 'react';
 import {
-  View,
-  Text,
-  StyleSheet,
-  TextInput,
-  TouchableOpacity,
-  ScrollView,
-  KeyboardAvoidingView,
-  Platform,
-  ActivityIndicator,
-  Alert,
-  Modal,
+  View, Text, StyleSheet, TextInput, TouchableOpacity,
+  KeyboardAvoidingView, Platform, ActivityIndicator,
+  Animated, Modal, ScrollView, StatusBar,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Ionicons } from '@expo/vector-icons';
 import { sendOTP } from '../api/auth';
+import { MOBILE_COLORS as P } from '../theme/colors';
 
-// Palette Saharienne
-const P = {
-  terra: '#C1440E',
-  amber: '#E8832A',
-  gold: '#F4A261',
-  brown: '#8B4513',
-  charcoal: '#2C2C2C',
-  sand: '#E9D8B8',
-  cream: '#F5EFE6',
-  dim: '#9B9B9B',
-  muted: '#6B6B6B',
-  white: '#FFFFFF',
-};
-
-// Liste des pays disponibles
 const COUNTRIES = [
-  { name: 'Niger', code: 'NE', dialCode: '+227', flag: '🇳🇪' },
-  { name: 'Sénégal', code: 'SN', dialCode: '+221', flag: '🇸🇳' },
-  { name: 'Mali', code: 'ML', dialCode: '+223', flag: '🇲🇱' },
+  { name: 'Niger',        code: 'NE', dialCode: '+227', flag: '🇳🇪' },
+  { name: 'Sénégal',      code: 'SN', dialCode: '+221', flag: '🇸🇳' },
+  { name: 'Mali',         code: 'ML', dialCode: '+223', flag: '🇲🇱' },
   { name: 'Burkina Faso', code: 'BF', dialCode: '+226', flag: '🇧🇫' },
-  { name: 'Côte d\'Ivoire', code: 'CI', dialCode: '+225', flag: '🇨🇮' },
-  { name: 'Bénin', code: 'BJ', dialCode: '+229', flag: '🇧🇯' },
-  { name: 'Togo', code: 'TG', dialCode: '+228', flag: '🇹🇬' },
+  { name: "Côte d'Ivoire",code: 'CI', dialCode: '+225', flag: '🇨🇮' },
+  { name: 'Bénin',        code: 'BJ', dialCode: '+229', flag: '🇧🇯' },
+  { name: 'Togo',         code: 'TG', dialCode: '+228', flag: '🇹🇬' },
 ];
 
+// Définition des micro-étapes
+// Chaque étape = une seule question
+const STEPS = [
+  { id: 'name',            label: 'Comment vous appelez-vous ?',      icon: '👋', hint: 'Votre nom complet' },
+  { id: 'country',         label: 'Votre pays ?',                     icon: '🌍', hint: 'Sélectionnez votre pays' },
+  { id: 'phone',           label: 'Votre numéro de téléphone ?',       icon: '📱', hint: 'Numéro principal' },
+  { id: 'whatsapp',        label: 'Votre WhatsApp ?',                  icon: '💬', hint: 'Optionnel — même numéro par défaut' },
+  { id: 'email',           label: 'Votre email ?',                     icon: '✉️', hint: 'Optionnel' },
+  { id: 'password',        label: 'Choisissez un mot de passe',        icon: '🔒', hint: 'Minimum 6 caractères' },
+  { id: 'confirmPassword', label: 'Confirmez votre mot de passe',      icon: '✅', hint: 'Retapez votre mot de passe' },
+];
+
+// ─────────────────────────────────────────────────────────────────────────────
 export default function RegisterScreen({ navigation }) {
-  const [selectedCountry, setSelectedCountry] = useState(COUNTRIES[0]);
-  const [formData, setFormData] = useState({
-    name: '',
-    phoneNumber: '',
-    whatsapp: '',
-    email: '',
-    password: '',
-    confirmPassword: '',
+  const insets = useSafeAreaInsets();
+  const [stepIndex,  setStepIndex]  = useState(0);
+  const [country,    setCountry]    = useState(COUNTRIES[0]);
+  const [showPicker, setShowPicker] = useState(false);
+  const [showPwd,    setShowPwd]    = useState(false);
+  const [showCPwd,   setShowCPwd]   = useState(false);
+  const [loading,    setLoading]    = useState(false);
+  const [error,      setError]      = useState('');
+  const [form, setForm] = useState({
+    name: '', phone: '', whatsapp: '',
+    email: '', password: '', confirmPassword: '',
   });
-  const [showPassword, setShowPassword] = useState(false);
-  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [errors, setErrors] = useState({});
-  const [showCountryPicker, setShowCountryPicker] = useState(false);
 
-  /**
-   * Mettre à jour les champs
-   */
-  const handleChange = (field, value) => {
-    setFormData(prev => ({ ...prev, [field]: value }));
-    // Effacer l'erreur du champ modifié
-    if (errors[field]) {
-      setErrors(prev => ({ ...prev, [field]: null }));
-    }
-    
-    // Auto-remplir whatsapp avec le numéro de téléphone
-    if (field === 'phoneNumber' && !formData.whatsapp) {
-      setFormData(prev => ({ ...prev, whatsapp: value }));
-    }
+  // Animations
+  const slideX  = useRef(new Animated.Value(0)).current;
+  const fadeAnim= useRef(new Animated.Value(1)).current;
+  const progAnim= useRef(new Animated.Value(0)).current;
+
+  const step = STEPS[stepIndex];
+  const progress = (stepIndex) / (STEPS.length - 1);
+
+  useEffect(() => {
+    Animated.timing(progAnim, {
+      toValue: progress,
+      duration: 400,
+      useNativeDriver: false,
+    }).start();
+  }, [stepIndex]);
+
+  // Animation de transition entre étapes
+  const animateNext = (forward = true) => {
+    Animated.parallel([
+      Animated.timing(fadeAnim, { toValue: 0, duration: 150, useNativeDriver: true }),
+      Animated.timing(slideX,   { toValue: forward ? -40 : 40, duration: 150, useNativeDriver: true }),
+    ]).start(() => {
+      slideX.setValue(forward ? 40 : -40);
+      Animated.parallel([
+        Animated.timing(fadeAnim, { toValue: 1, duration: 200, useNativeDriver: true }),
+        Animated.spring(slideX,   { toValue: 0, tension: 100, friction: 10, useNativeDriver: true }),
+      ]).start();
+    });
   };
 
-  /**
-   * Valider le formulaire étape 1
-   */
+  const set = (key, val) => {
+    setError('');
+    setForm(p => ({ ...p, [key]: val }));
+  };
+
+  // Validation par étape
   const validate = () => {
-    const newErrors = {};
-    
-    // Nom (min 2 caractères)
-    if (!formData.name.trim()) {
-      newErrors.name = 'Le nom est requis';
-    } else if (formData.name.trim().length < 2) {
-      newErrors.name = 'Le nom doit contenir au moins 2 caractères';
+    const v = form;
+    switch (step.id) {
+      case 'name':
+        if (!v.name.trim() || v.name.trim().length < 2)
+          return 'Minimum 2 caractères requis';
+        break;
+      case 'phone':
+        if (!v.phone.trim() || v.phone.trim().length < 7)
+          return 'Numéro invalide (min 7 chiffres)';
+        break;
+      case 'email':
+        if (v.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.email))
+          return 'Adresse email invalide';
+        break;
+      case 'password':
+        if (!v.password || v.password.length < 6)
+          return 'Minimum 6 caractères';
+        break;
+      case 'confirmPassword':
+        if (v.password !== v.confirmPassword)
+          return 'Les mots de passe ne correspondent pas';
+        break;
     }
-    
-    // Téléphone (min 7 chiffres)
-    if (!formData.phoneNumber.trim()) {
-      newErrors.phoneNumber = 'Le numéro de téléphone est requis';
-    } else if (formData.phoneNumber.trim().length < 7) {
-      newErrors.phoneNumber = 'Numéro de téléphone invalide';
-    }
-    
-    // Email (optionnel mais doit être valide si fourni)
-    if (formData.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email)) {
-      newErrors.email = 'Email invalide';
-    }
-    
-    // Mot de passe (min 6 caractères)
-    if (!formData.password) {
-      newErrors.password = 'Le mot de passe est requis';
-    } else if (formData.password.length < 6) {
-      newErrors.password = 'Le mot de passe doit contenir au moins 6 caractères';
-    }
-    
-    // Confirmation mot de passe
-    if (formData.password !== formData.confirmPassword) {
-      newErrors.confirmPassword = 'Les mots de passe ne correspondent pas';
-    }
-    
-    setErrors(newErrors);
-    return Object.keys(newErrors).length === 0;
+    return null;
   };
 
-  /**
-   * Envoyer le code OTP
-   */
-  const handleSendOTP = async () => {
-    if (!validate()) {
-      return;
+  const goNext = () => {
+    const err = validate();
+    if (err) { setError(err); return; }
+
+    // Auto-fill whatsapp si vide
+    if (step.id === 'phone' && !form.whatsapp) {
+      setForm(p => ({ ...p, whatsapp: p.phone }));
     }
 
+    if (stepIndex < STEPS.length - 1) {
+      animateNext(true);
+      setStepIndex(i => i + 1);
+      setError('');
+    } else {
+      handleSubmit();
+    }
+  };
+
+  const goPrev = () => {
+    if (stepIndex > 0) {
+      animateNext(false);
+      setStepIndex(i => i - 1);
+      setError('');
+    }
+  };
+
+  const handleSubmit = async () => {
     setLoading(true);
-    setErrors({});
-
+    setError('');
     try {
-      // Formater le numéro au format requis: "+227 12345678"
-      const formattedPhone = `${selectedCountry.dialCode} ${formData.phoneNumber.trim()}`;
-      const formattedWhatsapp = formData.whatsapp.trim() 
-        ? `${selectedCountry.dialCode} ${formData.whatsapp.trim()}`
-        : formattedPhone;
+      const fmtPhone    = `${country.dialCode} ${form.phone.trim()}`;
+      const fmtWhatsapp = form.whatsapp.trim()
+        ? `${country.dialCode} ${form.whatsapp.trim()}`
+        : fmtPhone;
 
-      // Envoyer l'OTP
-      const result = await sendOTP(formattedPhone);
-
+      const result = await sendOTP(fmtPhone);
       if (result.success) {
-        // Naviguer vers l'écran de vérification OTP avec les données du formulaire
         navigation.navigate('VerifyOTP', {
-          phone: formattedPhone,
+          phone: fmtPhone,
           type: 'register',
-          attemptsRemaining: result.data.attemptsRemaining || 3,
-          devCode: result.data.devOTPCode, // Code OTP en mode dev
-          // Passer les données du formulaire étape 1
+          attemptsRemaining: result.data?.attemptsRemaining || 3,
+          devCode: result.devOTP || result.data?.devOTP,
           formData: {
-            name: formData.name.trim(),
-            phone: formattedPhone,
-            whatsapp: formattedWhatsapp,
-            email: formData.email.trim() || undefined,
-            password: formData.password,
+            name:     form.name.trim(),
+            phone:    fmtPhone,
+            whatsapp: fmtWhatsapp,
+            email:    form.email.trim() || undefined,
+            password: form.password,
           },
         });
       }
-    } catch (err) {
-      console.error('❌ Erreur envoi OTP:', err);
-      setErrors({ general: err.message || 'Erreur lors de l\'envoi du code' });
+    } catch (e) {
+      setError(e.message || "Erreur lors de l'envoi du code");
     } finally {
       setLoading(false);
     }
   };
 
+  // Forcer de la valeur selon l'étape courante
+  const currentValue = () => {
+    if (step.id === 'country') return country.name;
+    return form[step.id] || '';
+  };
+
+  // Force du mot de passe
+  const pwdStrength = () => {
+    const p = form.password;
+    if (!p) return 0;
+    let score = 0;
+    if (p.length >= 6)            score++;
+    if (p.length >= 10)           score++;
+    if (/[A-Z]/.test(p))          score++;
+    if (/[0-9]/.test(p))          score++;
+    if (/[@$!%*?&]/.test(p))      score++;
+    return score;
+  };
+
+  const strengthColor = () => {
+    const s = pwdStrength();
+    if (s <= 1) return P.error;
+    if (s <= 3) return P.yellow;
+    return P.green;
+  };
+
+  const strengthLabel = () => {
+    const s = pwdStrength();
+    if (s <= 1) return 'Faible';
+    if (s <= 3) return 'Moyen';
+    return 'Fort 💪';
+  };
+
+  const isLast = stepIndex === STEPS.length - 1;
+
   return (
-    <SafeAreaView style={styles.safeArea}>
-      <LinearGradient colors={[P.cream, P.sand, P.gold]} style={styles.gradient}>
-        <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-          style={styles.container}
-        >
-          <ScrollView contentContainerStyle={styles.scrollContent}>
-            {/* Header */}
-            <View style={styles.header}>
-              <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
-                <Ionicons name="arrow-back" size={24} color={P.charcoal} />
-              </TouchableOpacity>
-            </View>
+    <KeyboardAvoidingView
+      style={s.container}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'padding'}
+    >
+      <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
 
-            {/* Content */}
-            <View style={styles.content}>
-              {/* Icon */}
-              <View style={styles.iconContainer}>
-                <Ionicons name="person-add-outline" size={60} color={P.terra} />
-              </View>
+      {/* ── HEADER ardoise ────────────────────────────────────────────── */}
+      <LinearGradient
+        colors={['#2d3748', '#374151']}
+        style={[s.header, { paddingTop: (insets.top || 0) + 6 }]}
+      >
+        <View style={s.headerAccent} />
 
-              <Text style={styles.title}>Créer un compte</Text>
-              <Text style={styles.subtitle}>
-                Remplissez vos informations pour commencer
-              </Text>
+        {/* Top row */}
+        <View style={s.headerRow}>
+          <TouchableOpacity
+            style={s.backBtn}
+            onPress={stepIndex > 0 ? goPrev : () => navigation.goBack()}
+            activeOpacity={0.8}
+          >
+            <Text style={s.backBtnTxt}>←</Text>
+          </TouchableOpacity>
 
-              {/* Error général */}
-              {errors.general ? (
-                <View style={styles.errorBox}>
-                  <Ionicons name="alert-circle" size={20} color={P.terra} />
-                  <Text style={styles.errorBoxText}>{errors.general}</Text>
-                </View>
-              ) : null}
-
-              {/* Nom complet */}
-              <View style={styles.inputContainer}>
-                <Text style={styles.label}>Nom complet *</Text>
-                <View style={styles.inputWrapper}>
-                  <Ionicons name="person-outline" size={20} color={P.muted} style={styles.icon} />
-                  <TextInput
-                    style={styles.input}
-                    placeholder="Ex: Amadou Diallo"
-                    placeholderTextColor={P.dim}
-                    value={formData.name}
-                    onChangeText={(text) => handleChange('name', text)}
-                    autoCapitalize="words"
-                    editable={!loading}
-                  />
-                </View>
-                {errors.name ? <Text style={styles.errorText}>{errors.name}</Text> : null}
-              </View>
-
-              {/* Sélecteur de pays */}
-              <TouchableOpacity
-                style={styles.countrySelector}
-                onPress={() => setShowCountryPicker(true)}
-                disabled={loading}
-              >
-                <Text style={styles.countryFlag}>{selectedCountry.flag}</Text>
-                <Text style={styles.countryDialCode}>{selectedCountry.dialCode}</Text>
-                <Text style={styles.countryName}>{selectedCountry.name}</Text>
-                <Ionicons name="chevron-down" size={20} color={P.muted} />
-              </TouchableOpacity>
-
-              {/* Téléphone */}
-              <View style={styles.inputContainer}>
-                <Text style={styles.label}>Numéro de téléphone *</Text>
-                <View style={styles.inputWrapper}>
-                  <Text style={styles.dialCode}>{selectedCountry.dialCode}</Text>
-                  <TextInput
-                    style={styles.input}
-                    placeholder="12 34 56 78"
-                    placeholderTextColor={P.dim}
-                    value={formData.phoneNumber}
-                    onChangeText={(text) => handleChange('phoneNumber', text)}
-                    keyboardType="phone-pad"
-                    editable={!loading}
-                  />
-                </View>
-                {errors.phoneNumber ? <Text style={styles.errorText}>{errors.phoneNumber}</Text> : null}
-              </View>
-
-              {/* WhatsApp */}
-              <View style={styles.inputContainer}>
-                <Text style={styles.label}>WhatsApp (optionnel)</Text>
-                <View style={styles.inputWrapper}>
-                  <Text style={styles.dialCode}>{selectedCountry.dialCode}</Text>
-                  <TextInput
-                    style={styles.input}
-                    placeholder="Même numéro que ci-dessus"
-                    placeholderTextColor={P.dim}
-                    value={formData.whatsapp}
-                    onChangeText={(text) => handleChange('whatsapp', text)}
-                    keyboardType="phone-pad"
-                    editable={!loading}
-                  />
-                </View>
-              </View>
-
-              {/* Email */}
-              <View style={styles.inputContainer}>
-                <Text style={styles.label}>Email (optionnel)</Text>
-                <View style={styles.inputWrapper}>
-                  <Ionicons name="mail-outline" size={20} color={P.muted} style={styles.icon} />
-                  <TextInput
-                    style={styles.input}
-                    placeholder="exemple@email.com"
-                    placeholderTextColor={P.dim}
-                    value={formData.email}
-                    onChangeText={(text) => handleChange('email', text)}
-                    keyboardType="email-address"
-                    autoCapitalize="none"
-                    editable={!loading}
-                  />
-                </View>
-                {errors.email ? <Text style={styles.errorText}>{errors.email}</Text> : null}
-              </View>
-
-              {/* Mot de passe */}
-              <View style={styles.inputContainer}>
-                <Text style={styles.label}>Mot de passe *</Text>
-                <View style={styles.inputWrapper}>
-                  <Ionicons name="lock-closed-outline" size={20} color={P.muted} style={styles.icon} />
-                  <TextInput
-                    style={[styles.input, styles.inputPassword]}
-                    placeholder="Minimum 6 caractères"
-                    placeholderTextColor={P.dim}
-                    value={formData.password}
-                    onChangeText={(text) => handleChange('password', text)}
-                    secureTextEntry={!showPassword}
-                    autoCapitalize="none"
-                    editable={!loading}
-                  />
-                  <TouchableOpacity
-                    onPress={() => setShowPassword(!showPassword)}
-                    style={styles.eyeButton}
-                  >
-                    <Ionicons
-                      name={showPassword ? 'eye-off-outline' : 'eye-outline'}
-                      size={20}
-                      color={P.muted}
-                    />
-                  </TouchableOpacity>
-                </View>
-                {errors.password ? <Text style={styles.errorText}>{errors.password}</Text> : null}
-              </View>
-
-              {/* Confirmer mot de passe */}
-              <View style={styles.inputContainer}>
-                <Text style={styles.label}>Confirmer le mot de passe *</Text>
-                <View style={styles.inputWrapper}>
-                  <Ionicons name="lock-closed-outline" size={20} color={P.muted} style={styles.icon} />
-                  <TextInput
-                    style={[styles.input, styles.inputPassword]}
-                    placeholder="Confirmer le mot de passe"
-                    placeholderTextColor={P.dim}
-                    value={formData.confirmPassword}
-                    onChangeText={(text) => handleChange('confirmPassword', text)}
-                    secureTextEntry={!showConfirmPassword}
-                    autoCapitalize="none"
-                    editable={!loading}
-                  />
-                  <TouchableOpacity
-                    onPress={() => setShowConfirmPassword(!showConfirmPassword)}
-                    style={styles.eyeButton}
-                  >
-                    <Ionicons
-                      name={showConfirmPassword ? 'eye-off-outline' : 'eye-outline'}
-                      size={20}
-                      color={P.muted}
-                    />
-                  </TouchableOpacity>
-                </View>
-                {errors.confirmPassword ? (
-                  <Text style={styles.errorText}>{errors.confirmPassword}</Text>
-                ) : null}
-              </View>
-
-              {/* Continue Button */}
-              <TouchableOpacity
-                style={[styles.button, loading && styles.buttonDisabled]}
-                onPress={handleSendOTP}
-                disabled={loading}
-              >
-                {loading ? (
-                  <ActivityIndicator color={P.white} />
-                ) : (
-                  <View style={styles.buttonContent}>
-                    <Text style={styles.buttonText}>Continuer</Text>
-                    <Ionicons name="arrow-forward" size={20} color={P.white} />
-                  </View>
-                )}
-              </TouchableOpacity>
-
-              {/* Login Link */}
-              <View style={styles.loginContainer}>
-                <Text style={styles.loginLabel}>Vous avez déjà un compte ? </Text>
-                <TouchableOpacity onPress={() => navigation.navigate('Login')}>
-                  <Text style={styles.loginLink}>Se connecter</Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-          </ScrollView>
-        </KeyboardAvoidingView>
-
-        {/* Country Picker Modal */}
-        <Modal
-          visible={showCountryPicker}
-          animationType="slide"
-          transparent={true}
-          onRequestClose={() => setShowCountryPicker(false)}
-        >
-          <View style={styles.modalOverlay}>
-            <View style={styles.modalContent}>
-              <View style={styles.modalHeader}>
-                <Text style={styles.modalTitle}>Sélectionner un pays</Text>
-                <TouchableOpacity onPress={() => setShowCountryPicker(false)}>
-                  <Ionicons name="close" size={24} color={P.charcoal} />
-                </TouchableOpacity>
-              </View>
-              <ScrollView>
-                {COUNTRIES.map((country) => (
-                  <TouchableOpacity
-                    key={country.code}
-                    style={styles.countryItem}
-                    onPress={() => {
-                      setSelectedCountry(country);
-                      setShowCountryPicker(false);
-                    }}
-                  >
-                    <Text style={styles.countryItemFlag}>{country.flag}</Text>
-                    <Text style={styles.countryItemName}>{country.name}</Text>
-                    <Text style={styles.countryItemDialCode}>{country.dialCode}</Text>
-                    {selectedCountry.code === country.code && (
-                      <Ionicons name="checkmark-circle" size={24} color={P.terra} />
-                    )}
-                  </TouchableOpacity>
-                ))}
-              </ScrollView>
-            </View>
+          <View style={s.headerCenter}>
+            <LinearGradient colors={[P.orange500, P.orange700]} style={s.logoMini}>
+              <Text style={s.logoMiniTxt}>M</Text>
+            </LinearGradient>
+            <Text style={s.headerBrand}>MarketHub</Text>
           </View>
-        </Modal>
+
+          <TouchableOpacity onPress={() => navigation.navigate('Login')} style={s.loginLink}>
+            <Text style={s.loginLinkTxt}>Connexion</Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* Barre de progression segmentée */}
+        <View style={s.progSegs}>
+          {STEPS.map((_, i) => (
+            <View
+              key={i}
+              style={[
+                s.progSeg,
+                i < stepIndex  && s.progSegDone,
+                i === stepIndex && s.progSegActive,
+              ]}
+            />
+          ))}
+        </View>
+
+        {/* Compteur */}
+        <Text style={s.stepCount}>{stepIndex + 1} / {STEPS.length}</Text>
+
+        <LinearGradient
+          colors={['transparent', P.terra, 'transparent']}
+          start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
+          style={s.headerGlow}
+        />
       </LinearGradient>
-    </SafeAreaView>
+
+      {/* ── CONTENU SCROLLABLE (question + input) ──────────────────────── */}
+      <ScrollView
+        style={{ flex: 1 }}
+        contentContainerStyle={s.scrollContent}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+        keyboardDismissMode="interactive"
+      >
+        {/* Zone question */}
+        <View style={s.questionZone}>
+          <Animated.View style={[s.questionWrap, { opacity: fadeAnim, transform: [{ translateX: slideX }] }]}>
+            <Text style={s.stepIcon}>{step.icon}</Text>
+            <Text style={s.question}>{step.label}</Text>
+            {step.hint ? <Text style={s.questionHint}>{step.hint}</Text> : null}
+          </Animated.View>
+        </View>
+
+        {/* Zone input */}
+        <View style={s.inputZone}>
+          <Animated.View style={{ opacity: fadeAnim, transform: [{ translateX: slideX }] }}>
+
+          {/* Sélecteur pays */}
+          {step.id === 'country' && (
+            <TouchableOpacity
+              style={s.countryBtn}
+              onPress={() => setShowPicker(true)}
+              activeOpacity={0.85}
+            >
+              <Text style={s.countryBtnFlag}>{country.flag}</Text>
+              <View style={{ flex: 1 }}>
+                <Text style={s.countryBtnName}>{country.name}</Text>
+                <Text style={s.countryBtnDial}>{country.dialCode}</Text>
+              </View>
+              <Text style={s.countryBtnArrow}>▾</Text>
+            </TouchableOpacity>
+          )}
+
+          {/* Numéro de téléphone / whatsapp avec indicatif */}
+          {(step.id === 'phone' || step.id === 'whatsapp') && (
+            <View style={s.phoneWrap}>
+              <View style={s.dialBadge}>
+                <Text style={s.dialFlag}>{country.flag}</Text>
+                <Text style={s.dialCode}>{country.dialCode}</Text>
+              </View>
+              <TextInput
+                style={s.phoneInput}
+                placeholder={step.id === 'phone' ? '12 34 56 78' : 'Même numéro (optionnel)'}
+                placeholderTextColor="rgba(107,114,128,0.6)"
+                value={form[step.id]}
+                onChangeText={v => set(step.id, v)}
+                keyboardType="phone-pad"
+              />
+            </View>
+          )}
+
+          {/* Champs texte normaux */}
+          {step.id === 'name' && (
+            <TextInput
+              style={s.mainInput}
+              placeholder="Ex: Amadou Diallo"
+              placeholderTextColor="rgba(107,114,128,0.6)"
+              value={form.name}
+              onChangeText={v => set('name', v)}
+              autoCapitalize="words"
+            />
+          )}
+
+          {step.id === 'email' && (
+            <TextInput
+              style={s.mainInput}
+              placeholder="exemple@email.com (optionnel)"
+              placeholderTextColor="rgba(107,114,128,0.6)"
+              value={form.email}
+              onChangeText={v => set('email', v)}
+              keyboardType="email-address"
+              autoCapitalize="none"
+            />
+          )}
+
+          {/* Mot de passe */}
+          {step.id === 'password' && (
+            <View>
+              <View style={s.pwdWrap}>
+                <TextInput
+                  style={s.pwdInput}
+                  placeholder="Minimum 6 caractères"
+                  placeholderTextColor="rgba(107,114,128,0.6)"
+                  value={form.password}
+                  onChangeText={v => set('password', v)}
+                  secureTextEntry={!showPwd}
+                  autoCapitalize="none"
+                />
+                <TouchableOpacity style={s.eyeBtn} onPress={() => setShowPwd(p => !p)}>
+                  <Text style={s.eyeBtnTxt}>{showPwd ? '🙈' : '👁'}</Text>
+                </TouchableOpacity>
+              </View>
+              {/* Indicateur de force */}
+              {form.password.length > 0 && (
+                <View style={s.strengthWrap}>
+                  <View style={s.strengthBar}>
+                    {[1,2,3,4,5].map(i => (
+                      <View
+                        key={i}
+                        style={[
+                          s.strengthSeg,
+                          i <= pwdStrength() && { backgroundColor: strengthColor() },
+                        ]}
+                      />
+                    ))}
+                  </View>
+                  <Text style={[s.strengthLabel, { color: strengthColor() }]}>
+                    {strengthLabel()}
+                  </Text>
+                </View>
+              )}
+              {/* Critères */}
+              {form.password.length > 0 && (
+                <View style={s.criteriaWrap}>
+                  {[
+                    { ok: form.password.length >= 6,          txt: '6 caractères min' },
+                    { ok: /[A-Z]/.test(form.password),        txt: 'Majuscule' },
+                    { ok: /[0-9]/.test(form.password),        txt: 'Chiffre' },
+                    { ok: /[@$!%*?&]/.test(form.password),    txt: 'Caractère spécial' },
+                  ].map((c, i) => (
+                    <View key={i} style={s.criteriaItem}>
+                      <Text style={[s.criteriaDot, c.ok && { color: P.green }]}>
+                        {c.ok ? '✓' : '○'}
+                      </Text>
+                      <Text style={[s.criteriaTxt, c.ok && s.criteriaTxtOk]}>{c.txt}</Text>
+                    </View>
+                  ))}
+                </View>
+              )}
+            </View>
+          )}
+
+          {/* Confirm password */}
+          {step.id === 'confirmPassword' && (
+            <View style={s.pwdWrap}>
+              <TextInput
+                style={s.pwdInput}
+                placeholder="Retapez votre mot de passe"
+                placeholderTextColor="rgba(107,114,128,0.6)"
+                value={form.confirmPassword}
+                onChangeText={v => set('confirmPassword', v)}
+                secureTextEntry={!showCPwd}
+                autoCapitalize="none"
+              />
+              <TouchableOpacity style={s.eyeBtn} onPress={() => setShowCPwd(p => !p)}>
+                <Text style={s.eyeBtnTxt}>{showCPwd ? '🙈' : '👁'}</Text>
+              </TouchableOpacity>
+              {/* Match indicator */}
+              {form.confirmPassword.length > 0 && (
+                <View style={[
+                  s.matchBadge,
+                  { backgroundColor: form.password === form.confirmPassword ? P.successSoft : P.errorSoft }
+                ]}>
+                  <Text style={{ fontSize: 13, fontWeight: '700',
+                    color: form.password === form.confirmPassword ? P.greenDark : P.error }}>
+                    {form.password === form.confirmPassword ? '✓ Identiques' : '✕ Différents'}
+                  </Text>
+                </View>
+              )}
+            </View>
+          )}
+
+          {/* Message d'erreur */}
+          {error ? (
+            <View style={s.errorWrap}>
+              <Text style={s.errorTxt}>⚠ {error}</Text>
+            </View>
+          ) : null}
+
+        </Animated.View>
+        </View>
+      </ScrollView>
+
+      {/* ── BOUTON SUIVANT ─────────────────────────────────────────────── */}
+      <View style={[s.footer, { paddingBottom: Math.max(insets.bottom, 12) + 4 }]}>
+        <TouchableOpacity
+          onPress={goNext}
+          disabled={loading}
+          activeOpacity={0.88}
+          style={s.nextBtn}
+        >
+          <LinearGradient
+            colors={[P.orange500, P.orange700]}
+            start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
+            style={s.nextBtnGrad}
+          >
+            {loading
+              ? <ActivityIndicator color={P.white} />
+              : <Text style={s.nextBtnTxt}>
+                  {isLast ? '✓ Créer mon compte' : 'Continuer →'}
+                </Text>
+            }
+          </LinearGradient>
+        </TouchableOpacity>
+
+        {/* Lien connexion */}
+        <View style={s.loginRow}>
+          <Text style={s.loginRowTxt}>Déjà un compte ? </Text>
+          <TouchableOpacity onPress={() => navigation.navigate('Login')}>
+            <Text style={s.loginRowLink}>Se connecter</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+
+      {/* ── MODAL PAYS ─────────────────────────────────────────────────── */}
+      <Modal
+        visible={showPicker}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowPicker(false)}
+      >
+        <View style={s.modalOverlay}>
+          <View style={s.modal}>
+            <View style={s.modalHandle} />
+            <View style={s.modalHead}>
+              <Text style={s.modalTitle}>Choisir un pays</Text>
+              <TouchableOpacity onPress={() => setShowPicker(false)} style={s.modalClose}>
+                <Text style={s.modalCloseTxt}>✕</Text>
+              </TouchableOpacity>
+            </View>
+            <ScrollView>
+              {COUNTRIES.map(c => (
+                <TouchableOpacity
+                  key={c.code}
+                  style={[s.countryRow, country.code === c.code && s.countryRowActive]}
+                  onPress={() => { setCountry(c); setShowPicker(false); setError(''); }}
+                  activeOpacity={0.8}
+                >
+                  <Text style={s.countryRowFlag}>{c.flag}</Text>
+                  <Text style={[s.countryRowName, country.code === c.code && { color: P.terra }]}>
+                    {c.name}
+                  </Text>
+                  <Text style={s.countryRowDial}>{c.dialCode}</Text>
+                  {country.code === c.code && <Text style={{ color: P.terra, fontWeight: '900' }}>✓</Text>}
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+    </KeyboardAvoidingView>
   );
 }
 
-const styles = StyleSheet.create({
-  safeArea: {
-    flex: 1,
-    backgroundColor: P.cream,
-  },
-  gradient: {
-    flex: 1,
-  },
-  container: {
-    flex: 1,
-  },
-  scrollContent: {
-    flexGrow: 1,
-  },
-  header: {
-    paddingHorizontal: 16,
-    paddingTop: 8,
-  },
-  backButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: P.white,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  content: {
-    flex: 1,
-    paddingHorizontal: 24,
-    paddingTop: 40,
-  },
-  iconContainer: {
-    alignItems: 'center',
-    marginBottom: 24,
-  },
-  title: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    color: P.charcoal,
-    marginBottom: 8,
-  },
-  subtitle: {
-    fontSize: 16,
-    color: P.muted,
-    marginBottom: 32,
-  },
-  countrySelector: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: P.white,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: P.dim,
-    paddingVertical: 16,
-    paddingHorizontal: 16,
-    marginBottom: 24,
-  },
-  countryFlag: {
-    fontSize: 28,
-    marginRight: 12,
-  },
-  countryDialCode: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: P.charcoal,
-    marginRight: 8,
-  },
-  countryName: {
-    flex: 1,
-    fontSize: 16,
-    color: P.charcoal,
-  },
-  inputContainer: {
-    marginBottom: 32,
-  },
-  label: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: P.charcoal,
-    marginBottom: 8,
-  },
-  inputWrapper: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: P.white,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: P.dim,
-    paddingHorizontal: 12,
-  },
-  icon: {
-    marginRight: 8,
-  },
-  dialCode: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: P.muted,
-    marginRight: 8,
-  },
-  input: {
-    flex: 1,
-    height: 50,
-    fontSize: 16,
-    color: P.charcoal,
-  },
-  inputPassword: {
-    paddingRight: 40,
-  },
-  eyeButton: {
-    position: 'absolute',
-    right: 12,
-    padding: 8,
-  },
-  errorBox: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#FEE2E2',
-    borderWidth: 1,
-    borderColor: '#FCA5A5',
-    borderRadius: 10,
-    padding: 12,
-    marginBottom: 20,
-  },
-  errorBoxText: {
-    color: P.terra,
-    fontSize: 14,
-    marginLeft: 8,
-    flex: 1,
-  },
-  errorContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 8,
-  },
-  errorText: {
-    color: P.terra,
-    fontSize: 12,
-    marginTop: 4,
-    marginLeft: 4,
-  },
-  button: {
-    backgroundColor: P.terra,
-    borderRadius: 12,
-    paddingVertical: 16,
-    alignItems: 'center',
-    marginBottom: 24,
-  },
-  buttonDisabled: {
-    backgroundColor: P.dim,
-  },
-  buttonContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  buttonText: {
-    color: P.white,
-    fontSize: 18,
-    fontWeight: 'bold',
-    marginRight: 8,
-  },
-  loginContainer: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  loginLabel: {
-    fontSize: 14,
-    color: P.muted,
-  },
-  loginLink: {
-    fontSize: 14,
-    color: P.terra,
-    fontWeight: 'bold',
-  },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    justifyContent: 'flex-end',
-  },
-  modalContent: {
-    backgroundColor: P.white,
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    maxHeight: '70%',
-  },
-  modalHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: 24,
-    paddingVertical: 20,
-    borderBottomWidth: 1,
-    borderBottomColor: P.dim,
-  },
-  modalTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: P.charcoal,
-  },
-  countryItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 24,
-    paddingVertical: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: P.cream,
-  },
-  countryItemFlag: {
-    fontSize: 24,
-    marginRight: 16,
-  },
-  countryItemName: {
-    flex: 1,
-    fontSize: 16,
-    color: P.charcoal,
-  },
-  countryItemDialCode: {
-    fontSize: 14,
-    color: P.muted,
-    marginRight: 8,
-  },
-});
+// ─── STYLES ───────────────────────────────────────────────────────────────────
+const s = StyleSheet.create({
+  container: { flex: 1, backgroundColor: P.white },
 
+  // Header ardoise
+  header:       { paddingHorizontal: 18, paddingBottom: 14, overflow: 'hidden', position: 'relative' },
+  headerAccent: { position: 'absolute', top: 0, left: 0, right: 0, height: 3, backgroundColor: P.terra },
+  headerRow:    { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 },
+  backBtn:      { width: 38, height: 38, borderRadius: 19, backgroundColor: 'rgba(255,255,255,0.1)', justifyContent: 'center', alignItems: 'center' },
+  backBtnTxt:   { fontSize: 18, fontWeight: '700', color: P.white },
+  headerCenter: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  logoMini:     { width: 28, height: 28, borderRadius: 8, justifyContent: 'center', alignItems: 'center' },
+  logoMiniTxt:  { fontSize: 16, fontWeight: '900', color: P.white },
+  headerBrand:  { fontSize: 16, fontWeight: '800', color: P.white },
+  loginLink:    { paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8, borderWidth: 1, borderColor: 'rgba(255,255,255,0.2)' },
+  loginLinkTxt: { fontSize: 12, fontWeight: '600', color: P.white },
+
+  // Progression
+  progSegs:     { flexDirection: 'row', gap: 4, marginBottom: 8 },
+  progSeg:      { flex: 1, height: 3, borderRadius: 1.5, backgroundColor: 'rgba(255,255,255,0.15)' },
+  progSegDone:  { backgroundColor: P.terra },
+  progSegActive:{ backgroundColor: P.amber },
+  stepCount:    { fontSize: 11, color: 'rgba(255,255,255,0.45)', fontWeight: '600', marginBottom: 2 },
+  headerGlow:   { height: 1.5, marginTop: 8 },
+
+  // Zone question
+  scrollContent: { paddingBottom: 24 },
+  questionZone: { paddingHorizontal: 24, paddingTop: 32, paddingBottom: 16 },
+  questionWrap: { alignItems: 'flex-start' },
+  stepIcon:     { fontSize: 40, marginBottom: 14 },
+  question:     { fontSize: 26, fontWeight: '900', color: P.charcoal, letterSpacing: -0.6, lineHeight: 34, marginBottom: 8 },
+  questionHint: { fontSize: 14, color: P.muted, lineHeight: 20 },
+
+  // Zone input
+  inputZone: { paddingHorizontal: 24, paddingTop: 8, paddingBottom: 16 },
+
+  // Input principal
+  mainInput: {
+    fontSize: 20, fontWeight: '600', color: P.charcoal,
+    borderBottomWidth: 2.5, borderBottomColor: P.terra,
+    paddingVertical: 12, paddingHorizontal: 0,
+    backgroundColor: 'transparent',
+  },
+
+  // Phone input
+  phoneWrap: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  dialBadge: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: P.surface, borderRadius: 10, paddingHorizontal: 10, paddingVertical: 10, borderWidth: 1, borderColor: P.dim },
+  dialFlag:  { fontSize: 18 },
+  dialCode:  { fontSize: 14, fontWeight: '700', color: P.charcoal },
+  phoneInput:{ flex: 1, fontSize: 20, fontWeight: '600', color: P.charcoal, borderBottomWidth: 2.5, borderBottomColor: P.terra, paddingVertical: 12 },
+
+  // Country selector
+  countryBtn:      { flexDirection: 'row', alignItems: 'center', backgroundColor: P.surface, borderRadius: 16, borderWidth: 1.5, borderColor: P.dim, padding: 16, gap: 12 },
+  countryBtnFlag:  { fontSize: 32 },
+  countryBtnName:  { fontSize: 17, fontWeight: '700', color: P.charcoal },
+  countryBtnDial:  { fontSize: 13, color: P.muted, marginTop: 2 },
+  countryBtnArrow: { fontSize: 18, color: P.muted },
+
+  // Password
+  pwdWrap:   { position: 'relative' },
+  pwdInput:  { fontSize: 20, fontWeight: '600', color: P.charcoal, borderBottomWidth: 2.5, borderBottomColor: P.terra, paddingVertical: 12, paddingRight: 44 },
+  eyeBtn:    { position: 'absolute', right: 0, top: 8, padding: 8 },
+  eyeBtnTxt: { fontSize: 18 },
+  matchBadge:{ marginTop: 10, alignSelf: 'flex-start', paddingHorizontal: 12, paddingVertical: 5, borderRadius: 8 },
+
+  // Force mot de passe
+  strengthWrap: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 14 },
+  strengthBar:  { flex: 1, flexDirection: 'row', gap: 4 },
+  strengthSeg:  { flex: 1, height: 4, borderRadius: 2, backgroundColor: P.dim },
+  strengthLabel:{ fontSize: 12, fontWeight: '700', minWidth: 50 },
+
+  // Critères
+  criteriaWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 12 },
+  criteriaItem: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: P.surface, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 20 },
+  criteriaDot:  { fontSize: 12, color: P.muted, fontWeight: '700' },
+  criteriaTxt:  { fontSize: 11, color: P.muted, fontWeight: '500' },
+  criteriaTxtOk:{ color: P.greenDark, fontWeight: '700' },
+
+  // Erreur
+  errorWrap: { marginTop: 12, backgroundColor: P.errorSoft, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 10, borderWidth: 1, borderColor: P.errorBorder },
+  errorTxt:  { fontSize: 13, color: P.error, fontWeight: '600' },
+
+  // Footer
+  footer:      { paddingHorizontal: 20, paddingTop: 12, backgroundColor: P.white, borderTopWidth: 1, borderTopColor: P.dim },
+  nextBtn:     { borderRadius: 14, overflow: 'hidden', shadowColor: P.terra, shadowOpacity: 0.3, shadowOffset: { width: 0, height: 4 }, shadowRadius: 10, elevation: 6 },
+  nextBtnGrad: { paddingVertical: 16, alignItems: 'center' },
+  nextBtnTxt:  { fontSize: 16, fontWeight: '800', color: P.white, letterSpacing: 0.2 },
+  loginRow:    { flexDirection: 'row', justifyContent: 'center', alignItems: 'center', marginTop: 14 },
+  loginRowTxt: { fontSize: 14, color: P.muted },
+  loginRowLink:{ fontSize: 14, color: P.terra, fontWeight: '700' },
+
+  // Modal pays
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(17,24,39,0.55)', justifyContent: 'flex-end' },
+  modal:        { backgroundColor: P.white, borderTopLeftRadius: 28, borderTopRightRadius: 28, maxHeight: '75%' },
+  modalHandle:  { width: 36, height: 4, borderRadius: 2, backgroundColor: P.dim, alignSelf: 'center', marginTop: 12, marginBottom: 4 },
+  modalHead:    { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 22, paddingVertical: 16, borderBottomWidth: 1, borderBottomColor: P.dim },
+  modalTitle:   { fontSize: 18, fontWeight: '900', color: P.charcoal },
+  modalClose:   { width: 30, height: 30, borderRadius: 15, backgroundColor: P.surface, alignItems: 'center', justifyContent: 'center' },
+  modalCloseTxt:{ fontSize: 13, color: P.muted, fontWeight: '700' },
+  countryRow:       { flexDirection: 'row', alignItems: 'center', gap: 14, paddingHorizontal: 22, paddingVertical: 15, borderBottomWidth: 1, borderBottomColor: P.dim + '80' },
+  countryRowActive: { backgroundColor: P.peachSoft },
+  countryRowFlag:   { fontSize: 26 },
+  countryRowName:   { flex: 1, fontSize: 15, fontWeight: '600', color: P.charcoal },
+  countryRowDial:   { fontSize: 13, color: P.muted, marginRight: 8 },
+});

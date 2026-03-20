@@ -1,37 +1,17 @@
 // Configuration de l'application
 
+import { COLORS } from '../theme/colors';
+
 // URL de l'API backend
 // En développement, utiliser l'IP locale de votre machine (pas localhost)
 // Exemple: si backend sur http://localhost:5000, utiliser http://192.168.1.X:5000
 export const API_BASE_URL = 'https://kowa-dan-kassoua-backend.onrender.com/api'; // À MODIFIER avec votre IP
 
 // Configuration Socket.IO
-export const SOCKET_URL = 'https://kowa-dan-kassoua-backend.onrender.com/api'; // À MODIFIER avec votre IP
+export const SOCKET_URL = 'https://kowa-dan-kassoua-backend.onrender.com'; // À MODIFIER avec votre IP
 
-// Couleurs de l'app (identique au web)
-export const COLORS = {
-  primary: '#ec5a13',
-  primaryDark: '#d94f0f',
-  secondary: '#f59e0b',
-  success: '#10b981',
-  error: '#ef4444',
-  warning: '#f59e0b',
-  info: '#3b82f6',
-  gray: {
-    50: '#f9fafb',
-    100: '#f3f4f6',
-    200: '#e5e7eb',
-    300: '#d1d5db',
-    400: '#9ca3af',
-    500: '#6b7280',
-    600: '#4b5563',
-    700: '#374151',
-    800: '#1f2937',
-    900: '#111827',
-  },
-  white: '#ffffff',
-  black: '#000000',
-};
+// Couleurs centralisees (source unique)
+export { COLORS };
 
 // Catégories (avec emojis comme sur le web)
 export const CATEGORIES = [

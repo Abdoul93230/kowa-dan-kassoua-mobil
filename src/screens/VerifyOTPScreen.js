@@ -1,488 +1,385 @@
+﻿// ─── VerifyOTPScreen v2 PREMIUM ─ MarketHub Niger ────────────────────────────
+// Vérification OTP — design cohérent, épuré, user-friendly
+
 import React, { useState, useEffect, useRef } from 'react';
 import {
-  View,
-  Text,
-  TextInput,
-  StyleSheet,
-  TouchableOpacity,
-  Alert,
-  ActivityIndicator,
-  KeyboardAvoidingView,
-  Platform,
-  ScrollView,
+  View, Text, TextInput, StyleSheet, TouchableOpacity,
+  ActivityIndicator, KeyboardAvoidingView,
+  Platform, ScrollView, StatusBar, Animated,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Ionicons } from '@expo/vector-icons';
 import { sendOTP, verifyOTP, forgotPassword } from '../api/auth';
+import AlertModal from '../components/AlertModal';
+import { MOBILE_COLORS as P } from '../theme/colors';
 
-// Palette Saharienne
-const P = {
-  terra: '#C1440E',
-  amber: '#E8832A',
-  gold: '#F4A261',
-  brown: '#8B4513',
-  charcoal: '#2C2C2C',
-  sand: '#E9D8B8',
-  cream: '#F5EFE6',
-  dim: '#9B9B9B',
-  muted: '#6B6B6B',
-  white: '#FFFFFF',
-};
-
-/**
- * Écran de vérification OTP
- * Réutilisable pour inscription et réinitialisation de mot de passe
- * 
- * @param {object} route.params
- * @param {string} route.params.phone - Numéro de téléphone au format "+227 12345678"
- * @param {string} route.params.identifier - Email ou téléphone (pour forgot password)
- * @param {string} route.params.type - "register" ou "resetPassword"
- * @param {number} route.params.attemptsRemaining - Tentatives restantes
- * @param {string} route.params.devCode - Code OTP en mode développement
- * @param {object} route.params.formData - Données du formulaire Step 1 (pour register)
- */
 export default function VerifyOTPScreen({ navigation, route }) {
-  const { phone, identifier, type = 'register', attemptsRemaining: initialAttempts = 3, devCode, formData } = route.params || {};
-  
-  const [code, setCode] = useState(['', '', '', '', '', '']);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
-  const [attemptsRemaining, setAttemptsRemaining] = useState(initialAttempts);
-  const [resendCooldown, setResendCooldown] = useState(0);
-  const [devOTPCode, setDevOTPCode] = useState(devCode);
+  const {
+    phone, identifier, type = 'register',
+    attemptsRemaining: initialAttempts = 3,
+    devCode, formData,
+  } = route.params || {};
 
-  // Références pour les inputs
-  const inputRefs = useRef([]);
-
-  const isRegister = type === 'register';
+  const insets = useSafeAreaInsets();
+  const isRegister       = type === 'register';
   const displayIdentifier = phone || identifier;
 
-  // Timer pour le cooldown de renvoi
-  useEffect(() => {
-    if (resendCooldown > 0) {
-      const timer = setTimeout(() => {
-        setResendCooldown(resendCooldown - 1);
-      }, 1000);
-      return () => clearTimeout(timer);
-    }
-  }, [resendCooldown]);
+  const [code,             setCode]             = useState(['', '', '', '', '', '']);
+  const [loading,          setLoading]          = useState(false);
+  const [error,            setError]            = useState('');
+  const [attemptsLeft,     setAttemptsLeft]     = useState(initialAttempts);
+  const [cooldown,         setCooldown]         = useState(0);
+  const [devOTPCode,       setDevOTPCode]       = useState(devCode);
+  const [alert,            setAlert]            = useState({
+    visible: false,
+    type: 'info',
+    title: '',
+    message: '',
+    buttons: [{ text: 'OK', onPress: () => {} }],
+  });
 
-  // Focus automatique sur le premier input au montage
+  const inputRefs = useRef([]);
+
+  // Animations
+  const shakeAnim  = useRef(new Animated.Value(0)).current;
+  const successAnim= useRef(new Animated.Value(1)).current;
+  const fadeAnim   = useRef(new Animated.Value(0)).current;
+
   useEffect(() => {
-    if (inputRefs.current[0]) {
-      setTimeout(() => inputRefs.current[0].focus(), 100);
-    }
+    Animated.timing(fadeAnim, { toValue: 1, duration: 500, useNativeDriver: true }).start();
   }, []);
 
-  /**
-   * Gérer le changement de valeur d'un input
-   */
-  const handleChangeText = (text, index) => {
-    // Accepter seulement les chiffres
-    if (text && !/^\d+$/.test(text)) {
-      return;
-    }
+  // Cooldown timer
+  useEffect(() => {
+    if (cooldown <= 0) return;
+    const t = setTimeout(() => setCooldown(c => c - 1), 1000);
+    return () => clearTimeout(t);
+  }, [cooldown]);
 
+  // Shake animation pour erreur
+  const shakeInputs = () => {
+    shakeAnim.setValue(0);
+    Animated.sequence([
+      Animated.timing(shakeAnim, { toValue: 8,  duration: 60,  useNativeDriver: true }),
+      Animated.timing(shakeAnim, { toValue: -8, duration: 60,  useNativeDriver: true }),
+      Animated.timing(shakeAnim, { toValue: 6,  duration: 60,  useNativeDriver: true }),
+      Animated.timing(shakeAnim, { toValue: -6, duration: 60,  useNativeDriver: true }),
+      Animated.timing(shakeAnim, { toValue: 0,  duration: 60,  useNativeDriver: true }),
+    ]).start();
+  };
+
+  const handleChangeText = (text, index) => {
+    if (text && !/^\d+$/.test(text)) return;
     const newCode = [...code];
     newCode[index] = text;
     setCode(newCode);
     setError('');
-
-    // Auto-focus sur le prochain input
-    if (text && index < 5) {
-      inputRefs.current[index + 1].focus();
-    }
-
-    // Vérifier automatiquement si le code est complet
+    if (text && index < 5) inputRefs.current[index + 1]?.focus();
     if (text && index === 5) {
-      const fullCode = newCode.join('');
-      if (fullCode.length === 6) {
-        handleVerifyOTP(fullCode);
-      }
+      const full = newCode.join('');
+      if (full.length === 6) handleVerify(full);
     }
   };
 
-  /**
-   * Gérer la touche backspace
-   */
   const handleKeyPress = (e, index) => {
-    if (e.nativeEvent.key === 'Backspace' && !code[index] && index > 0) {
-      inputRefs.current[index - 1].focus();
-    }
+    if (e.nativeEvent.key === 'Backspace' && !code[index] && index > 0)
+      inputRefs.current[index - 1]?.focus();
   };
 
-  /**
-   * Vérifier le code OTP
-   */
-  const handleVerifyOTP = async (fullCode = code.join('')) => {
-    if (fullCode.length !== 6) {
-      setError('Veuillez entrer le code à 6 chiffres');
-      return;
-    }
-
+  const handleVerify = async (full = code.join('')) => {
+    if (full.length !== 6) { setError('Entrez le code à 6 chiffres'); return; }
     setLoading(true);
     setError('');
-
     try {
       if (isRegister) {
-        // Vérification pour inscription
-        const result = await verifyOTP(displayIdentifier, fullCode);
-        
+        const result = await verifyOTP(displayIdentifier, full);
         if (result.success && result.data.verified) {
-          // OTP vérifié, naviguer vers la suite de l'inscription (Step 2)
           navigation.replace('RegisterStep2', {
-            phone: displayIdentifier,
-            verified: true,
-            formData: formData, // Passer les données de l'étape 1
+            phone: displayIdentifier, verified: true, formData,
           });
         }
       } else {
-        // Vérification pour réinitialisation mot de passe
         const { verifyResetCode } = await import('../api/auth');
-        const result = await verifyResetCode(displayIdentifier, fullCode);
-        
+        const result = await verifyResetCode(displayIdentifier, full);
         if (result.success) {
-          // Code vérifié, naviguer vers l'écran de nouveau mot de passe
-          navigation.replace('ResetPassword', {
-            identifier: displayIdentifier,
-            code: fullCode,
-          });
+          navigation.replace('ResetPassword', { identifier: displayIdentifier, code: full });
         }
       }
     } catch (err) {
-      console.error('❌ Erreur vérification OTP:', err);
       setError(err.message || 'Code invalide ou expiré');
-      
-      // Réinitialiser le code
       setCode(['', '', '', '', '', '']);
-      if (inputRefs.current[0]) {
-        inputRefs.current[0].focus();
-      }
+      inputRefs.current[0]?.focus();
+      shakeInputs();
     } finally {
       setLoading(false);
     }
   };
 
-  /**
-   * Renvoyer le code OTP
-   */
-  const handleResendOTP = async () => {
-    if (resendCooldown > 0) {
-      return;
-    }
-
-    if (attemptsRemaining <= 0) {
-      Alert.alert(
-        'Limite atteinte',
-        'Vous avez atteint le nombre maximum de tentatives. Veuillez réessayer dans 15 minutes.'
-      );
-      return;
-    }
-
+  const handleResend = async () => {
+    if (cooldown > 0 || attemptsLeft <= 0) return;
     setLoading(true);
     setError('');
-
     try {
-      if (isRegister) {
-        // Renvoyer OTP pour inscription
-        const result = await sendOTP(displayIdentifier);
-        
-        if (result.success) {
-          Alert.alert('Code renvoyé', 'Un nouveau code a été envoyé à votre téléphone');
-          setAttemptsRemaining(result.data.attemptsRemaining || attemptsRemaining - 1);
-          setResendCooldown(60); // 60 secondes de cooldown
-          
-          // Afficher le code en mode dev
-          if (result.data.devOTPCode) {
-            setDevOTPCode(result.data.devOTPCode);
-          }
-        }
-      } else {
-        // Renvoyer OTP pour réinitialisation
-        const result = await forgotPassword(displayIdentifier);
-        
-        if (result.success) {
-          Alert.alert('Code renvoyé', 'Un nouveau code a été envoyé');
-          setResendCooldown(60);
-          
-          // Afficher le code en mode dev
-          if (result.devCode) {
-            setDevOTPCode(result.devCode);
-          }
-        }
+      const result = isRegister
+        ? await sendOTP(displayIdentifier)
+        : await forgotPassword(displayIdentifier);
+      if (result.success) {
+        setAlert({
+          visible: true,
+          type: 'success',
+          title: 'Code envoyé ✓',
+          message: 'Un nouveau code a été envoyé',
+          buttons: [{ text: 'OK', onPress: () => {} }],
+        });
+        setAttemptsLeft(result.data?.attemptsRemaining ?? attemptsLeft - 1);
+        setCooldown(60);
+        const nc = result.devOTP || result.data?.devOTP || result.devCode;
+        if (nc) setDevOTPCode(nc);
       }
     } catch (err) {
-      console.error('❌ Erreur renvoi OTP:', err);
-      setError(err.message || 'Erreur lors du renvoi du code');
+      setError(err.message || 'Erreur lors du renvoi');
     } finally {
       setLoading(false);
     }
   };
+
+  const isComplete = code.join('').length === 6;
 
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <KeyboardAvoidingView
+      style={s.container}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'padding'}
+    >
+      <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
+
+      {/* ── HEADER ardoise ─────────────────────────────────────────────── */}
       <LinearGradient
-        colors={[P.cream, P.sand, P.gold]}
-        style={styles.gradient}
+        colors={['#2d3748', '#374151']}
+        style={[s.header, { paddingTop: (insets.top || 0) + 6 }]}
       >
-        <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-          style={styles.container}
-        >
-          <ScrollView contentContainerStyle={styles.scrollContent}>
-            {/* Header */}
-            <View style={styles.header}>
-              <TouchableOpacity
-                onPress={() => navigation.goBack()}
-                style={styles.backButton}
-              >
-                <Ionicons name="arrow-back" size={24} color={P.charcoal} />
-              </TouchableOpacity>
-            </View>
+        <View style={s.headerAccent} />
+        <View style={s.headerRow}>
+          <TouchableOpacity
+            style={s.backBtn}
+            onPress={() => navigation.goBack()}
+            activeOpacity={0.8}
+          >
+            <Text style={s.backBtnTxt}>←</Text>
+          </TouchableOpacity>
 
-            {/* Content */}
-            <View style={styles.content}>
-              {/* Icon */}
-              <View style={styles.iconContainer}>
-                <Ionicons name="mail-outline" size={60} color={P.terra} />
-              </View>
+          <View style={s.headerCenter}>
+            <LinearGradient colors={[P.orange500, P.orange700]} style={s.logoMini}>
+              <Text style={s.logoMiniTxt}>M</Text>
+            </LinearGradient>
+            <Text style={s.headerBrand}>MarketHub</Text>
+          </View>
 
-              {/* Title */}
-              <Text style={styles.title}>Vérification</Text>
-              <Text style={styles.subtitle}>
-                Entrez le code à 6 chiffres envoyé au {'\n'}
-                <Text style={styles.phone}>{displayIdentifier}</Text>
-              </Text>
-
-              {/* Dev Code (visible seulement en développement) */}
-              {devOTPCode && (
-                <View style={styles.devCodeContainer}>
-                  <Text style={styles.devCodeLabel}>🔧 Mode Dev - Code OTP:</Text>
-                  <Text style={styles.devCodeText}>{devOTPCode}</Text>
-                </View>
-              )}
-
-              {/* Code Inputs */}
-              <View style={styles.codeContainer}>
-                {code.map((digit, index) => (
-                  <TextInput
-                    key={index}
-                    ref={(ref) => (inputRefs.current[index] = ref)}
-                    style={[
-                      styles.codeInput,
-                      digit && styles.codeInputFilled,
-                      error && styles.codeInputError,
-                    ]}
-                    value={digit}
-                    onChangeText={(text) => handleChangeText(text, index)}
-                    onKeyPress={(e) => handleKeyPress(e, index)}
-                    keyboardType="number-pad"
-                    maxLength={1}
-                    selectTextOnFocus
-                    editable={!loading}
-                  />
-                ))}
-              </View>
-
-              {/* Error */}
-              {error ? (
-                <View style={styles.errorContainer}>
-                  <Ionicons name="alert-circle" size={16} color={P.terra} />
-                  <Text style={styles.errorText}>{error}</Text>
-                </View>
-              ) : null}
-
-              {/* Attempts Remaining */}
-              {attemptsRemaining < 3 && (
-                <Text style={styles.attemptsText}>
-                  {attemptsRemaining} {attemptsRemaining > 1 ? 'tentatives restantes' : 'tentative restante'}
-                </Text>
-              )}
-
-              {/* Verify Button */}
-              <TouchableOpacity
-                style={[styles.button, loading && styles.buttonDisabled]}
-                onPress={() => handleVerifyOTP()}
-                disabled={loading || code.join('').length !== 6}
-              >
-                {loading ? (
-                  <ActivityIndicator color={P.white} />
-                ) : (
-                  <Text style={styles.buttonText}>Vérifier</Text>
-                )}
-              </TouchableOpacity>
-
-              {/* Resend Code */}
-              <View style={styles.resendContainer}>
-                <Text style={styles.resendLabel}>Vous n'avez pas reçu le code ? </Text>
-                <TouchableOpacity
-                  onPress={handleResendOTP}
-                  disabled={loading || resendCooldown > 0}
-                >
-                  <Text
-                    style={[
-                      styles.resendButton,
-                      (loading || resendCooldown > 0) && styles.resendButtonDisabled,
-                    ]}
-                  >
-                    {resendCooldown > 0 ? `Renvoyer (${resendCooldown}s)` : 'Renvoyer'}
-                  </Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-          </ScrollView>
-        </KeyboardAvoidingView>
+          <View style={{ width: 38 }} />
+        </View>
+        <LinearGradient
+          colors={['transparent', P.terra, 'transparent']}
+          start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
+          style={s.headerGlow}
+        />
       </LinearGradient>
-    </SafeAreaView>
+
+      {/* ── CONTENU ────────────────────────────────────────────────────── */}
+      <ScrollView
+        style={{ flex: 1 }}
+        contentContainerStyle={s.scroll}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+      >
+        <Animated.View style={{ opacity: fadeAnim }}>
+
+          {/* Icône + titre */}
+          <View style={s.hero}>
+            <View style={s.heroIconWrap}>
+              <LinearGradient colors={[P.orange500, P.orange700]} style={s.heroIconGrad}>
+                <Text style={s.heroIconTxt}>✉</Text>
+              </LinearGradient>
+              <View style={s.heroRing} />
+            </View>
+            <Text style={s.heroTitle}>Vérification</Text>
+            <Text style={s.heroSub}>
+              Code envoyé au{'\n'}
+              <Text style={s.heroPhone}>{displayIdentifier}</Text>
+            </Text>
+          </View>
+
+          {/* Badge dev OTP */}
+          {devOTPCode ? (
+            <View style={s.devBadge}>
+              <Text style={s.devBadgeEye}>🔧</Text>
+              <View style={{ flex: 1 }}>
+                <Text style={s.devBadgeLabel}>Mode développement</Text>
+                <Text style={s.devBadgeCode}>{devOTPCode}</Text>
+              </View>
+            </View>
+          ) : null}
+
+          {/* Inputs OTP */}
+          <Animated.View style={[s.otpRow, { transform: [{ translateX: shakeAnim }] }]}>
+            {code.map((digit, i) => (
+              <TextInput
+                key={i}
+                ref={r => { inputRefs.current[i] = r; }}
+                style={[
+                  s.otpInput,
+                  digit && s.otpInputFilled,
+                  error && s.otpInputError,
+                  i === code.filter(Boolean).length && !digit && s.otpInputActive,
+                ]}
+                value={digit}
+                onChangeText={t => handleChangeText(t, i)}
+                onKeyPress={e => handleKeyPress(e, i)}
+                keyboardType="number-pad"
+                maxLength={1}
+                selectTextOnFocus
+                editable={!loading}
+              />
+            ))}
+          </Animated.View>
+
+          {/* Erreur */}
+          {error ? (
+            <View style={s.errorWrap}>
+              <Text style={s.errorTxt}>⚠ {error}</Text>
+            </View>
+          ) : null}
+
+          {/* Tentatives restantes */}
+          {attemptsLeft < 3 && attemptsLeft > 0 ? (
+            <View style={s.attemptsBadge}>
+              <Text style={s.attemptsTxt}>
+                ⚠ {attemptsLeft} tentative{attemptsLeft > 1 ? 's' : ''} restante{attemptsLeft > 1 ? 's' : ''}
+              </Text>
+            </View>
+          ) : null}
+
+          {/* Bouton vérifier */}
+          <TouchableOpacity
+            onPress={() => handleVerify()}
+            disabled={loading || !isComplete}
+            activeOpacity={0.85}
+            style={[s.verifyBtn, (!isComplete && !loading) && s.verifyBtnDisabled]}
+          >
+            <LinearGradient
+              colors={isComplete ? [P.orange500, P.orange700] : [P.muted, P.muted]}
+              start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
+              style={s.verifyBtnGrad}
+            >
+              {loading
+                ? <ActivityIndicator color={P.white} />
+                : <Text style={s.verifyBtnTxt}>
+                    {isComplete ? '✓ Vérifier le code' : 'Entrez les 6 chiffres'}
+                  </Text>
+              }
+            </LinearGradient>
+          </TouchableOpacity>
+
+          {/* Renvoyer */}
+          <View style={s.resendRow}>
+            <Text style={s.resendTxt}>Pas reçu le code ? </Text>
+            <TouchableOpacity
+              onPress={handleResend}
+              disabled={loading || cooldown > 0 || attemptsLeft <= 0}
+              activeOpacity={0.7}
+            >
+              <Text style={[
+                s.resendLink,
+                (cooldown > 0 || attemptsLeft <= 0) && s.resendLinkDisabled,
+              ]}>
+                {cooldown > 0 ? `Renvoyer (${cooldown}s)` : 'Renvoyer →'}
+              </Text>
+            </TouchableOpacity>
+          </View>
+
+        </Animated.View>
+      </ScrollView>
+
+      <AlertModal
+        visible={alert.visible}
+        type={alert.type}
+        title={alert.title}
+        message={alert.message}
+        buttons={alert.buttons}
+        onDismiss={() => setAlert({ ...alert, visible: false })}
+      />
+    </KeyboardAvoidingView>
   );
 }
 
-const styles = StyleSheet.create({
-  safeArea: {
-    flex: 1,
-    backgroundColor: P.cream,
+// ─── STYLES ───────────────────────────────────────────────────────────────────
+const s = StyleSheet.create({
+  container: { flex: 1, backgroundColor: P.surface },
+
+  // Header
+  header:       { paddingHorizontal: 18, paddingBottom: 14, overflow: 'hidden', position: 'relative' },
+  headerAccent: { position: 'absolute', top: 0, left: 0, right: 0, height: 3, backgroundColor: P.terra },
+  headerRow:    { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 },
+  backBtn:      { width: 38, height: 38, borderRadius: 19, backgroundColor: 'rgba(255,255,255,0.1)', justifyContent: 'center', alignItems: 'center' },
+  backBtnTxt:   { fontSize: 18, fontWeight: '700', color: P.white },
+  headerCenter: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  logoMini:     { width: 28, height: 28, borderRadius: 8, justifyContent: 'center', alignItems: 'center' },
+  logoMiniTxt:  { fontSize: 15, fontWeight: '900', color: P.white },
+  headerBrand:  { fontSize: 16, fontWeight: '800', color: P.white },
+  headerGlow:   { height: 1.5 },
+
+  // Scroll
+  scroll: { paddingHorizontal: 24, paddingTop: 32, paddingBottom: 40 },
+
+  // Hero
+  hero:         { alignItems: 'center', marginBottom: 32 },
+  heroIconWrap: { position: 'relative', marginBottom: 20 },
+  heroIconGrad: { width: 80, height: 80, borderRadius: 24, justifyContent: 'center', alignItems: 'center', shadowColor: P.terra, shadowOpacity: 0.35, shadowOffset: { width: 0, height: 6 }, shadowRadius: 16, elevation: 10 },
+  heroIconTxt:  { fontSize: 36, color: P.white },
+  heroRing:     { position: 'absolute', top: -8, left: -8, right: -8, bottom: -8, borderRadius: 32, borderWidth: 1.5, borderColor: 'rgba(236,90,19,0.25)' },
+  heroTitle:    { fontSize: 28, fontWeight: '900', color: P.charcoal, letterSpacing: -0.5, marginBottom: 10 },
+  heroSub:      { fontSize: 15, color: P.muted, textAlign: 'center', lineHeight: 22 },
+  heroPhone:    { fontWeight: '800', color: P.terra },
+
+  // Dev badge
+  devBadge:      { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: P.amberSoft, borderWidth: 1, borderColor: P.yellow, borderRadius: 14, padding: 14, marginBottom: 24 },
+  devBadgeEye:   { fontSize: 22 },
+  devBadgeLabel: { fontSize: 11, fontWeight: '600', color: P.amberDark, marginBottom: 4 },
+  devBadgeCode:  { fontSize: 26, fontWeight: '900', color: P.terra, letterSpacing: 6 },
+
+  // OTP inputs
+  otpRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 20 },
+  otpInput: {
+    width: 48, height: 58,
+    borderWidth: 2, borderColor: P.dim,
+    borderRadius: 14, backgroundColor: P.white,
+    textAlign: 'center', fontSize: 24, fontWeight: '900', color: P.charcoal,
+    shadowColor: P.charcoal, shadowOpacity: 0.04,
+    shadowOffset: { width: 0, height: 2 }, shadowRadius: 4, elevation: 1,
   },
-  gradient: {
-    flex: 1,
+  otpInputActive: { borderColor: P.terra, borderWidth: 2.5 },
+  otpInputFilled: {
+    borderColor: P.terra, backgroundColor: P.peachSoft,
+    shadowColor: P.terra, shadowOpacity: 0.15,
+    shadowOffset: { width: 0, height: 3 }, shadowRadius: 8, elevation: 3,
   },
-  container: {
-    flex: 1,
-  },
-  scrollContent: {
-    flexGrow: 1,
-  },
-  header: {
-    paddingHorizontal: 16,
-    paddingTop: 8,
-  },
-  backButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: P.white,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  content: {
-    flex: 1,
-    paddingHorizontal: 24,
-    paddingTop: 40,
-  },
-  iconContainer: {
-    alignItems: 'center',
-    marginBottom: 24,
-  },
-  title: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    color: P.charcoal,
-    textAlign: 'center',
-    marginBottom: 12,
-  },
-  subtitle: {
-    fontSize: 16,
-    color: P.muted,
-    textAlign: 'center',
-    marginBottom: 32,
-  },
-  phone: {
-    fontWeight: 'bold',
-    color: P.terra,
-  },
-  devCodeContainer: {
-    backgroundColor: '#FFF9E6',
-    borderWidth: 2,
-    borderColor: '#FFEB3B',
-    borderRadius: 8,
-    padding: 12,
-    marginBottom: 24,
-    alignItems: 'center',
-  },
-  devCodeLabel: {
-    fontSize: 12,
-    color: P.muted,
-    marginBottom: 4,
-  },
-  devCodeText: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: P.terra,
-    letterSpacing: 4,
-  },
-  codeContainer: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 24,
-  },
-  codeInput: {
-    width: 48,
-    height: 56,
-    borderWidth: 2,
-    borderColor: P.dim,
-    borderRadius: 12,
-    backgroundColor: P.white,
-    textAlign: 'center',
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: P.charcoal,
-  },
-  codeInputFilled: {
-    borderColor: P.terra,
-    backgroundColor: P.cream,
-  },
-  codeInputError: {
-    borderColor: P.terra,
-  },
-  errorContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 16,
-    paddingHorizontal: 12,
-  },
-  errorText: {
-    color: P.terra,
-    fontSize: 14,
-    marginLeft: 8,
-    flex: 1,
-  },
-  attemptsText: {
-    fontSize: 14,
-    color: P.amber,
-    textAlign: 'center',
-    marginBottom: 16,
-    fontWeight: '600',
-  },
-  button: {
-    backgroundColor: P.terra,
-    borderRadius: 12,
-    paddingVertical: 16,
-    alignItems: 'center',
-    marginBottom: 24,
-  },
-  buttonDisabled: {
-    backgroundColor: P.dim,
-  },
-  buttonText: {
-    color: P.white,
-    fontSize: 18,
-    fontWeight: 'bold',
-  },
-  resendContainer: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  resendLabel: {
-    fontSize: 14,
-    color: P.muted,
-  },
-  resendButton: {
-    fontSize: 14,
-    color: P.terra,
-    fontWeight: 'bold',
-  },
-  resendButtonDisabled: {
-    color: P.dim,
-  },
+  otpInputError:  { borderColor: P.error, backgroundColor: P.errorSoft },
+
+  // Erreur
+  errorWrap: { backgroundColor: P.errorSoft, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 10, borderWidth: 1, borderColor: P.errorBorder, marginBottom: 16 },
+  errorTxt:  { fontSize: 13, color: P.error, fontWeight: '600' },
+
+  // Tentatives
+  attemptsBadge: { backgroundColor: P.yellowSoft, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 9, borderWidth: 1, borderColor: 'rgba(245,158,11,0.3)', marginBottom: 16, alignItems: 'center' },
+  attemptsTxt:   { fontSize: 13, fontWeight: '700', color: P.amberDark },
+
+  // Bouton vérifier
+  verifyBtn:         { borderRadius: 14, overflow: 'hidden', marginBottom: 20, shadowColor: P.terra, shadowOpacity: 0.25, shadowOffset: { width: 0, height: 4 }, shadowRadius: 10, elevation: 6 },
+  verifyBtnDisabled: { shadowOpacity: 0 },
+  verifyBtnGrad:     { paddingVertical: 16, alignItems: 'center' },
+  verifyBtnTxt:      { fontSize: 16, fontWeight: '800', color: P.white, letterSpacing: 0.2 },
+
+  // Renvoyer
+  resendRow:        { flexDirection: 'row', justifyContent: 'center', alignItems: 'center' },
+  resendTxt:        { fontSize: 14, color: P.muted },
+  resendLink:       { fontSize: 14, fontWeight: '700', color: P.terra },
+  resendLinkDisabled:{ color: P.muted },
 });

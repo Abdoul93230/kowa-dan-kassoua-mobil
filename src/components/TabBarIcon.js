@@ -1,31 +1,18 @@
-// ─── TabBarIcon — MarketHub Niger ─────────────────────────────────────────────
-// Barre de navigation époustouflante — palette terracotta/or/sable
+﻿// ─── TabBarIcon — MarketHub Niger ─────────────────────────────────────────────
+// Version premium modérée — cohérente avec l'app
 
 import React, { useEffect, useRef } from 'react';
 import { View, Text, StyleSheet, Animated } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
+import { MOBILE_COLORS as P } from '../theme/colors';
 
-// ─── PALETTE (en sync avec ProductsListScreen) ────────────────────────────────
-const P = {
-  terra:    '#C1440E',
-  amber:    '#E8832A',
-  gold:     '#F0A500',
-  brown:    '#3D1C02',
-  cream:    '#FDF6EC',
-  sand:     '#F5E6C8',
-  muted:    '#9C8872',
-  charcoal: '#1A1210',
-  white:    '#FFFFFF',
-  error:    '#EF4444',
-};
-
-// ─── ICÔNES SVG-like via texte enrichi ───────────────────────────────────────
+// ─── ICÔNES ───────────────────────────────────────────────────────────────────
 const ICONS = {
-  home:      { active: '⌂',  inactive: '⌂'  },
-  favorites: { active: '♥',  inactive: '♡'  },
-  publish:   { active: '+',  inactive: '+'  },
-  messages:  { active: '✉',  inactive: '✉'  },
-  profile:   { active: '◉',  inactive: '○'  },
+  home:      { active: '⌂', inactive: '⌂' },
+  favorites: { active: '♥', inactive: '♡' },
+  publish:   { active: '+', inactive: '+' },
+  messages:  { active: '✉', inactive: '✉' },
+  profile:   { active: '◉', inactive: '○' },
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -35,20 +22,12 @@ function AnimatedBadge({ count }) {
   const scale = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
-    if (count > 0) {
-      Animated.spring(scale, {
-        toValue: 1,
-        tension: 180,
-        friction: 8,
-        useNativeDriver: true,
-      }).start();
-    } else {
-      Animated.timing(scale, {
-        toValue: 0,
-        duration: 150,
-        useNativeDriver: true,
-      }).start();
-    }
+    Animated.spring(scale, {
+      toValue: count > 0 ? 1 : 0,
+      tension: 180,
+      friction: 8,
+      useNativeDriver: true,
+    }).start();
   }, [count]);
 
   if (!count || count <= 0) return null;
@@ -61,36 +40,38 @@ function AnimatedBadge({ count }) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// BOUTON PUBLIER — flottant au centre, spectaculaire
+// BOUTON PUBLIER — modéré mais impactant
 // ─────────────────────────────────────────────────────────────────────────────
 function PublishButton({ focused }) {
-  const scale    = useRef(new Animated.Value(1)).current;
-  const rotate   = useRef(new Animated.Value(0)).current;
-  const glow     = useRef(new Animated.Value(0)).current;
+  const scale  = useRef(new Animated.Value(0.85)).current;
+  const rotate = useRef(new Animated.Value(0)).current;
+  const glow   = useRef(new Animated.Value(0.4)).current;
 
   // Animation d'entrée au montage
   useEffect(() => {
     Animated.spring(scale, {
       toValue: 1,
-      tension: 120,
+      tension: 100,
       friction: 7,
       useNativeDriver: true,
     }).start();
   }, []);
 
-  // Rotation + glow quand focused
+  // Rotation du + et intensité du glow selon focus
   useEffect(() => {
-    if (focused) {
-      Animated.parallel([
-        Animated.spring(rotate, { toValue: 1, tension: 140, friction: 6, useNativeDriver: true }),
-        Animated.timing(glow,   { toValue: 1, duration: 250, useNativeDriver: true }),
-      ]).start();
-    } else {
-      Animated.parallel([
-        Animated.spring(rotate, { toValue: 0, tension: 140, friction: 6, useNativeDriver: true }),
-        Animated.timing(glow,   { toValue: 0, duration: 200, useNativeDriver: true }),
-      ]).start();
-    }
+    Animated.parallel([
+      Animated.spring(rotate, {
+        toValue: focused ? 1 : 0,
+        tension: 140,
+        friction: 7,
+        useNativeDriver: true,
+      }),
+      Animated.timing(glow, {
+        toValue: focused ? 1 : 0.4,
+        duration: 250,
+        useNativeDriver: true,
+      }),
+    ]).start();
   }, [focused]);
 
   const spin = rotate.interpolate({
@@ -98,29 +79,23 @@ function PublishButton({ focused }) {
     outputRange: ['0deg', '45deg'],
   });
 
-  const glowOpacity = glow.interpolate({
-    inputRange:  [0, 1],
-    outputRange: [0, 0.5],
-  });
-
   return (
     <View style={s.publishWrap}>
-      {/* Halo extérieur */}
-      <Animated.View style={[s.publishHalo, { opacity: glowOpacity }]} />
-
-      {/* Anneau décoratif */}
-      <View style={s.publishRing} />
+      {/* Halo orange — toujours présent, plus fort si focused */}
+      <Animated.View style={[s.publishHalo, { opacity: glow }]} />
 
       {/* Bouton principal */}
       <Animated.View style={[s.publishOuter, { transform: [{ scale }] }]}>
         <LinearGradient
           colors={focused
-            ? [P.amber, P.terra, '#8A2400']
-            : [P.terra, P.amber]}
+            ? [P.amber, P.terra, P.terraDark]
+            : [P.orange500, P.orange700]}
           start={{ x: 0, y: 0 }}
           end={{ x: 1, y: 1 }}
           style={s.publishGrad}
         >
+          {/* Reflet subtil en haut */}
+          <View style={s.publishShine} />
           <Animated.Text style={[s.publishIcon, { transform: [{ rotate: spin }] }]}>
             +
           </Animated.Text>
@@ -128,7 +103,7 @@ function PublishButton({ focused }) {
       </Animated.View>
 
       {/* Label */}
-      <Text style={[s.publishLabel, focused && { color: P.terra, fontWeight: '800' }]}>
+      <Text style={[s.publishLabel, focused && s.publishLabelActive]}>
         Publier
       </Text>
     </View>
@@ -138,16 +113,30 @@ function PublishButton({ focused }) {
 // ─────────────────────────────────────────────────────────────────────────────
 // ICÔNE STANDARD
 // ─────────────────────────────────────────────────────────────────────────────
-function StandardIcon({ name, focused, color, badge }) {
-  const scale     = useRef(new Animated.Value(1)).current;
-  const bgOpacity = useRef(new Animated.Value(focused ? 1 : 0)).current;
-  const dotScale  = useRef(new Animated.Value(focused ? 1 : 0)).current;
+function StandardIcon({ name, focused, badge }) {
+  const scale    = useRef(new Animated.Value(1)).current;
+  const pillAnim = useRef(new Animated.Value(focused ? 1 : 0)).current;
+  const dotScale = useRef(new Animated.Value(focused ? 1 : 0)).current;
 
   useEffect(() => {
     Animated.parallel([
-      Animated.spring(scale,     { toValue: focused ? 1.12 : 1, tension: 180, friction: 7, useNativeDriver: true }),
-      Animated.timing(bgOpacity, { toValue: focused ? 1 : 0,    duration: 200, useNativeDriver: true }),
-      Animated.spring(dotScale,  { toValue: focused ? 1 : 0,    tension: 200, friction: 8, useNativeDriver: true }),
+      Animated.spring(scale, {
+        toValue: focused ? 1.1 : 1,
+        tension: 180,
+        friction: 8,
+        useNativeDriver: true,
+      }),
+      Animated.timing(pillAnim, {
+        toValue: focused ? 1 : 0,
+        duration: 200,
+        useNativeDriver: true,
+      }),
+      Animated.spring(dotScale, {
+        toValue: focused ? 1 : 0,
+        tension: 200,
+        friction: 8,
+        useNativeDriver: true,
+      }),
     ]).start();
   }, [focused]);
 
@@ -155,11 +144,12 @@ function StandardIcon({ name, focused, color, badge }) {
 
   return (
     <View style={s.iconWrap}>
-      {/* Fond pill actif */}
-      <Animated.View style={[s.iconPill, { opacity: bgOpacity }]}>
+      {/* Pill active */}
+      <Animated.View style={[s.iconPill, { opacity: pillAnim }]}>
         <LinearGradient
-          colors={[P.terra + '22', P.amber + '11']}
-          start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
+          colors={['rgba(236,90,19,0.18)', 'rgba(255,168,123,0.10)']}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
           style={StyleSheet.absoluteFill}
         />
       </Animated.View>
@@ -169,16 +159,16 @@ function StandardIcon({ name, focused, color, badge }) {
         style={[
           s.icon,
           {
-            color: focused ? P.terra : P.muted,
+            color: focused ? P.amber : 'rgba(255,255,255,0.4)',
             transform: [{ scale }],
-            fontSize: focused ? 23 : 21,
+            fontSize: focused ? 22 : 20,
           },
         ]}
       >
         {focused ? icon.active : icon.inactive}
       </Animated.Text>
 
-      {/* Point indicateur sous l'icône */}
+      {/* Point indicateur */}
       <Animated.View style={[s.dot, { transform: [{ scale: dotScale }] }]} />
 
       {/* Badge */}
@@ -191,18 +181,18 @@ function StandardIcon({ name, focused, color, badge }) {
 // EXPORT PRINCIPAL
 // ─────────────────────────────────────────────────────────────────────────────
 export function TabBarIcon({ name, focused, color, badge }) {
-  if (name === 'publish') {
-    return <PublishButton focused={focused} />;
-  }
+  if (name === 'publish') return <PublishButton focused={focused} />;
   return <StandardIcon name={name} focused={focused} color={color} badge={badge} />;
 }
 
-// ─── STYLES ───────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// STYLES
+// ─────────────────────────────────────────────────────────────────────────────
 const s = StyleSheet.create({
 
   // ── Icône standard ──────────────────────────────────────────────────────────
   iconWrap: {
-    width: 46,
+    width: 50,
     height: 44,
     justifyContent: 'center',
     alignItems: 'center',
@@ -211,47 +201,54 @@ const s = StyleSheet.create({
   iconPill: {
     position: 'absolute',
     width: 44,
-    height: 32,
-    borderRadius: 16,
+    height: 28,
+    borderRadius: 14,
     overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: 'rgba(236,90,19,0.22)',
   },
   icon: {
     fontWeight: '400',
     lineHeight: 26,
-    marginBottom: 4,
+    marginBottom: 2,
   },
   dot: {
     position: 'absolute',
     bottom: 2,
-    width: 5,
-    height: 5,
-    borderRadius: 2.5,
-    backgroundColor: P.terra,
+    width: 4,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: P.amber,
+    shadowColor: P.amber,
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.8,
+    shadowRadius: 3,
+    elevation: 2,
   },
 
-  // ── Badge ───────────────────────────────────────────────────────────────────
+  // ── Badge ────────────────────────────────────────────────────────────────────
   badge: {
     position: 'absolute',
-    top: 0,
+    top: 1,
     right: 2,
     backgroundColor: P.error,
-    borderRadius: 10,
-    minWidth: 18,
-    height: 18,
+    borderRadius: 9,
+    minWidth: 16,
+    height: 16,
     justifyContent: 'center',
     alignItems: 'center',
-    paddingHorizontal: 4,
-    borderWidth: 2,
-    borderColor: P.cream,
+    paddingHorizontal: 3,
+    borderWidth: 1.5,
+    borderColor: '#111827',
     shadowColor: P.error,
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.5,
     shadowRadius: 4,
-    elevation: 5,
+    elevation: 4,
   },
   badgeTxt: {
     color: P.white,
-    fontSize: 9,
+    fontSize: 8,
     fontWeight: '900',
     letterSpacing: 0.2,
   },
@@ -260,71 +257,67 @@ const s = StyleSheet.create({
   publishWrap: {
     alignItems: 'center',
     position: 'absolute',
-    top: -28,
-    width: 72,
+    top: -26,
+    width: 70,
   },
-
-  // Halo lumineux derrière le bouton
   publishHalo: {
     position: 'absolute',
-    top: -8,
-    width: 80,
-    height: 80,
-    borderRadius: 40,
+    top: -6,
+    width: 72,
+    height: 72,
+    borderRadius: 36,
     backgroundColor: P.terra,
     shadowColor: P.terra,
     shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.6,
-    shadowRadius: 20,
+    shadowOpacity: 0.5,
+    shadowRadius: 16,
     elevation: 0,
   },
-
-  // Anneau décoratif
-  publishRing: {
-    position: 'absolute',
-    top: -6,
-    width: 76,
-    height: 76,
-    borderRadius: 38,
-    borderWidth: 2,
-    borderColor: P.gold + '55',
-    borderStyle: 'dashed',
-  },
-
-  // Bouton principal
   publishOuter: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
+    width: 58,
+    height: 58,
+    borderRadius: 29,
     overflow: 'hidden',
     shadowColor: P.terra,
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.45,
-    shadowRadius: 16,
-    elevation: 14,
-    // Bordure crème
-    borderWidth: 3,
-    borderColor: P.cream,
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.4,
+    shadowRadius: 12,
+    elevation: 12,
+    borderWidth: 2.5,
+    borderColor: '#111827',
   },
   publishGrad: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
+    position: 'relative',
+  },
+  publishShine: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    height: '40%',
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    borderBottomLeftRadius: 28,
+    borderBottomRightRadius: 28,
   },
   publishIcon: {
-    fontSize: 34,
+    fontSize: 30,
     fontWeight: '300',
     color: P.white,
-    lineHeight: 38,
+    lineHeight: 34,
     marginTop: 2,
   },
-
-  // Label sous le bouton
   publishLabel: {
     fontSize: 10,
-    fontWeight: '700',
-    color: P.muted,
+    fontWeight: '600',
+    color: 'rgba(255,255,255,0.38)',
     marginTop: 6,
     letterSpacing: 0.3,
+  },
+  publishLabelActive: {
+    color: P.amber,
+    fontWeight: '700',
   },
 });

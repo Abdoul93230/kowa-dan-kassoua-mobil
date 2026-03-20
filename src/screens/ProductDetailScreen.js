@@ -1,6 +1,5 @@
-// ─── ProductDetailScreen v2 — MarketHub Niger ────────────────────────────────
-// Design luxury editorial : carousel immersif, animations staggerées,
-// footer glassmorphism, header transparent → opaque au scroll
+﻿// ─── ProductDetailScreen v3 PREMIUM ─ MarketHub Niger ────────────────────────
+// Design irrésistible — sombre, impactant, cohérent avec l'app
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
@@ -11,129 +10,90 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from 'expo-blur';
 import { apiClient } from '../api/auth';
+import { checkFavorite, toggleFavorite } from '../api/favorites';
+import { useAuth } from '../contexts/AuthContext';
+import AlertModal from '../components/AlertModal';
+import { MOBILE_COLORS as P } from '../theme/colors';
 
 const { width, height } = Dimensions.get('window');
-const CAROUSEL_H = height * 0.48;
+const HERO_H = height * 0.52;
 
-// ─── PALETTE ──────────────────────────────────────────────────────────────────
-const P = {
-  terra:    '#C1440E',
-  amber:    '#E8832A',
-  gold:     '#F0A500',
-  brown:    '#3D1C02',
-  charcoal: '#1A1210',
-  cream:    '#FDF6EC',
-  sand:     '#F5E6C8',
-  surface:  '#FFFAF3',
-  muted:    '#9C8872',
-  dim:      'rgba(61,28,2,0.07)',
-  white:    '#FFFFFF',
-  green:    '#22C55E',
-};
-
+// ─── HELPERS ──────────────────────────────────────────────────────────────────
 const getCityName = (loc) => loc ? loc.split(',')[0].trim() : 'Niger';
 const getInitials = (name) => {
   if (!name) return '??';
-  const p = name.split(' ');
+  const p = name.trim().split(' ');
   return p.length >= 2 ? (p[0][0] + p[1][0]).toUpperCase() : name.substring(0, 2).toUpperCase();
 };
 
-// ─────────────────────────────────────────────────────────────────────────────
-// MICRO-ANIMATIONS UTILITAIRES
-// ─────────────────────────────────────────────────────────────────────────────
-function useSpringPress(config = {}) {
+// ─── SPRING PRESS HOOK ────────────────────────────────────────────────────────
+function useSpringPress() {
   const scale = useRef(new Animated.Value(1)).current;
   return {
     scale,
-    onPressIn:  () => Animated.spring(scale, { toValue: 0.94, useNativeDriver: true, speed: 35, ...config }).start(),
-    onPressOut: () => Animated.spring(scale, { toValue: 1,    useNativeDriver: true, speed: 35, ...config }).start(),
+    onPressIn:  () => Animated.spring(scale, { toValue: 0.95, useNativeDriver: true, speed: 40 }).start(),
+    onPressOut: () => Animated.spring(scale, { toValue: 1,    useNativeDriver: true, speed: 40 }).start(),
   };
 }
 
-function useStaggerEntrance(count, delay = 80) {
-  const anims = useRef(Array.from({ length: count }, () => new Animated.Value(0))).current;
-  useEffect(() => {
-    Animated.stagger(delay,
-      anims.map(a => Animated.spring(a, { toValue: 1, tension: 70, friction: 10, useNativeDriver: true }))
-    ).start();
-  }, []);
-  return anims;
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
-// CAROUSEL IMAGES — plein écran avec parallaxe léger
+// CAROUSEL IMAGES — immersif plein écran
 // ─────────────────────────────────────────────────────────────────────────────
 function ImageCarousel({ images }) {
   const [idx, setIdx] = useState(0);
   const scrollX = useRef(new Animated.Value(0)).current;
 
-  const onScroll = Animated.event(
-    [{ nativeEvent: { contentOffset: { x: scrollX } } }],
-    { useNativeDriver: false }
-  );
-
   useEffect(() => {
-    const listener = scrollX.addListener(({ value }) => {
-      setIdx(Math.round(value / width));
-    });
-    return () => scrollX.removeListener(listener);
+    const id = scrollX.addListener(({ value }) => setIdx(Math.round(value / width)));
+    return () => scrollX.removeListener(id);
   }, []);
 
   return (
-    <View style={s.carousel}>
+    <View style={s.hero}>
       <Animated.ScrollView
-        horizontal
-        pagingEnabled
+        horizontal pagingEnabled
         showsHorizontalScrollIndicator={false}
-        onScroll={onScroll}
+        onScroll={Animated.event([{ nativeEvent: { contentOffset: { x: scrollX } } }], { useNativeDriver: false })}
         scrollEventThrottle={16}
         decelerationRate="fast"
       >
         {images.map((img, i) => (
-          <View key={i} style={s.slide}>
+          <View key={i} style={{ width, height: HERO_H }}>
             <Image
-              source={{ uri: img || 'https://via.placeholder.com/400x500/F5E6C8/C1440E?text=MarketHub' }}
-              style={s.slideImg}
+              source={{ uri: img || 'https://via.placeholder.com/400x500/1f2937/ec5a13?text=MH' }}
+              style={{ width: '100%', height: '100%' }}
               resizeMode="cover"
-            />
-            {/* Vignette latérale pour la profondeur */}
-            <LinearGradient
-              colors={['rgba(26,18,16,0.18)', 'transparent', 'rgba(26,18,16,0.18)']}
-              start={{ x: 0, y: 0.5 }} end={{ x: 1, y: 0.5 }}
-              style={StyleSheet.absoluteFill}
             />
           </View>
         ))}
       </Animated.ScrollView>
 
-      {/* Gradient bas — dégradé vers la fiche */}
+      {/* Gradient bas — fondu vers fond sombre */}
       <LinearGradient
-        colors={['transparent', 'rgba(13,8,6,0.35)', 'rgba(26,18,16,0.85)']}
-        style={s.carouselGrad}
+        colors={['transparent', 'rgba(17,24,39,0.5)', '#111827']}
+        style={s.heroGrad}
       />
 
-      {/* Compteur d'images */}
+      {/* Compteur images — top right */}
       <View style={s.imgCounter}>
-        <Text style={s.imgCounterTxt}>{idx + 1} / {images.length}</Text>
+        <Text style={s.imgCounterTxt}>{idx + 1}/{images.length}</Text>
       </View>
 
-      {/* Indicateurs thin */}
+      {/* Dots indicateurs */}
       {images.length > 1 && (
         <View style={s.dotsRow}>
           {images.map((_, i) => {
             const w = scrollX.interpolate({
               inputRange: [(i - 1) * width, i * width, (i + 1) * width],
-              outputRange: [6, 22, 6],
+              outputRange: [5, 20, 5],
               extrapolate: 'clamp',
             });
             const op = scrollX.interpolate({
               inputRange: [(i - 1) * width, i * width, (i + 1) * width],
-              outputRange: [0.35, 1, 0.35],
+              outputRange: [0.3, 1, 0.3],
               extrapolate: 'clamp',
             });
-            return (
-              <Animated.View key={i} style={[s.dot, { width: w, opacity: op }]} />
-            );
+            return <Animated.View key={i} style={[s.dot, { width: w, opacity: op }]} />;
           })}
         </View>
       )}
@@ -142,82 +102,81 @@ function ImageCarousel({ images }) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// PRICE TAG — typographie éditoriale
+// SECTION avec accent orange latéral
 // ─────────────────────────────────────────────────────────────────────────────
-function PriceTag({ price, anim }) {
-  const translateY = anim.interpolate({ inputRange: [0, 1], outputRange: [20, 0] });
+function Section({ title, children, dark }) {
   return (
-    <Animated.View style={[s.priceTagWrap, { opacity: anim, transform: [{ translateY }] }]}>
-      {price ? (
-        <>
-          <Text style={s.priceMeta}>Prix demandé</Text>
-          <Text style={s.priceMain}>{parseInt(price).toLocaleString()}</Text>
-          <Text style={s.priceCurrency}>FCFA</Text>
-        </>
-      ) : (
-        <Text style={s.priceNego}>Prix à discuter</Text>
-      )}
-    </Animated.View>
+    <View style={[s.section, dark && s.sectionDark]}>
+      <View style={s.secHeadRow}>
+        <LinearGradient colors={[P.orange500, P.orange300]} style={s.secBar} />
+        <Text style={[s.secTitle, dark && s.secTitleDark]}>{title}</Text>
+      </View>
+      {children}
+    </View>
   );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// STAT PILL
+// SPEC TABLE
 // ─────────────────────────────────────────────────────────────────────────────
-function StatPill({ icon, value, anim }) {
-  const ty = anim.interpolate({ inputRange: [0, 1], outputRange: [16, 0] });
+function SpecTable({ rows, dark }) {
   return (
-    <Animated.View style={[s.pill, { opacity: anim, transform: [{ translateY: ty }] }]}>
-      <Text style={s.pillIcon}>{icon}</Text>
-      <Text style={s.pillVal}>{value}</Text>
-    </Animated.View>
+    <View style={[s.specTable, dark && s.specTableDark]}>
+      {rows.filter(Boolean).map((row, i) => (
+        <View key={i} style={[
+          s.specRow,
+          dark ? (i % 2 === 0 ? s.specRowDarkAlt : s.specRowDark) : (i % 2 === 0 ? s.specRowAlt : null),
+        ]}>
+          <Text style={[s.specLabel, dark && s.specLabelDark]}>{row.label}</Text>
+          <Text style={[s.specValue, dark && s.specValueDark]}>{row.value}</Text>
+        </View>
+      ))}
+    </View>
   );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// VENDEUR CARD — premium
+// VENDEUR CARD — premium dark
 // ─────────────────────────────────────────────────────────────────────────────
-function SellerCard({ seller, onPress, anim }) {
+function SellerCard({ seller, onPress }) {
   const { scale, onPressIn, onPressOut } = useSpringPress();
-  const ty = anim.interpolate({ inputRange: [0, 1], outputRange: [20, 0] });
 
   return (
     <TouchableOpacity activeOpacity={1} onPress={onPress} onPressIn={onPressIn} onPressOut={onPressOut}>
-      <Animated.View style={[s.sellerCard, { opacity: anim, transform: [{ translateY: ty }, { scale }] }]}>
+      <Animated.View style={[s.sellerCard, { transform: [{ scale }] }]}>
 
         {/* Avatar */}
         <View style={s.sellerAvatarWrap}>
           {seller.avatar
-            ? <Image source={{ uri: seller.avatar }} style={s.sellerAvatarImg} />
+            ? <Image source={{ uri: seller.avatar }} style={s.sellerAvatar} />
             : (
-              <LinearGradient colors={[P.terra, P.amber]} style={s.sellerAvatarGrad}>
+              <LinearGradient colors={[P.orange500, P.orange700]} style={s.sellerAvatar}>
                 <Text style={s.sellerInitials}>{getInitials(seller.name)}</Text>
               </LinearGradient>
             )
           }
-          {/* Online dot */}
           <View style={s.onlineDot} />
         </View>
 
         {/* Infos */}
-        <View style={s.sellerMid}>
+        <View style={{ flex: 1 }}>
           <View style={s.sellerNameRow}>
             <Text style={s.sellerName} numberOfLines={1}>{seller.businessName || seller.name}</Text>
             {seller.businessType === 'professional' && (
               <View style={s.verifiedBadge}><Text style={s.verifiedTxt}>✓</Text></View>
             )}
           </View>
-          <Text style={s.sellerLoc} numberOfLines={1}>📍 {getCityName(seller.location)}</Text>
-          <View style={s.sellerRating}>
+          <Text style={s.sellerLoc}>📍 {getCityName(seller.location)}</Text>
+          <View style={s.ratingRow}>
             <Text style={s.ratingStars}>{'★'.repeat(Math.round(seller.sellerStats?.rating || 0))}</Text>
             <Text style={s.ratingNum}>{seller.sellerStats?.rating?.toFixed(1) || '0.0'}</Text>
             <Text style={s.ratingCount}>({seller.sellerStats?.totalReviews || 0} avis)</Text>
           </View>
         </View>
 
-        {/* CTA */}
-        <View style={s.sellerCta}>
-          <Text style={s.sellerCtaTxt}>Profil →</Text>
+        {/* Flèche */}
+        <View style={s.sellerArrow}>
+          <Text style={s.sellerArrowTxt}>→</Text>
         </View>
 
       </Animated.View>
@@ -226,65 +185,26 @@ function SellerCard({ seller, onPress, anim }) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// SPEC TABLE
-// ─────────────────────────────────────────────────────────────────────────────
-function SpecTable({ rows }) {
-  return (
-    <View style={s.specTable}>
-      {rows.filter(Boolean).map((row, i) => row && (
-        <View key={i} style={[s.specRow, i % 2 === 0 && s.specRowAlt]}>
-          <Text style={s.specLabel}>{row.label}</Text>
-          <Text style={s.specValue}>{row.value}</Text>
-        </View>
-      ))}
-    </View>
-  );
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// SECTION WRAPPER animée
-// ─────────────────────────────────────────────────────────────────────────────
-function Section({ title, children, anim }) {
-  const ty = anim.interpolate({ inputRange: [0, 1], outputRange: [24, 0] });
-  return (
-    <Animated.View style={[s.section, { opacity: anim, transform: [{ translateY: ty }] }]}>
-      <View style={s.sectionHeadRow}>
-        <View style={s.sectionBar} />
-        <Text style={s.sectionTitle}>{title}</Text>
-      </View>
-      {children}
-    </Animated.View>
-  );
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
 // BOUTON CONTACT
 // ─────────────────────────────────────────────────────────────────────────────
 function ContactBtn({ icon, label, onPress, variant = 'ghost' }) {
-  const { scale, onPressIn, onPressOut } = useSpringPress({ speed: 40 });
-
-  const isMain    = variant === 'main';
-  const isGhost   = variant === 'ghost';
-  const isWhatsApp= variant === 'whatsapp';
+  const { scale, onPressIn, onPressOut } = useSpringPress();
+  const isMain     = variant === 'main';
+  const isWA       = variant === 'whatsapp';
+  const isCall     = variant === 'call';
 
   return (
     <TouchableOpacity activeOpacity={1} onPress={onPress} onPressIn={onPressIn} onPressOut={onPressOut}>
-      <Animated.View style={[
-        s.cBtn,
-        isMain     && s.cBtnMain,
-        isGhost    && s.cBtnGhost,
-        isWhatsApp && s.cBtnWA,
-        { transform: [{ scale }] },
-      ]}>
+      <Animated.View style={[s.cBtn, isMain && s.cBtnMain, isWA && s.cBtnWA, isCall && s.cBtnCall, { transform: [{ scale }] }]}>
         {isMain ? (
-          <LinearGradient colors={[P.terra, P.amber]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={s.cBtnGrad}>
+          <LinearGradient colors={[P.orange500, P.orange700]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={s.cBtnGrad}>
             <Text style={s.cBtnIconMain}>{icon}</Text>
             <Text style={s.cBtnLabelMain}>{label}</Text>
           </LinearGradient>
         ) : (
           <>
-            <Text style={[s.cBtnIcon, isWhatsApp && { color: '#25D366' }]}>{icon}</Text>
-            <Text style={[s.cBtnLabel, isWhatsApp && { color: '#25D366' }]}>{label}</Text>
+            <Text style={[s.cBtnIcon, isWA && { color: P.whatsapp }, isCall && { color: P.amber }]}>{icon}</Text>
+            <Text style={[s.cBtnLabel, isWA && { color: P.whatsapp }, isCall && { color: P.amber }]}>{label}</Text>
           </>
         )}
       </Animated.View>
@@ -297,29 +217,34 @@ function ContactBtn({ icon, label, onPress, variant = 'ghost' }) {
 // ─────────────────────────────────────────────────────────────────────────────
 export default function ProductDetailScreen({ route, navigation }) {
   const insets = useSafeAreaInsets();
+  const { user } = useAuth();
   const { productId } = route.params;
 
   const [product,    setProduct]    = useState(null);
   const [loading,    setLoading]    = useState(true);
   const [isFavorite, setIsFavorite] = useState(false);
+  const [alert,      setAlert]      = useState({
+    visible: false,
+    type: 'info',
+    title: '',
+    message: '',
+    buttons: [{ text: 'OK', onPress: () => {} }],
+  });
 
-  // Scroll pour header transparent → opaque
+  // Scroll → header opacity
   const scrollY = useRef(new Animated.Value(0)).current;
-
-  // Opacité header : transparent jusqu'à 120px, puis opaque
-  const headerBgOpacity = scrollY.interpolate({
-    inputRange: [CAROUSEL_H - 120, CAROUSEL_H - 40],
+  const headerOpacity = scrollY.interpolate({
+    inputRange: [HERO_H - 100, HERO_H - 30],
     outputRange: [0, 1],
     extrapolate: 'clamp',
   });
 
-  // Animations staggerées pour les sections
-  const [ready, setReady] = useState(false);
-  const enters = useRef(Array.from({ length: 8 }, () => new Animated.Value(0))).current;
+  // Animations d'entrée staggerées
+  const enters = useRef(Array.from({ length: 7 }, () => new Animated.Value(0))).current;
 
   const runEntrance = useCallback(() => {
-    Animated.stagger(90,
-      enters.map(a => Animated.spring(a, { toValue: 1, tension: 65, friction: 9, useNativeDriver: true }))
+    Animated.stagger(70,
+      enters.map(a => Animated.spring(a, { toValue: 1, tension: 70, friction: 10, useNativeDriver: true }))
     ).start();
   }, []);
 
@@ -327,14 +252,23 @@ export default function ProductDetailScreen({ route, navigation }) {
     try {
       const res = await apiClient.get(`/products/${productId}`);
       setProduct(res.data.data || res.data);
+      const isFav = await checkFavorite(productId);
+      setIsFavorite(isFav);
     } catch (e) { console.error(e); }
     finally {
       setLoading(false);
-      setTimeout(() => { setReady(true); runEntrance(); }, 80);
+      setTimeout(runEntrance, 80);
     }
   };
 
   useEffect(() => { fetchProduct(); }, [productId]);
+
+  const handleToggleFavorite = async () => {
+    try {
+      await toggleFavorite(productId, isFavorite);
+      setIsFavorite(!isFavorite);
+    } catch (e) { console.error(e); }
+  };
 
   const handleShare = async () => {
     if (!product) return;
@@ -348,18 +282,51 @@ export default function ProductDetailScreen({ route, navigation }) {
       Linking.openURL(`whatsapp://send?phone=${seller.contactInfo.whatsapp}`);
     if (type === 'call' && (seller.contactInfo?.phone || seller.phone))
       Linking.openURL(`tel:${seller.contactInfo?.phone || seller.phone}`);
-    if (type === 'message')
-      navigation.navigate('Messages', { sellerId: seller.id });
+    if (type === 'message') {
+      const sellerId = seller.id || seller._id;
+      if (!sellerId) return;
+
+      // Vérifier si c'est le même utilisateur
+      const currentUserId = String(user?.id || '');
+      const sellerIdStr = String(sellerId || '');
+      if (currentUserId && sellerIdStr && currentUserId === sellerIdStr) {
+        setAlert({
+          visible: true,
+          type: 'warning',
+          title: 'Annonce personnelle',
+          message: 'Vous ne pouvez pas discuter avec vous-même. Ceci est votre propre produit.',
+          buttons: [{ text: 'Fermer', onPress: () => {} }],
+        });
+        return;
+      }
+
+      navigation.navigate('MainTabs', {
+        screen: 'Messages',
+        params: {
+          screen: 'MessagesList',
+          params: {
+            sellerId,
+            productId,
+          },
+        },
+      });
+    }
   };
 
   // ── Loading ────────────────────────────────────────────────────────────────
   if (loading) {
     return (
-      <LinearGradient colors={[P.terra, P.amber, P.gold]} style={s.loadScreen}>
-        <View style={s.loadLogoBox}><Text style={s.loadLogoTxt}>M</Text></View>
+      <LinearGradient colors={[P.charcoal, '#0d1420']} style={s.loadScreen}>
+        <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
+        <View style={s.loadRingWrap}>
+          <LinearGradient colors={[P.orange500, P.orange700]} style={s.loadLogoBox}>
+            <Text style={s.loadLogoTxt}>M</Text>
+          </LinearGradient>
+          <View style={s.loadRing} />
+        </View>
         <Text style={s.loadBrand}>MarketHub</Text>
         <Text style={s.loadSub}>Chargement de l'annonce…</Text>
-        <ActivityIndicator size="large" color={P.cream} style={{ marginTop: 36 }} />
+        <ActivityIndicator size="large" color={P.amber} style={{ marginTop: 36 }} />
       </LinearGradient>
     );
   }
@@ -367,19 +334,25 @@ export default function ProductDetailScreen({ route, navigation }) {
   // ── Not found ──────────────────────────────────────────────────────────────
   if (!product) {
     return (
-      <View style={s.notFound}>
-        <Text style={{ fontSize: 72 }}>😕</Text>
+      <LinearGradient colors={[P.charcoal, '#0d1420']} style={s.notFound}>
+        <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
+        <Text style={{ fontSize: 64 }}>😕</Text>
         <Text style={s.notFoundTitle}>Annonce introuvable</Text>
-        <Text style={s.notFoundSub}>Cette annonce a peut-être été supprimée ou retirée.</Text>
+        <Text style={s.notFoundSub}>Cette annonce a peut-être été supprimée.</Text>
         <TouchableOpacity style={s.notFoundBtn} onPress={() => navigation.goBack()} activeOpacity={0.85}>
-          <Text style={s.notFoundBtnTxt}>← Retourner</Text>
+          <LinearGradient colors={[P.orange500, P.orange700]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={s.notFoundBtnGrad}>
+            <Text style={s.notFoundBtnTxt}>← Retourner</Text>
+          </LinearGradient>
         </TouchableOpacity>
-      </View>
+      </LinearGradient>
     );
   }
 
+  // Préparer les données
   const isService = product.type === 'service';
-  const images = product.images?.filter(Boolean).length > 0 ? product.images : [product.mainImage].filter(Boolean);
+  const images = product.images?.filter(Boolean).length > 0
+    ? product.images
+    : [product.mainImage].filter(Boolean);
   if (!images.length) images.push(null);
 
   const specRows = [
@@ -393,7 +366,7 @@ export default function ProductDetailScreen({ route, navigation }) {
     product.subcategory     && { label: 'Sous-catégorie', value: product.subcategory },
   ].filter(Boolean);
 
-  const postDate = product.createdAt 
+  const postDate = product.createdAt
     ? new Date(product.createdAt).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' })
     : product.postedTime || 'Récent';
 
@@ -402,187 +375,238 @@ export default function ProductDetailScreen({ route, navigation }) {
     <View style={s.screen}>
       <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
 
-      {/* ══ HEADER FLOTTANT ═══════════════════════════════════════════════ */}
-      <Animated.View
-        style={[s.header, { paddingTop: (insets.top || 0) + 8 }]}
-        pointerEvents="box-none"
-      >
+      {/* ══ HEADER FLOTTANT ══════════════════════════════════════════════ */}
+      <View style={[s.header, { paddingTop: (insets.top || 0) + 8 }]} pointerEvents="box-none">
         {/* Fond qui apparaît au scroll */}
-        <Animated.View style={[StyleSheet.absoluteFill, s.headerBg, { opacity: headerBgOpacity }]} />
+        <Animated.View style={[StyleSheet.absoluteFill, s.headerBg, { opacity: headerOpacity }]} />
 
+        {/* Bouton retour */}
         <TouchableOpacity style={s.hBtn} onPress={() => navigation.goBack()} activeOpacity={0.85}>
-          <Text style={s.hBtnTxt}>←</Text>
+          <BlurView intensity={30} tint="dark" style={s.hBtnBlur}>
+            <Text style={s.hBtnTxt}>←</Text>
+          </BlurView>
         </TouchableOpacity>
 
-        <Animated.Text style={[s.hTitle, { opacity: headerBgOpacity }]} numberOfLines={1}>
+        {/* Titre au scroll */}
+        <Animated.Text style={[s.hTitle, { opacity: headerOpacity }]} numberOfLines={1}>
           {product.title}
         </Animated.Text>
 
+        {/* Actions droite */}
         <View style={s.hRight}>
           <TouchableOpacity style={s.hBtn} onPress={handleShare} activeOpacity={0.85}>
-            <Text style={s.hBtnTxt}>↗</Text>
+            <BlurView intensity={30} tint="dark" style={s.hBtnBlur}>
+              <Text style={s.hBtnTxt}>↗</Text>
+            </BlurView>
           </TouchableOpacity>
-          <TouchableOpacity
-            style={[s.hBtn, isFavorite && s.hBtnFav]}
-            onPress={() => setIsFavorite(f => !f)}
-            activeOpacity={0.85}
-          >
-            <Text style={[s.hBtnTxt, isFavorite && { color: P.terra }]}>
-              {isFavorite ? '♥' : '♡'}
-            </Text>
+          <TouchableOpacity style={s.hBtn} onPress={handleToggleFavorite} activeOpacity={0.85}>
+            <BlurView intensity={30} tint="dark" style={[s.hBtnBlur, isFavorite && s.hBtnFavBlur]}>
+              <Text style={[s.hBtnTxt, isFavorite && s.hBtnFavTxt]}>
+                {isFavorite ? '♥' : '♡'}
+              </Text>
+            </BlurView>
           </TouchableOpacity>
         </View>
-      </Animated.View>
+      </View>
 
-      {/* ══ SCROLL PRINCIPAL ══════════════════════════════════════════════ */}
+      {/* ══ SCROLL PRINCIPAL ═════════════════════════════════════════════ */}
       <Animated.ScrollView
         style={{ flex: 1 }}
-        contentContainerStyle={{ paddingBottom: 140 + Math.max(insets.bottom, 16) }}
+        contentContainerStyle={{ paddingBottom: 90 + Math.max(insets.bottom, 16) }}
         showsVerticalScrollIndicator={false}
-        onScroll={Animated.event([{ nativeEvent: { contentOffset: { y: scrollY } } }], { useNativeDriver: false })}
+        onScroll={Animated.event(
+          [{ nativeEvent: { contentOffset: { y: scrollY } } }],
+          { useNativeDriver: false }
+        )}
         scrollEventThrottle={16}
       >
 
-        {/* ── CAROUSEL ────────────────────────────────────────────────── */}
+        {/* ── HERO IMAGE ──────────────────────────────────────────────── */}
         <ImageCarousel images={images} />
 
-        {/* ── FICHE HERO (sur le carousel) ─────────────────────────────── */}
-        <Animated.View style={[s.heroFiche, { opacity: enters[0], transform: [{ translateY: enters[0].interpolate({ inputRange: [0, 1], outputRange: [30, 0] }) }] }]}>
-
-          {/* Type badge */}
-          <View style={[s.typeBadge, { backgroundColor: isService ? P.terra : P.amber }]}>
+        {/* ── BLOC TITRE — chevauchement hero ─────────────────────────── */}
+        <Animated.View style={[
+          s.titleBlock,
+          {
+            opacity: enters[0],
+            transform: [{ translateY: enters[0].interpolate({ inputRange: [0, 1], outputRange: [24, 0] }) }],
+          },
+        ]}>
+          {/* Badge type */}
+          <View style={[s.typeBadge, { backgroundColor: isService ? 'rgba(236,90,19,0.9)' : 'rgba(245,158,11,0.9)' }]}>
             <Text style={s.typeBadgeTxt}>{isService ? '🛠 Service' : '📦 Produit'}</Text>
           </View>
 
-          {/* Titre */}
           <Text style={s.heroTitle}>{product.title}</Text>
 
-          {/* Localisation */}
-          <View style={s.heroLocRow}>
-            <View style={s.heroLoc}>
-              <Text style={s.heroLocIcon}>📍</Text>
+          {/* Localisation + date */}
+          <View style={s.heroMeta}>
+            <View style={s.heroLocRow}>
+              <Text style={s.heroLocDot}>●</Text>
               <Text style={s.heroLocTxt}>{getCityName(product.location)}</Text>
             </View>
             <Text style={s.heroDate}>Publié le {postDate}</Text>
           </View>
-
         </Animated.View>
 
-        {/* ── PRIX ─────────────────────────────────────────────────────── */}
-        <View style={s.priceSection}>
-          <PriceTag price={product.price} anim={enters[1]} />
-
-          {/* Stats pills */}
-          <View style={s.pillsRow}>
-            <StatPill icon="👁" value={`${product.views || 0} vues`}        anim={enters[1]} />
-            <StatPill icon="♡" value={`${product.favorites || 0} favoris`} anim={enters[1]} />
-            <StatPill icon="📅" value={postDate}                             anim={enters[1]} />
-          </View>
-        </View>
-
-        {/* ── VENDEUR ──────────────────────────────────────────────────── */}
-        {product.seller && (
-          <Section title="Annonceur" anim={enters[2]}>
-            <SellerCard
-              seller={product.seller}
-              anim={enters[2]}
-              onPress={() => navigation.navigate('SellerProfile', { sellerId: product.seller.id })}
-            />
-          </Section>
-        )}
-
-        {/* ── DESCRIPTION ──────────────────────────────────────────────── */}
-        <Section title="Description" anim={enters[3]}>
-          <View style={s.descCard}>
-            <Text style={s.descText}>{product.description}</Text>
-          </View>
-        </Section>
-
-        {/* ── DÉTAILS ──────────────────────────────────────────────────── */}
-        <Section title="Détails de l'annonce" anim={enters[4]}>
-          <SpecTable rows={specRows} />
-        </Section>
-
-        {/* ── CARACTÉRISTIQUES ─────────────────────────────────────────── */}
-        {product.specifications && Object.keys(product.specifications).length > 0 && (
-          <Section title="Caractéristiques" anim={enters[5]}>
-            <SpecTable
-              rows={Object.entries(product.specifications).map(([k, v]) => ({ label: k, value: v }))}
-            />
-          </Section>
-        )}
-
-        {/* ── DISPONIBILITÉ (service) ───────────────────────────────────── */}
-        {isService && product.availability && (
-          <Section title="Disponibilité" anim={enters[6]}>
-            <View style={s.availCard}>
-              {product.availability.days?.length > 0 && (
-                <View style={s.availRow}>
-                  <Text style={s.availIcon}>📅</Text>
-                  <Text style={s.availTxt}>{product.availability.days.join(' · ')}</Text>
+        {/* ── PRIX + STATS — fond sombre ──────────────────────────────── */}
+        <Animated.View style={[
+          s.priceBlock,
+          {
+            opacity: enters[1],
+            transform: [{ translateY: enters[1].interpolate({ inputRange: [0, 1], outputRange: [20, 0] }) }],
+          },
+        ]}>
+          <View style={s.priceRow}>
+            <View>
+              <Text style={s.priceMeta}>Prix demandé</Text>
+              {product.price ? (
+                <View style={s.priceAmountRow}>
+                  <Text style={s.priceAmount}>{parseInt(product.price).toLocaleString('fr-FR')}</Text>
+                  <Text style={s.priceCurrency}> FCFA</Text>
                 </View>
-              )}
-              {product.availability.openingTime && (
-                <View style={s.availRow}>
-                  <Text style={s.availIcon}>🕐</Text>
-                  <Text style={s.availTxt}>{product.availability.openingTime} — {product.availability.closingTime}</Text>
-                </View>
+              ) : (
+                <Text style={s.priceNego}>Prix à discuter</Text>
               )}
             </View>
-          </Section>
+
+            {/* Mini stats pills */}
+            <View style={s.miniStats}>
+              <View style={s.miniStat}>
+                <Text style={s.miniStatIcon}>👁</Text>
+                <Text style={s.miniStatVal}>{product.views || 0}</Text>
+              </View>
+              <View style={s.miniStat}>
+                <Text style={s.miniStatIcon}>♡</Text>
+                <Text style={s.miniStatVal}>{product.favorites || 0}</Text>
+              </View>
+            </View>
+          </View>
+
+          {/* Ligne accent */}
+          <LinearGradient
+            colors={['transparent', P.terra, 'transparent']}
+            start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
+            style={s.priceAccentLine}
+          />
+        </Animated.View>
+
+        {/* ── VENDEUR ─────────────────────────────────────────────────── */}
+        {product.seller && (
+          <Animated.View style={{
+            opacity: enters[2],
+            transform: [{ translateY: enters[2].interpolate({ inputRange: [0, 1], outputRange: [20, 0] }) }],
+          }}>
+            <Section title="Annonceur">
+              <SellerCard
+                seller={product.seller}
+                onPress={() => navigation.navigate('SellerProfile', { sellerId: product.seller.id })}
+              />
+            </Section>
+          </Animated.View>
         )}
 
-        {/* ── ACCORDS / RENDEZ-VOUS ─────────────────────────────────────── */}
-        <Animated.View style={[s.meetupNote, { opacity: enters[7], transform: [{ translateY: enters[7].interpolate({ inputRange: [0, 1], outputRange: [16, 0] }) }] }]}>
-          <LinearGradient colors={[P.sand, P.cream]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={s.meetupGrad}>
+        {/* ── DESCRIPTION ─────────────────────────────────────────────── */}
+        <Animated.View style={{
+          opacity: enters[3],
+          transform: [{ translateY: enters[3].interpolate({ inputRange: [0, 1], outputRange: [20, 0] }) }],
+        }}>
+          <Section title="Description">
+            <View style={s.descCard}>
+              <Text style={s.descText}>{product.description}</Text>
+            </View>
+          </Section>
+        </Animated.View>
+
+        {/* ── DÉTAILS ─────────────────────────────────────────────────── */}
+        <Animated.View style={{
+          opacity: enters[4],
+          transform: [{ translateY: enters[4].interpolate({ inputRange: [0, 1], outputRange: [20, 0] }) }],
+        }}>
+          <Section title="Détails">
+            <SpecTable rows={specRows} />
+          </Section>
+        </Animated.View>
+
+        {/* ── CARACTÉRISTIQUES ────────────────────────────────────────── */}
+        {product.specifications && Object.keys(product.specifications).length > 0 && (
+          <Animated.View style={{
+            opacity: enters[5],
+            transform: [{ translateY: enters[5].interpolate({ inputRange: [0, 1], outputRange: [20, 0] }) }],
+          }}>
+            <Section title="Caractéristiques">
+              <SpecTable rows={Object.entries(product.specifications).map(([k, v]) => ({ label: k, value: v }))} />
+            </Section>
+          </Animated.View>
+        )}
+
+        {/* ── DISPONIBILITÉ (service) ──────────────────────────────────── */}
+        {isService && product.availability && (
+          <Animated.View style={{
+            opacity: enters[5],
+            transform: [{ translateY: enters[5].interpolate({ inputRange: [0, 1], outputRange: [20, 0] }) }],
+          }}>
+            <Section title="Disponibilité">
+              <View style={s.availCard}>
+                {product.availability.days?.length > 0 && (
+                  <View style={s.availRow}>
+                    <Text style={s.availIcon}>📅</Text>
+                    <Text style={s.availTxt}>{product.availability.days.join(' · ')}</Text>
+                  </View>
+                )}
+                {product.availability.openingTime && (
+                  <View style={s.availRow}>
+                    <Text style={s.availIcon}>🕐</Text>
+                    <Text style={s.availTxt}>{product.availability.openingTime} — {product.availability.closingTime}</Text>
+                  </View>
+                )}
+              </View>
+            </Section>
+          </Animated.View>
+        )}
+
+        {/* ── NOTE MISE EN RELATION ────────────────────────────────────── */}
+        <Animated.View style={[
+          s.meetupNote,
+          {
+            opacity: enters[6],
+            transform: [{ translateY: enters[6].interpolate({ inputRange: [0, 1], outputRange: [16, 0] }) }],
+          },
+        ]}>
+          <View style={s.meetupInner}>
+            {/* Accent bar gauche */}
+            <View style={s.meetupAccent} />
             <Text style={s.meetupIcon}>🤝</Text>
             <View style={{ flex: 1 }}>
               <Text style={s.meetupTitle}>Mise en relation directe</Text>
-              <Text style={s.meetupSub}>
-                Contactez l'annonceur, convenez d'un lieu et d'un moment qui vous conviennent à tous les deux.
-              </Text>
+              <Text style={s.meetupSub}>Contactez l'annonceur et convenez d'un lieu entre vous.</Text>
             </View>
-          </LinearGradient>
+          </View>
         </Animated.View>
 
       </Animated.ScrollView>
 
-      {/* ══ FOOTER CONTACT — glassmorphism ══════════════════════════════════ */}
-      <View style={[s.footer, { paddingBottom: Math.max(insets.bottom + 8, 16) }]}>
-        {/* Gradient fondu */}
+      {/* ══ FOOTER CONTACT ═══════════════════════════════════════════════ */}
+      <View style={[s.footer, { paddingBottom: Math.max(insets.bottom + 10, 18) }]}>
+        {/* Fondu blanc vers le haut */}
         <LinearGradient
-          colors={['rgba(253,246,236,0)', 'rgba(253,246,236,0.97)', P.cream]}
+          colors={['rgba(249,250,251,0)', P.surface]}
           style={s.footerFade}
           pointerEvents="none"
         />
-
-        {/* Boutons */}
-        <View style={s.footerBtns}>
-          {/* Ligne secondaire - Désactivée temporairement */}
-          {/* <View style={s.footerRow}>
-            <ContactBtn
-              icon="📞"
-              label="Appeler"
-              variant="ghost"
-              onPress={() => handleContact('call')}
-            />
-            <ContactBtn
-              icon="💚"
-              label="WhatsApp"
-              variant="whatsapp"
-              onPress={() => handleContact('whatsapp')}
-            />
-          </View> */}
-          {/* CTA principal */}
-          <ContactBtn
-            icon="✉️"
-            label="Envoyer un message"
-            variant="main"
-            onPress={() => handleContact('message')}
-          />
+        <View style={s.footerContent}>
+          <ContactBtn icon="✉️" label="Envoyer un message" variant="main" onPress={() => handleContact('message')} />
         </View>
       </View>
 
+      <AlertModal
+        visible={alert.visible}
+        type={alert.type}
+        title={alert.title}
+        message={alert.message}
+        buttons={alert.buttons}
+        onDismiss={() => setAlert({ ...alert, visible: false })}
+      />
     </View>
   );
 }
@@ -590,142 +614,153 @@ export default function ProductDetailScreen({ route, navigation }) {
 // ─── STYLES ───────────────────────────────────────────────────────────────────
 const s = StyleSheet.create({
 
-  screen: { flex: 1, backgroundColor: P.cream },
+  screen: { flex: 1, backgroundColor: P.surface },
 
   // ── Loading ──────────────────────────────────────────────────────────────────
-  loadScreen:  { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  loadLogoBox: { width: 76, height: 76, borderRadius: 24, backgroundColor: 'rgba(253,246,236,0.25)', justifyContent: 'center', alignItems: 'center', marginBottom: 16, borderWidth: 2, borderColor: 'rgba(253,246,236,0.4)' },
-  loadLogoTxt: { fontSize: 40, fontWeight: '900', color: P.cream },
-  loadBrand:   { fontSize: 30, fontWeight: '900', color: P.cream, letterSpacing: -1 },
-  loadSub:     { fontSize: 13, color: 'rgba(253,246,236,0.65)', marginTop: 6 },
+  loadScreen:   { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  loadRingWrap: { position: 'relative', alignItems: 'center', justifyContent: 'center', marginBottom: 20 },
+  loadLogoBox:  { width: 72, height: 72, borderRadius: 22, justifyContent: 'center', alignItems: 'center', shadowColor: P.terra, shadowOpacity: 0.5, shadowOffset: { width: 0, height: 8 }, shadowRadius: 20, elevation: 12 },
+  loadRing:     { position: 'absolute', width: 96, height: 96, borderRadius: 48, borderWidth: 1.5, borderColor: 'rgba(236,90,19,0.3)' },
+  loadLogoTxt:  { fontSize: 38, fontWeight: '900', color: P.white },
+  loadBrand:    { fontSize: 28, fontWeight: '900', color: P.white, letterSpacing: -1 },
+  loadSub:      { fontSize: 13, color: 'rgba(255,255,255,0.4)', marginTop: 6 },
 
   // ── Not found ─────────────────────────────────────────────────────────────
-  notFound:      { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 40, backgroundColor: P.cream },
-  notFoundTitle: { fontSize: 24, fontWeight: '900', color: P.charcoal, marginTop: 16, marginBottom: 8, letterSpacing: -0.5 },
-  notFoundSub:   { fontSize: 14, color: P.muted, textAlign: 'center', lineHeight: 21, marginBottom: 28 },
-  notFoundBtn:   { backgroundColor: P.terra, borderRadius: 14, paddingVertical: 14, paddingHorizontal: 28 },
-  notFoundBtnTxt:{ fontSize: 15, fontWeight: '800', color: P.white },
+  notFound:        { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 40 },
+  notFoundTitle:   { fontSize: 22, fontWeight: '900', color: P.white, marginTop: 16, marginBottom: 8, letterSpacing: -0.5 },
+  notFoundSub:     { fontSize: 14, color: 'rgba(255,255,255,0.45)', textAlign: 'center', lineHeight: 21, marginBottom: 28 },
+  notFoundBtn:     { borderRadius: 14, overflow: 'hidden', shadowColor: P.terra, shadowOpacity: 0.35, shadowOffset: { width: 0, height: 5 }, shadowRadius: 12, elevation: 7 },
+  notFoundBtnGrad: { paddingVertical: 14, paddingHorizontal: 28 },
+  notFoundBtnTxt:  { fontSize: 15, fontWeight: '800', color: P.white },
 
   // ── Header flottant ───────────────────────────────────────────────────────
-  header:   { position: 'absolute', top: 0, left: 0, right: 0, zIndex: 20, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, paddingBottom: 10, gap: 8 },
-  headerBg: { backgroundColor: P.cream, borderBottomWidth: 1, borderBottomColor: P.dim },
-  hBtn:     { width: 42, height: 42, borderRadius: 21, backgroundColor: 'rgba(253,246,236,0.88)', justifyContent: 'center', alignItems: 'center', shadowColor: P.brown, shadowOpacity: 0.18, shadowOffset: { width: 0, height: 3 }, shadowRadius: 8, elevation: 5 },
-  hBtnFav:  { backgroundColor: 'rgba(193,68,14,0.1)' },
-  hBtnTxt:  { fontSize: 20, fontWeight: '700', color: P.brown },
-  hTitle:   { flex: 1, fontSize: 15, fontWeight: '800', color: P.charcoal, letterSpacing: -0.2, textAlign: 'center' },
-  hRight:   { flexDirection: 'row', gap: 8 },
+  header:    { position: 'absolute', top: 0, left: 0, right: 0, zIndex: 20, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, paddingBottom: 10, gap: 8 },
+  headerBg:  { backgroundColor: '#111827', borderBottomWidth: 1, borderBottomColor: 'rgba(236,90,19,0.2)' },
+  hBtn:      { width: 40, height: 40, borderRadius: 20, overflow: 'hidden' },
+  hBtnBlur:  { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  hBtnFavBlur:{ backgroundColor: 'rgba(236,90,19,0.25)' },
+  hBtnTxt:   { fontSize: 18, fontWeight: '700', color: P.white },
+  hBtnFavTxt:{ color: P.amber },
+  hTitle:    { flex: 1, fontSize: 14, fontWeight: '800', color: P.white, letterSpacing: -0.2, textAlign: 'center' },
+  hRight:    { flexDirection: 'row', gap: 8 },
 
-  // ── Carousel ──────────────────────────────────────────────────────────────
-  carousel:    { width, height: CAROUSEL_H, backgroundColor: P.sand },
-  slide:       { width, height: CAROUSEL_H },
-  slideImg:    { width: '100%', height: '100%' },
-  carouselGrad:{ position: 'absolute', bottom: 0, left: 0, right: 0, height: CAROUSEL_H * 0.5 },
+  // ── Hero image ────────────────────────────────────────────────────────────
+  hero:      { width, height: HERO_H, backgroundColor: P.charcoal },
+  heroGrad:  { position: 'absolute', bottom: 0, left: 0, right: 0, height: HERO_H * 0.6 },
+  imgCounter:{ position: 'absolute', top: 14, right: 14, backgroundColor: 'rgba(17,24,39,0.55)', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 20, borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)' },
+  imgCounterTxt:{ fontSize: 11, fontWeight: '700', color: P.white },
+  dotsRow:   { position: 'absolute', bottom: 80, left: 0, right: 0, flexDirection: 'row', justifyContent: 'center', gap: 4 },
+  dot:       { height: 3, borderRadius: 1.5, backgroundColor: P.white },
 
-  imgCounter: { position: 'absolute', top: 16, right: 16, backgroundColor: 'rgba(26,18,16,0.5)', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 20 },
-  imgCounterTxt: { fontSize: 12, fontWeight: '700', color: P.white },
-
-  dotsRow: { position: 'absolute', bottom: 72, left: 0, right: 0, flexDirection: 'row', justifyContent: 'center', gap: 5 },
-  dot:     { height: 4, borderRadius: 2, backgroundColor: P.white },
-
-  // ── Hero fiche (chevauchement carousel) ───────────────────────────────────
-  heroFiche: {
-    marginTop: -72,
-    marginHorizontal: 18,
+  // ── Bloc titre (chevauchement) ────────────────────────────────────────────
+  titleBlock: {
+    marginTop: -60,
+    marginHorizontal: 16,
     backgroundColor: P.white,
-    borderRadius: 24,
+    borderRadius: 20,
     padding: 20,
-    shadowColor: P.brown,
-    shadowOpacity: 0.14,
+    borderWidth: 1,
+    borderColor: P.dim,
+    shadowColor: P.charcoal,
+    shadowOpacity: 0.12,
     shadowOffset: { width: 0, height: 8 },
     shadowRadius: 20,
     elevation: 10,
     zIndex: 5,
   },
-  typeBadge:    { alignSelf: 'flex-start', paddingHorizontal: 12, paddingVertical: 5, borderRadius: 8, marginBottom: 12 },
-  typeBadgeTxt: { fontSize: 12, fontWeight: '900', color: P.white },
-  heroTitle:    { fontSize: 22, fontWeight: '900', color: P.charcoal, lineHeight: 30, marginBottom: 14, letterSpacing: -0.4 },
-  heroLocRow:   { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  heroLoc:      { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  heroLocIcon:  { fontSize: 14 },
-  heroLocTxt:   { fontSize: 13, fontWeight: '700', color: P.brown },
+  typeBadge:    { alignSelf: 'flex-start', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8, marginBottom: 12 },
+  typeBadgeTxt: { fontSize: 11, fontWeight: '900', color: P.white },
+  heroTitle:    { fontSize: 22, fontWeight: '900', color: P.charcoal, lineHeight: 30, marginBottom: 14, letterSpacing: -0.5 },
+  heroMeta:     { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  heroLocRow:   { flexDirection: 'row', alignItems: 'center', gap: 5 },
+  heroLocDot:   { fontSize: 7, color: P.terra },
+  heroLocTxt:   { fontSize: 13, fontWeight: '700', color: P.terra },
   heroDate:     { fontSize: 11, color: P.muted, fontWeight: '500' },
 
   // ── Prix ──────────────────────────────────────────────────────────────────
-  priceSection: { paddingHorizontal: 20, paddingTop: 24, paddingBottom: 8 },
-  priceTagWrap: { marginBottom: 16 },
-  priceMeta:    { fontSize: 10, fontWeight: '600', color: P.muted, letterSpacing: 1.2, textTransform: 'uppercase', marginBottom: 2 },
-  priceMain:    { fontSize: 28, fontWeight: '800', color: P.terra, letterSpacing: -1, lineHeight: 32 },
-  priceCurrency:{ fontSize: 13, fontWeight: '600', color: P.muted, letterSpacing: 0.3, marginTop: -2 },
-  priceNego:    { fontSize: 18, fontWeight: '700', color: P.muted, letterSpacing: -0.3 },
-  pillsRow:     { flexDirection: 'row', gap: 8, flexWrap: 'wrap' },
-  pill:         { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: P.cream, borderRadius: 20, paddingHorizontal: 12, paddingVertical: 7, borderWidth: 1, borderColor: P.dim },
-  pillIcon:     { fontSize: 14 },
-  pillVal:      { fontSize: 12, fontWeight: '600', color: P.muted },
+  priceBlock:     { marginHorizontal: 16, marginTop: 12, backgroundColor: P.white, borderRadius: 20, padding: 20, borderWidth: 1, borderColor: P.dim, shadowColor: P.charcoal, shadowOpacity: 0.06, shadowOffset: { width: 0, height: 4 }, shadowRadius: 12, elevation: 4 },
+  priceRow:       { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 },
+  priceMeta:      { fontSize: 10, fontWeight: '600', color: P.muted, letterSpacing: 1.2, textTransform: 'uppercase', marginBottom: 4 },
+  priceAmountRow: { flexDirection: 'row', alignItems: 'baseline' },
+  priceAmount:    { fontSize: 32, fontWeight: '900', color: P.terra, letterSpacing: -1 },
+  priceCurrency:  { fontSize: 14, fontWeight: '600', color: P.muted },
+  priceNego:      { fontSize: 18, fontWeight: '700', color: P.muted },
+  miniStats:      { flexDirection: 'row', gap: 10 },
+  miniStat:       { alignItems: 'center', gap: 2 },
+  miniStatIcon:   { fontSize: 16 },
+  miniStatVal:    { fontSize: 12, fontWeight: '700', color: P.muted },
+  priceAccentLine:{ height: 1.5, borderRadius: 1 },
 
-  // ── Section wrapper ───────────────────────────────────────────────────────
-  section:       { paddingHorizontal: 20, paddingVertical: 22, borderTopWidth: 1, borderTopColor: P.dim },
-  sectionHeadRow:{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 14 },
-  sectionBar:    { width: 4, height: 22, borderRadius: 2, backgroundColor: P.terra },
-  sectionTitle:  { fontSize: 17, fontWeight: '900', color: P.charcoal, letterSpacing: -0.3 },
+  // ── Sections ──────────────────────────────────────────────────────────────
+  section:     { paddingHorizontal: 16, paddingVertical: 20, marginTop: 4, backgroundColor: P.white },
+  sectionDark: { backgroundColor: P.white },
+  secHeadRow:  { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 14 },
+  secBar:      { width: 4, height: 22, borderRadius: 2 },
+  secTitle:    { fontSize: 17, fontWeight: '900', color: P.charcoal, letterSpacing: -0.3 },
+  secTitleDark:{ color: P.charcoal },
 
   // ── Vendeur ───────────────────────────────────────────────────────────────
-  sellerCard:      { flexDirection: 'row', alignItems: 'center', backgroundColor: P.white, borderRadius: 20, padding: 16, borderWidth: 1, borderColor: P.dim, shadowColor: P.brown, shadowOpacity: 0.09, shadowOffset: { width: 0, height: 4 }, shadowRadius: 12, elevation: 4, gap: 12 },
+  sellerCard:      { flexDirection: 'row', alignItems: 'center', backgroundColor: P.surface, borderRadius: 18, padding: 16, borderWidth: 1, borderColor: P.dim, gap: 12 },
   sellerAvatarWrap:{ position: 'relative' },
-  sellerAvatarImg: { width: 58, height: 58, borderRadius: 29 },
-  sellerAvatarGrad:{ width: 58, height: 58, borderRadius: 29, justifyContent: 'center', alignItems: 'center' },
-  sellerInitials:  { fontSize: 22, fontWeight: '800', color: P.white },
-  onlineDot:       { position: 'absolute', bottom: 2, right: 2, width: 12, height: 12, borderRadius: 6, backgroundColor: P.green, borderWidth: 2, borderColor: P.white },
-  sellerMid:       { flex: 1 },
+  sellerAvatar:    { width: 54, height: 54, borderRadius: 27, justifyContent: 'center', alignItems: 'center' },
+  sellerInitials:  { fontSize: 20, fontWeight: '800', color: P.white },
+  onlineDot:       { position: 'absolute', bottom: 1, right: 1, width: 12, height: 12, borderRadius: 6, backgroundColor: P.green, borderWidth: 2, borderColor: P.surface },
   sellerNameRow:   { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4 },
-  sellerName:      { fontSize: 16, fontWeight: '800', color: P.charcoal },
-  verifiedBadge:   { width: 18, height: 18, borderRadius: 9, backgroundColor: P.green, justifyContent: 'center', alignItems: 'center' },
-  verifiedTxt:     { fontSize: 11, fontWeight: '900', color: P.white },
-  sellerLoc:       { fontSize: 12, color: P.muted, marginBottom: 5 },
-  sellerRating:    { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  sellerName:      { fontSize: 15, fontWeight: '800', color: P.charcoal },
+  verifiedBadge:   { width: 17, height: 17, borderRadius: 9, backgroundColor: P.green, justifyContent: 'center', alignItems: 'center' },
+  verifiedTxt:     { fontSize: 10, fontWeight: '900', color: P.white },
+  sellerLoc:       { fontSize: 12, color: P.muted, marginBottom: 4 },
+  ratingRow:       { flexDirection: 'row', alignItems: 'center', gap: 4 },
   ratingStars:     { fontSize: 12, color: P.gold },
-  ratingNum:       { fontSize: 13, fontWeight: '800', color: P.brown },
+  ratingNum:       { fontSize: 12, fontWeight: '800', color: P.charcoal },
   ratingCount:     { fontSize: 11, color: P.muted },
-  sellerCta:       { backgroundColor: P.terra, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8 },
-  sellerCtaTxt:    { fontSize: 12, fontWeight: '700', color: P.white },
+  sellerArrow:     { width: 32, height: 32, borderRadius: 16, backgroundColor: P.peachSoft, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: 'rgba(236,90,19,0.2)' },
+  sellerArrowTxt:  { fontSize: 14, fontWeight: '700', color: P.terra },
 
   // ── Description ───────────────────────────────────────────────────────────
-  descCard: { backgroundColor: P.surface, borderRadius: 18, padding: 18, borderWidth: 1, borderColor: P.dim },
+  descCard: { backgroundColor: P.surface, borderRadius: 16, padding: 16, borderWidth: 1, borderColor: P.dim },
   descText: { fontSize: 15, color: P.charcoal, lineHeight: 26 },
 
   // ── Spec table ────────────────────────────────────────────────────────────
-  specTable:  { borderRadius: 18, overflow: 'hidden', borderWidth: 1, borderColor: P.dim },
-  specRow:    { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 14, paddingHorizontal: 16, borderBottomWidth: 1, borderBottomColor: P.dim, backgroundColor: P.white },
-  specRowAlt: { backgroundColor: P.surface },
-  specLabel:  { fontSize: 13, fontWeight: '600', color: P.muted, flex: 1 },
-  specValue:  { fontSize: 13, fontWeight: '800', color: P.charcoal, textAlign: 'right', flex: 1.2 },
+  specTable:      { borderRadius: 16, overflow: 'hidden', borderWidth: 1, borderColor: P.dim },
+  specTableDark:  { borderColor: P.dim },
+  specRow:        { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 13, paddingHorizontal: 16, borderBottomWidth: 1, borderBottomColor: P.dim, backgroundColor: P.white },
+  specRowAlt:     { backgroundColor: P.surface },
+  specRowDark:    { backgroundColor: P.white, borderBottomColor: P.dim },
+  specRowDarkAlt: { backgroundColor: P.surface, borderBottomColor: P.dim },
+  specLabel:      { fontSize: 13, fontWeight: '600', color: P.muted, flex: 1 },
+  specLabelDark:  { color: P.muted },
+  specValue:      { fontSize: 13, fontWeight: '800', color: P.charcoal, textAlign: 'right', flex: 1.2 },
+  specValueDark:  { color: P.charcoal },
 
   // ── Disponibilité ─────────────────────────────────────────────────────────
-  availCard: { backgroundColor: P.white, borderRadius: 18, padding: 18, gap: 12, borderWidth: 1, borderColor: P.dim },
+  availCard: { backgroundColor: P.surface, borderRadius: 16, padding: 16, gap: 12, borderWidth: 1, borderColor: P.dim },
   availRow:  { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  availIcon: { fontSize: 20 },
+  availIcon: { fontSize: 18 },
   availTxt:  { fontSize: 14, fontWeight: '600', color: P.charcoal },
 
   // ── Note mise en relation ─────────────────────────────────────────────────
-  meetupNote: { marginHorizontal: 20, marginTop: 8, marginBottom: 4, borderRadius: 18, overflow: 'hidden' },
-  meetupGrad: { flexDirection: 'row', alignItems: 'center', padding: 18, gap: 14, borderWidth: 1, borderColor: 'rgba(193,68,14,0.12)', borderRadius: 18 },
-  meetupIcon: { fontSize: 36 },
-  meetupTitle:{ fontSize: 14, fontWeight: '800', color: P.brown, marginBottom: 4 },
-  meetupSub:  { fontSize: 12, color: P.muted, lineHeight: 18 },
+  meetupNote:   { marginHorizontal: 16, marginTop: 12, borderRadius: 18, overflow: 'hidden' },
+  meetupInner:  { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 16, backgroundColor: P.peachSoft, borderWidth: 1, borderColor: 'rgba(236,90,19,0.18)', borderRadius: 18,marginBottom: 40  },
+  meetupAccent: { position: 'absolute', left: 0, top: 12, bottom: 12, width: 3, backgroundColor: P.terra, borderRadius: 2 },
+  meetupIcon:   { fontSize: 30 },
+  meetupTitle:  { fontSize: 13, fontWeight: '800', color: P.charcoal, marginBottom: 3 },
+  meetupSub:    { fontSize: 12, color: P.muted, lineHeight: 18 },
 
   // ── Footer contact ────────────────────────────────────────────────────────
-  footer:     { position: 'absolute', bottom: 0, left: 0, right: 0 },
-  footerFade: { position: 'absolute', top: -40, left: 0, right: 0, height: 40 },
-  footerBtns: { paddingHorizontal: 18, paddingTop: 10, gap: 10, backgroundColor: P.cream },
-  footerRow:  { flexDirection: 'row', gap: 10 },
+  footer:       { position: 'absolute', bottom: 0, left: 0, right: 0 },
+  footerFade:   { position: 'absolute', top: -40, left: 0, right: 0, height: 40 },
+  footerContent:{ paddingHorizontal: 16, paddingTop: 10, backgroundColor: P.surface, borderTopWidth: 1, borderTopColor: P.dim },
+  footerRow:    { flexDirection: 'row', gap: 10 },
 
-  // Contact buttons
-  cBtn:       { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 15, borderRadius: 16, gap: 8 },
-  cBtnGhost:  { backgroundColor: P.surface, borderWidth: 1.5, borderColor: P.dim },
-  cBtnWA:     { backgroundColor: 'rgba(37,211,102,0.09)', borderWidth: 1.5, borderColor: 'rgba(37,211,102,0.25)' },
-  cBtnMain:   { overflow: 'hidden', shadowColor: P.terra, shadowOpacity: 0.4, shadowOffset: { width: 0, height: 6 }, shadowRadius: 14, elevation: 8 },
-  cBtnGrad:   { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 15, borderRadius: 16, gap: 8 },
-  cBtnIcon:   { fontSize: 18, color: P.brown },
-  cBtnLabel:  { fontSize: 14, fontWeight: '700', color: P.brown },
-  cBtnIconMain: { fontSize: 20 },
+  // Boutons contact
+  cBtn:         { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 13, borderRadius: 14, gap: 7 },
+  cBtnWA:       { backgroundColor: 'rgba(37,211,102,0.1)', borderWidth: 1.5, borderColor: 'rgba(37,211,102,0.25)' },
+  cBtnCall:     { backgroundColor: P.peachSoft, borderWidth: 1.5, borderColor: 'rgba(236,90,19,0.2)' },
+  cBtnMain:     { overflow: 'hidden', shadowColor: P.terra, shadowOpacity: 0.35, shadowOffset: { width: 0, height: 5 }, shadowRadius: 12, elevation: 8 },
+  cBtnGrad:     { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 15, borderRadius: 14, gap: 8 },
+  cBtnIcon:     { fontSize: 17 },
+  cBtnLabel:    { fontSize: 13, fontWeight: '700' },
+  cBtnIconMain: { fontSize: 18 },
   cBtnLabelMain:{ fontSize: 15, fontWeight: '800', color: P.white, letterSpacing: 0.2 },
 });

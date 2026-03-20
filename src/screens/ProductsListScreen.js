@@ -1,6 +1,5 @@
-// ─── ProductsListScreen v2 ─ MarketHub Niger ─────────────────────────────────
-// Plateforme de mise en relation acheteurs / vendeurs
-// Aucune gestion de livraison ni de paiement par la plateforme
+﻿// ─── ProductsListScreen v3 PREMIUM ─ MarketHub Niger ─────────────────────────
+// Redesign bling-bling — moderne, engageant, irrésistible
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
@@ -10,12 +9,17 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
-import { COLORS, CATEGORIES } from '../utils/constants';
+import { CATEGORIES } from '../utils/constants';
 import { apiClient } from '../api/auth';
+import { getUnreadCount } from '../api/messaging';
+import { useAuth } from '../contexts/AuthContext';
+import { useSocket } from '../hooks/useSocket';
+import { MOBILE_COLORS as P } from '../theme/colors';
 
 const { width } = Dimensions.get('window');
 
-// Formater les nombres pour les stats (ex: 1234 => "1.2k+")
+// ─── HELPERS ──────────────────────────────────────────────────────────────────
+
 const formatStatNumber = (num) => {
   if (!num || num === 0) return '0';
   if (num < 1000) return num.toString();
@@ -23,46 +27,31 @@ const formatStatNumber = (num) => {
   return Math.floor(num / 1000) + 'k+';
 };
 
-// Extraire le nom de la ville depuis la localisation (ex: "Niamey, Niger" => "Niamey")
 const getCityName = (location) => {
-  if (!location) return '';
+  if (!location) return 'Niger';
   return location.split(',')[0].trim();
 };
 
-// ─── PALETTE ──────────────────────────────────────────────────────────────────
-const P = {
-  terra:    '#C1440E',
-  amber:    '#E8832A',
-  gold:     '#F0A500',
-  brown:    '#3D1C02',
-  charcoal: '#1A1210',
-  cream:    '#FDF6EC',
-  sand:     '#F5E6C8',
-  surface:  '#FFFAF3',
-  muted:    '#9C8872',
-  dim:      'rgba(61,28,2,0.06)',
-  white:    '#FFFFFF',
-};
-
-// ─── DONNÉES ──────────────────────────────────────────────────────────────────
+// ─── HOW IT WORKS DATA ────────────────────────────────────────────────────────
 
 const HOW_IT_WORKS = [
-  { step: '01', icon: '📸', title: 'Publiez',   desc: 'Ajoutez vos photos et décrivez votre annonce' },
-  { step: '02', icon: '💬', title: 'Discutez',  desc: 'Échangez directement par messagerie' },
-  { step: '03', icon: '🤝', title: 'Rencontrez', desc: 'Convenez d\'un lieu et concluez entre vous' },
+  { step: '01', icon: '📸', title: 'Publiez',    desc: 'Ajoutez vos photos et décrivez votre annonce' },
+  { step: '02', icon: '💬', title: 'Discutez',   desc: 'Échangez directement par messagerie' },
+  { step: '03', icon: '🤝', title: 'Rencontrez', desc: "Convenez d'un lieu et concluez entre vous" },
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────
 // MICRO-COMPOSANTS
 // ─────────────────────────────────────────────────────────────────────────────
 
+// Badge pulsant (notifications)
 function PulseBadge({ text }) {
   const pulse = useRef(new Animated.Value(1)).current;
   useEffect(() => {
     Animated.loop(
       Animated.sequence([
-        Animated.timing(pulse, { toValue: 1.18, duration: 650, useNativeDriver: true }),
-        Animated.timing(pulse, { toValue: 1,    duration: 650, useNativeDriver: true }),
+        Animated.timing(pulse, { toValue: 1.25, duration: 700, useNativeDriver: true }),
+        Animated.timing(pulse, { toValue: 1,    duration: 700, useNativeDriver: true }),
       ])
     ).start();
   }, []);
@@ -73,49 +62,55 @@ function PulseBadge({ text }) {
   );
 }
 
+// Ticker animé horizontal
 function StatsTicker({ stats }) {
-  const tx   = useRef(new Animated.Value(width)).current;
+  const tx = useRef(new Animated.Value(width)).current;
   const [idx, setIdx] = useState(0);
-  
-  // Générer les messages dynamiques avec les vraies stats
-  const tickerMsgs = [
+
+  const msgs = [
     `🔥 ${formatStatNumber(stats.totalProducts)} annonces disponibles`,
     `👥 ${formatStatNumber(stats.totalUsers)} membres actifs au Niger`,
-    `📍 Présent dans ${stats.totalCities}+ villes`,
+    `📍 Présent dans ${stats.totalCities || 0}+ villes`,
     '🆓 Publication entièrement gratuite',
     '⚡ Mise en relation directe & rapide',
   ];
-  
+
   useEffect(() => {
     const run = () => {
       tx.setValue(width);
-      Animated.timing(tx, { toValue: -width * 1.3, duration: 7200, useNativeDriver: true })
-        .start(() => { setIdx(p => (p + 1) % tickerMsgs.length); run(); });
+      Animated.timing(tx, { toValue: -width * 1.4, duration: 7500, useNativeDriver: true })
+        .start(() => { setIdx(p => (p + 1) % msgs.length); run(); });
     };
     run();
   }, [stats]);
-  
+
   return (
     <View style={s.ticker}>
-      <View style={s.tickerDot} />
+      <View style={s.tickerPill} />
       <View style={s.tickerTrack}>
         <Animated.Text style={[s.tickerTxt, { transform: [{ translateX: tx }] }]}>
-          {tickerMsgs[idx]}
+          {msgs[idx]}
         </Animated.Text>
       </View>
     </View>
   );
 }
 
-function SectionHeader({ title, subtitle, onSeeAll }) {
+// En-tête de section avec accent latéral
+function SectionHeader({ title, subtitle, onSeeAll, light }) {
   return (
     <View style={s.secHead}>
       <View style={{ flex: 1 }}>
         <View style={s.secTitleRow}>
-          <View style={s.secAccent} />
-          <Text style={s.secTitle}>{title}</Text>
+          <LinearGradient
+            colors={[P.orange500, P.orange300]}
+            style={s.secAccent}
+          />
+          <Text style={[s.secTitle, light && { color: P.white }]}>{title}</Text>
         </View>
-        {subtitle ? <Text style={s.secSub}>{subtitle}</Text> : null}
+        {subtitle ? (
+          <Text style={[s.secSub, light && { color: 'rgba(255,255,255,0.55)' }]}>{subtitle}</Text>
+        ) : null}
       </View>
       {onSeeAll && (
         <TouchableOpacity style={s.seeAllBtn} onPress={onSeeAll} activeOpacity={0.7}>
@@ -126,56 +121,85 @@ function SectionHeader({ title, subtitle, onSeeAll }) {
   );
 }
 
+// Chip catégorie
 function CategoryChip({ category, onPress }) {
   const sc = useRef(new Animated.Value(1)).current;
   return (
-    <TouchableOpacity activeOpacity={1} onPress={onPress}
-      onPressIn={()  => Animated.spring(sc, { toValue: 0.90, useNativeDriver: true, speed: 40 }).start()}
-      onPressOut={() => Animated.spring(sc, { toValue: 1,    useNativeDriver: true, speed: 40 }).start()}>
+    <TouchableOpacity
+      activeOpacity={1}
+      onPress={onPress}
+      onPressIn={()  => Animated.spring(sc, { toValue: 0.88, useNativeDriver: true, speed: 50 }).start()}
+      onPressOut={() => Animated.spring(sc, { toValue: 1,    useNativeDriver: true, speed: 50 }).start()}
+    >
       <Animated.View style={[s.chip, { transform: [{ scale: sc }] }]}>
-        <View style={s.chipIconWrap}><Text style={s.chipEmoji}>{category.emoji}</Text></View>
+        <View style={s.chipIconWrap}>
+          <Text style={s.chipEmoji}>{category.emoji}</Text>
+        </View>
         <Text style={s.chipLabel} numberOfLines={1}>{category.name}</Text>
       </Animated.View>
     </TouchableOpacity>
   );
 }
 
+// Carte annonce — redesignée
 function AnnounceCard({ item, onPress, hot }) {
   const sc = useRef(new Animated.Value(1)).current;
   const isService = item.type === 'service';
+
   return (
-    <TouchableOpacity activeOpacity={1} onPress={onPress}
-      onPressIn={()  => Animated.spring(sc, { toValue: 0.96, useNativeDriver: true, speed: 28 }).start()}
-      onPressOut={() => Animated.spring(sc, { toValue: 1,    useNativeDriver: true, speed: 28 }).start()}>
+    <TouchableOpacity
+      activeOpacity={1}
+      onPress={onPress}
+      onPressIn={()  => Animated.spring(sc, { toValue: 0.96, useNativeDriver: true, speed: 30 }).start()}
+      onPressOut={() => Animated.spring(sc, { toValue: 1,    useNativeDriver: true, speed: 30 }).start()}
+    >
       <Animated.View style={[s.card, { transform: [{ scale: sc }] }]}>
 
         {/* Image */}
         <View style={s.cardImgWrap}>
           <Image
-            source={{ uri: item.images?.[0] || 'https://via.placeholder.com/200x145/F5E6C8/C1440E?text=MarketHub' }}
+            source={{ uri: item.images?.[0] || 'https://via.placeholder.com/200x150/FFE9DE/EC5A13?text=MH' }}
             style={s.cardImg}
             resizeMode="cover"
           />
-          <LinearGradient colors={['transparent', 'rgba(26,18,16,0.58)']} style={StyleSheet.absoluteFill} />
+          {/* Gradient image bas */}
+          <LinearGradient
+            colors={['transparent', 'rgba(17,24,39,0.6)']}
+            style={StyleSheet.absoluteFill}
+            pointerEvents="none"
+          />
+
+          {/* Badge populaire */}
           {hot && (
-            <View style={s.hotBadge}><Text style={s.hotBadgeTxt}>🔥 Populaire</Text></View>
+            <View style={s.hotBadge}>
+              <Text style={s.hotBadgeTxt}>🔥 Populaire</Text>
+            </View>
           )}
-          <View style={[s.typeBadge, { backgroundColor: isService ? P.terra : P.amber }]}>
+
+          {/* Badge type — bas gauche */}
+          <View style={[s.typeBadge, { backgroundColor: isService ? 'rgba(236,90,19,0.9)' : 'rgba(245,158,11,0.9)' }]}>
             <Text style={s.typeBadgeTxt}>{isService ? '🛠 Service' : '📦 Produit'}</Text>
+          </View>
+
+          {/* Prix — bas droit */}
+          <View style={s.cardPriceTag}>
+            <Text style={s.cardPriceTagTxt}>
+              {item.price ? `${parseInt(item.price).toLocaleString('fr-FR')} FCFA` : 'À discuter'}
+            </Text>
           </View>
         </View>
 
-        {/* Infos */}
+        {/* Contenu */}
         <View style={s.cardBody}>
           <Text style={s.cardTitle} numberOfLines={2}>{item.title}</Text>
-          <Text style={s.cardLoc} numberOfLines={1}>
-            📍 {getCityName(item.location) || 'Niger'}
-          </Text>
-          <View style={s.cardBottom}>
-            <Text style={s.cardPrice}>
-              {item.price ? `${parseInt(item.price).toLocaleString()} FCFA` : 'Prix à discuter'}
-            </Text>
-            <View style={s.contactBtn}><Text style={s.contactBtnTxt}>Contacter</Text></View>
+          <View style={s.cardFooter}>
+            <View style={s.cardLocRow}>
+              <Text style={s.cardLocDot}>●</Text>
+              <Text style={s.cardLoc} numberOfLines={1}>{getCityName(item.location)}</Text>
+            </View>
+            <TouchableOpacity style={s.contactBtn} onPress={onPress}>
+              <Text style={s.contactBtnTxt}>Contacter</Text>
+            </TouchableOpacity>
           </View>
         </View>
 
@@ -184,44 +208,48 @@ function AnnounceCard({ item, onPress, hot }) {
   );
 }
 
+// Carte vendeur actif
 function SellerCard({ seller }) {
   const sc = useRef(new Animated.Value(1)).current;
-  // Extraire les initiales du nom
   const getInitials = (name) => {
     if (!name) return '??';
-    const parts = name.split(' ');
-    if (parts.length >= 2) {
-      return (parts[0][0] + parts[1][0]).toUpperCase();
-    }
-    return name.substring(0, 2).toUpperCase();
+    const parts = name.trim().split(' ');
+    return parts.length >= 2
+      ? (parts[0][0] + parts[1][0]).toUpperCase()
+      : name.substring(0, 2).toUpperCase();
   };
 
   return (
-    <TouchableOpacity activeOpacity={1}
-      onPressIn={()  => Animated.spring(sc, { toValue: 0.93, useNativeDriver: true, speed: 35 }).start()}
-      onPressOut={() => Animated.spring(sc, { toValue: 1,    useNativeDriver: true, speed: 35 }).start()}>
+    <TouchableOpacity
+      activeOpacity={1}
+      onPressIn={()  => Animated.spring(sc, { toValue: 0.93, useNativeDriver: true, speed: 40 }).start()}
+      onPressOut={() => Animated.spring(sc, { toValue: 1,    useNativeDriver: true, speed: 40 }).start()}
+    >
       <Animated.View style={[s.sellerCard, { transform: [{ scale: sc }] }]}>
+        {/* Indicateur online */}
+        <View style={[s.onlineDot, { backgroundColor: seller.isOnline ? P.green : P.muted }]} />
+
         {seller.avatar ? (
           <Image source={{ uri: seller.avatar }} style={s.sellerAvatar} />
         ) : (
-          <View style={s.sellerAvatar}>
+          <LinearGradient colors={[P.orange500, P.orange700]} style={s.sellerAvatar}>
             <Text style={s.sellerInitials}>{getInitials(seller.name)}</Text>
-          </View>
+          </LinearGradient>
         )}
         <Text style={s.sellerName} numberOfLines={1}>{seller.businessName || seller.name}</Text>
         <Text style={s.sellerCount}>{seller.productCount} annonce{seller.productCount > 1 ? 's' : ''}</Text>
-        <View style={[s.onlineDot, { backgroundColor: seller.isOnline ? '#22C55E' : P.muted }]} />
       </Animated.View>
     </TouchableOpacity>
   );
 }
 
+// Carte vide
 function EmptyCard({ text }) {
   return (
     <View style={s.emptyCard}>
-      <Text style={{ fontSize: 32 }}>🔍</Text>
+      <Text style={{ fontSize: 30, marginBottom: 6 }}>🔍</Text>
       <Text style={s.emptyTxt}>{text}</Text>
-      <Text style={s.emptySub}>Soyez le premier à publier !</Text>
+      <Text style={s.emptySub}>Soyez le premier !</Text>
     </View>
   );
 }
@@ -229,32 +257,66 @@ function EmptyCard({ text }) {
 // ─────────────────────────────────────────────────────────────────────────────
 // ÉCRAN PRINCIPAL
 // ─────────────────────────────────────────────────────────────────────────────
+
 export default function ProductsListScreen({ navigation }) {
   const insets = useSafeAreaInsets();
-  const [allProducts, setAllProducts] = useState([]);
-  const [loading, setLoading]         = useState(true);
-  const [refreshing, setRefreshing]   = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [platformStats, setPlatformStats] = useState({
-    totalProducts: 0,
-    totalUsers: 0,
-    totalCities: 0
+  const { isAuthenticated, token } = useAuth();
+  const { isConnected, on, off } = useSocket({
+    enabled: isAuthenticated,
+    token,
   });
-  const [activeSellers, setActiveSellers] = useState([]);
 
-  const fade  = useRef(new Animated.Value(0)).current;
-  const slideY = useRef(new Animated.Value(22)).current;
+  const [allProducts,    setAllProducts]    = useState([]);
+  const [loading,        setLoading]        = useState(true);
+  const [refreshing,     setRefreshing]     = useState(false);
+  const [searchQuery,    setSearchQuery]    = useState('');
+  const [platformStats,  setPlatformStats]  = useState({ totalProducts: 0, totalUsers: 0, totalCities: 0 });
+  const [activeSellers,  setActiveSellers]  = useState([]);
+  const [unreadCount,    setUnreadCount]    = useState(0);
+
+  // Animations d'entrée
+  const fade   = useRef(new Animated.Value(0)).current;
+  const slideY = useRef(new Animated.Value(28)).current;
 
   useEffect(() => {
     Animated.parallel([
-      Animated.timing(fade,   { toValue: 1, duration: 520, useNativeDriver: true }),
-      Animated.spring(slideY, { toValue: 0, tension: 68, friction: 11, useNativeDriver: true }),
+      Animated.timing(fade,   { toValue: 1, duration: 550, useNativeDriver: true }),
+      Animated.spring(slideY, { toValue: 0, tension: 65, friction: 10, useNativeDriver: true }),
     ]).start();
   }, []);
 
   const products = allProducts.filter(i => i.type !== 'service');
   const services = allProducts.filter(i => i.type === 'service');
 
+  // ─── Fetch unread count ───────────────────────────────────────────────────
+  const loadUnreadCount = useCallback(async () => {
+    if (!isAuthenticated) return;
+    try {
+      const response = await getUnreadCount();
+      setUnreadCount(Number(response?.data?.unreadCount || 0));
+    } catch (error) {
+      console.error('Erreur chargement compteur non lus:', error);
+    }
+  }, [isAuthenticated]);
+
+  useEffect(() => {
+    loadUnreadCount();
+  }, [loadUnreadCount]);
+
+  // Socket listeners pour mises à jour temps réel
+  useEffect(() => {
+    if (!isConnected) return;
+    on('unreadCount:changed', loadUnreadCount);
+    on('message:new', loadUnreadCount);
+    on('message:read', loadUnreadCount);
+    return () => {
+      off('unreadCount:changed', loadUnreadCount);
+      off('message:new', loadUnreadCount);
+      off('message:read', loadUnreadCount);
+    };
+  }, [isConnected, loadUnreadCount, on, off]);
+
+  // ─── Fetch ─────────────────────────────────────────────────────────────────
   const fetchProducts = async () => {
     try {
       const res = await apiClient.get('/products');
@@ -263,102 +325,123 @@ export default function ProductsListScreen({ navigation }) {
     finally { setLoading(false); setRefreshing(false); }
   };
 
-  const fetchPlatformStats = async () => {
+  const fetchStats = async () => {
     try {
       const res = await apiClient.get('/products/platform/stats');
-      if (res.data.success) {
-        setPlatformStats(res.data.data);
-      }
-    } catch (e) { console.error('Erreur stats:', e); }
+      if (res.data.success) setPlatformStats(res.data.data);
+    } catch (e) { console.error(e); }
   };
 
-  const fetchActiveSellers = async () => {
+  const fetchSellers = async () => {
     try {
       const res = await apiClient.get('/products/active-sellers?limit=10');
-      if (res.data.success) {
-        setActiveSellers(res.data.data);
-      }
-    } catch (e) { console.error('Erreur vendeurs:', e); }
+      if (res.data.success) setActiveSellers(res.data.data);
+    } catch (e) { console.error(e); }
   };
 
   useEffect(() => {
     fetchProducts();
-    fetchPlatformStats();
-    fetchActiveSellers();
+    fetchStats();
+    fetchSellers();
   }, []);
 
   const onRefresh = useCallback(() => {
     setRefreshing(true);
     fetchProducts();
-    fetchPlatformStats();
-    fetchActiveSellers();
+    fetchStats();
+    fetchSellers();
   }, []);
 
-  // ── Loading ────────────────────────────────────────────────────────────────
+  // ─── Loading screen ────────────────────────────────────────────────────────
   if (loading) {
     return (
-      <View style={{ flex: 1 }}>
-        <LinearGradient colors={[P.terra, P.amber]} style={s.loadScreen}>
-          <View style={s.loadLogoBox}><Text style={s.loadLogoTxt}>M</Text></View>
-          <Text style={s.loadBrand}>MarketHub</Text>
-          <Text style={s.loadSlogan}>Kowa Dan Kassoua · Niger</Text>
-          <ActivityIndicator size="large" color={P.cream} style={{ marginTop: 44 }} />
-        </LinearGradient>
-      </View>
+      <LinearGradient colors={[P.charcoal, P.brown]} style={s.loadScreen}>
+        <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
+        <View style={s.loadLogoWrap}>
+          <LinearGradient colors={[P.orange500, P.orange700]} style={s.loadLogoBox}>
+            <Text style={s.loadLogoTxt}>M</Text>
+          </LinearGradient>
+          {/* Anneau décoratif */}
+          <View style={s.loadRing} />
+        </View>
+        <Text style={s.loadBrand}>MarketHub</Text>
+        <Text style={s.loadSlogan}>Kowa Dan Kassoua · Niger</Text>
+        <ActivityIndicator size="large" color={P.amber} style={{ marginTop: 40 }} />
+      </LinearGradient>
     );
   }
 
-  // ── Rendu ──────────────────────────────────────────────────────────────────
+  // ─── Rendu principal ───────────────────────────────────────────────────────
   return (
     <View style={s.screen}>
-      <StatusBar barStyle="light-content" backgroundColor={P.terra} />
+      <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
 
       <ScrollView
         showsVerticalScrollIndicator={false}
         contentContainerStyle={{ paddingBottom: 80 + Math.max(insets.bottom, 8) }}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[P.terra]} tintColor={P.terra} />}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[P.terra]} tintColor={P.terra} />
+        }
       >
 
-        {/* ══════════════ HERO ══════════════════════════════════════════════ */}
+        {/* ══════════════════════════════════════════════════════════════════
+            HERO — fond sombre premium
+        ═══════════════════════════════════════════════════════════════════ */}
         <LinearGradient
-          colors={[P.terra, '#8A2400', P.charcoal]}
-          start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
+          colors={['#2d3748', '#374151', '#3d4a5c']}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
           style={[s.hero, { paddingTop: (insets.top || 0) + 14 }]}
         >
-          <View style={s.deco1} /><View style={s.deco2} /><View style={s.deco3} />
+          {/* Décos cercles ambiance */}
+          <View style={s.deco1} />
+          <View style={s.deco2} />
+          <View style={s.deco3} />
+          {/* Ligne accent top */}
+          <View style={s.heroTopLine} />
 
           <Animated.View style={{ opacity: fade, transform: [{ translateY: slideY }] }}>
 
-            {/* Marque */}
+            {/* ── Barre marque ── */}
             <View style={s.brandBar}>
-              <View style={s.logoBox}><Text style={s.logoTxt}>M</Text></View>
+              <LinearGradient colors={[P.orange500, P.orange700]} style={s.logoBox}>
+                <Text style={s.logoTxt}>M</Text>
+              </LinearGradient>
               <View style={{ flex: 1 }}>
                 <Text style={s.brandName}>MarketHub</Text>
                 <Text style={s.brandSub}>Kowa Dan Kassoua · Niger</Text>
               </View>
-              <TouchableOpacity style={s.notifBox} onPress={() => navigation.navigate('Notifications')}>
+              <TouchableOpacity
+                style={s.notifBox}
+                onPress={() => navigation.navigate('Messages')}
+              >
                 <Text style={{ fontSize: 20 }}>🔔</Text>
-                <PulseBadge text="2" />
+                {unreadCount > 0 && <PulseBadge text={String(unreadCount)} />}
               </TouchableOpacity>
             </View>
 
-            {/* Accroche */}
-            <Text style={s.heroH1}>Trouvez, contactez,{'\n'}concluez.</Text>
-            <Text style={s.heroH2}>
-              La place de marché du Niger — entre particuliers et professionnels.
-            </Text>
+            {/* ── Accroche ── */}
+            <View style={s.heroTextWrap}>
+              <Text style={s.heroH1}>
+                Trouvez, contactez,{'\n'}
+                <Text style={s.heroH1Accent}>concluez.</Text>
+              </Text>
+              <Text style={s.heroH2}>
+                La place de marché du Niger — entre particuliers et professionnels.
+              </Text>
+            </View>
 
-            {/* Ticker live */}
+            {/* ── Ticker live ── */}
             <StatsTicker stats={platformStats} />
 
-            {/* Recherche */}
+            {/* ── Barre de recherche ── */}
             <View style={s.searchBar}>
-              <View style={s.searchLeft}>
-                <Text style={{ fontSize: 16, marginRight: 8 }}>🔍</Text>
+              <View style={s.searchInner}>
+                <Text style={s.searchIcon}>🔍</Text>
                 <TextInput
                   style={s.searchInput}
-                  placeholder="Rechercher une annonce..."
-                  placeholderTextColor={P.muted}
+                  placeholder="Rechercher une annonce…"
+                  placeholderTextColor="rgba(107,114,128,0.8)"
                   value={searchQuery}
                   onChangeText={setSearchQuery}
                   returnKeyType="search"
@@ -368,20 +451,25 @@ export default function ProductsListScreen({ navigation }) {
               <TouchableOpacity
                 style={s.searchCta}
                 onPress={() => navigation.navigate('Search', { query: searchQuery })}
+                activeOpacity={0.85}
               >
-                <Text style={s.searchCtaTxt}>OK</Text>
+                <LinearGradient colors={[P.orange500, P.orange700]} style={s.searchCtaGrad}>
+                  <Text style={s.searchCtaTxt}>OK</Text>
+                </LinearGradient>
               </TouchableOpacity>
             </View>
 
           </Animated.View>
         </LinearGradient>
 
-        {/* ══════════════ CHIFFRES CLÉS ══════════════════════════════════════ */}
+        {/* ══════════════════════════════════════════════════════════════════
+            STATS STRIP — 3 chiffres clés
+        ═══════════════════════════════════════════════════════════════════ */}
         <View style={s.statsStrip}>
           {[
             { n: formatStatNumber(platformStats.totalProducts), lbl: 'Annonces',  icon: '📋' },
-            { n: formatStatNumber(platformStats.totalUsers), lbl: 'Membres',   icon: '👥' },
-            { n: platformStats.totalCities + '+', lbl: 'Villes',    icon: '📍' },
+            { n: formatStatNumber(platformStats.totalUsers),    lbl: 'Membres',   icon: '👥' },
+            { n: (platformStats.totalCities || 0) + '+',        lbl: 'Villes',    icon: '📍' },
           ].map((st, i) => (
             <React.Fragment key={i}>
               {i > 0 && <View style={s.statsDiv} />}
@@ -394,160 +482,237 @@ export default function ProductsListScreen({ navigation }) {
           ))}
         </View>
 
-        {/* ══════════════ CATÉGORIES ═════════════════════════════════════════ */}
+        {/* ══════════════════════════════════════════════════════════════════
+            CATÉGORIES
+        ═══════════════════════════════════════════════════════════════════ */}
         <View style={s.section}>
           <SectionHeader
             title="Parcourir par catégorie"
             subtitle="Trouvez exactement ce que vous cherchez"
             onSeeAll={() => navigation.navigate('Categories')}
           />
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.chipList}>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={s.chipList}
+          >
             {CATEGORIES.map(cat => (
               <CategoryChip
                 key={cat.id}
                 category={cat}
-                onPress={() => navigation.navigate('CategoryProducts', { categorySlug: cat.slug, categoryName: cat.name })}
+                onPress={() => navigation.navigate('CategoryProducts', {
+                  categorySlug: cat.slug,
+                  categoryName: cat.name,
+                })}
               />
             ))}
           </ScrollView>
         </View>
 
-        {/* ══════════════ BANNIÈRE — PUBLIER ═════════════════════════════════ */}
-        <View style={{ paddingHorizontal: 18, paddingVertical: 6 }}>
+        {/* ══════════════════════════════════════════════════════════════════
+            BANNIÈRE — PUBLIER GRATUITEMENT
+        ═══════════════════════════════════════════════════════════════════ */}
+        <View style={s.bannerWrap}>
           <LinearGradient
-            colors={[P.terra, P.amber]}
-            start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
+            colors={['#374151', '#3d4a5c']}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
             style={s.banner}
           >
+            {/* Accent orange côté gauche */}
+            <View style={s.bannerAccentBar} />
             <View style={{ flex: 1 }}>
-              <Text style={s.bannerEye}>🚀 C'est gratuit</Text>
-              <Text style={s.bannerTitle}>Publiez votre annonce{'\n'}en 2 minutes top chrono</Text>
-              <TouchableOpacity style={s.bannerBtn} onPress={() => navigation.navigate('CreateProduct')}>
-                <Text style={s.bannerBtnTxt}>Je publie maintenant →</Text>
+              <View style={s.bannerEyeWrap}>
+                <Text style={s.bannerEyeTxt}>🚀 C'est 100% gratuit</Text>
+              </View>
+              <Text style={s.bannerTitle}>
+                Publiez votre annonce{'\n'}en 2 minutes
+              </Text>
+              <TouchableOpacity
+                onPress={() => navigation.navigate('CreateProduct')}
+                activeOpacity={0.85}
+              >
+                <LinearGradient
+                  colors={[P.orange500, P.orange700]}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 0 }}
+                  style={s.bannerBtn}
+                >
+                  <Text style={s.bannerBtnTxt}>Je publie maintenant →</Text>
+                </LinearGradient>
               </TouchableOpacity>
             </View>
-            <Text style={{ fontSize: 68, marginLeft: 8 }}>📣</Text>
+            <Text style={s.bannerEmoji}>📣</Text>
           </LinearGradient>
         </View>
 
-        {/* ══════════════ ANNONCES DU MOMENT 🔥 ═════════════════════════════ */}
+        {/* ══════════════════════════════════════════════════════════════════
+            ANNONCES DU MOMENT 🔥
+        ═══════════════════════════════════════════════════════════════════ */}
         <View style={s.section}>
           <SectionHeader
             title="Annonces du moment 🔥"
             subtitle="Les plus consultées aujourd'hui"
             onSeeAll={() => navigation.navigate('AllProducts', { type: 'product' })}
           />
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.cardList}>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={s.cardList}
+          >
             {products.length === 0
               ? <EmptyCard text="Aucun produit pour l'instant" />
               : products.slice(0, 10).map((item, idx) => (
                   <AnnounceCard
-                    key={item.id || idx}
+                    key={item._id || item.id || idx}
                     item={item}
                     hot={idx < 2}
-                    onPress={() => navigation.navigate('ProductDetail', { productId: item.id })}
+                    onPress={() => navigation.navigate('ProductDetail', { productId: item._id || item.id })}
                   />
                 ))
             }
           </ScrollView>
         </View>
 
-        {/* ══════════════ COMMENT ÇA MARCHE ══════════════════════════════════ */}
-        <View style={s.howSection}>
-          <SectionHeader title="Comment ça marche ?" />
+        {/* ══════════════════════════════════════════════════════════════════
+            COMMENT ÇA MARCHE
+        ═══════════════════════════════════════════════════════════════════ */}
+        <LinearGradient
+          colors={['#2d3748', '#374151']}
+          style={s.howSection}
+        >
+          <SectionHeader title="Comment ça marche ?" light />
           <View style={s.howRow}>
             {HOW_IT_WORKS.map((h, i) => (
               <View key={i} style={s.howStep}>
-                {/* Connecteur entre étapes */}
                 {i < HOW_IT_WORKS.length - 1 && <View style={s.howLine} />}
                 <View style={s.howIconWrap}>
-                  <Text style={s.howIcon}>{h.icon}</Text>
-                  <View style={s.howNum}><Text style={s.howNumTxt}>{h.step}</Text></View>
+                  <LinearGradient colors={['rgba(236,90,19,0.18)', 'rgba(236,90,19,0.06)']} style={s.howIconBg}>
+                    <Text style={s.howIcon}>{h.icon}</Text>
+                  </LinearGradient>
+                  <LinearGradient colors={[P.orange500, P.orange700]} style={s.howNum}>
+                    <Text style={s.howNumTxt}>{h.step}</Text>
+                  </LinearGradient>
                 </View>
                 <Text style={s.howTitle}>{h.title}</Text>
                 <Text style={s.howDesc}>{h.desc}</Text>
               </View>
             ))}
           </View>
-        </View>
+        </LinearGradient>
 
-        {/* ══════════════ SERVICES À LA UNE ══════════════════════════════════ */}
+        {/* ══════════════════════════════════════════════════════════════════
+            SERVICES À LA UNE
+        ═══════════════════════════════════════════════════════════════════ */}
         <View style={s.section}>
           <SectionHeader
             title="Services à la une"
             subtitle="Artisans, prestataires et experts près de vous"
             onSeeAll={() => navigation.navigate('AllProducts', { type: 'service' })}
           />
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.cardList}>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={s.cardList}
+          >
             {services.length === 0
               ? <EmptyCard text="Aucun service pour l'instant" />
               : services.slice(0, 10).map((item, idx) => (
                   <AnnounceCard
-                    key={item.id || idx}
+                    key={item._id || item.id || idx}
                     item={item}
                     hot={false}
-                    onPress={() => navigation.navigate('ProductDetail', { productId: item.id })}
+                    onPress={() => navigation.navigate('ProductDetail', { productId: item._id || item.id })}
                   />
                 ))
             }
           </ScrollView>
         </View>
 
-        {/* ══════════════ VENDEURS ACTIFS ════════════════════════════════════ */}
+        {/* ══════════════════════════════════════════════════════════════════
+            VENDEURS ACTIFS
+        ═══════════════════════════════════════════════════════════════════ */}
         {activeSellers.length > 0 && (
           <View style={s.section}>
             <SectionHeader
               title="Vendeurs actifs"
               subtitle="Annonceurs disponibles en ce moment"
             />
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.sellerList}>
-              {activeSellers.map((sel, i) => <SellerCard key={sel._id || i} seller={sel} />)}
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={s.sellerList}
+            >
+              {activeSellers.map((sel, i) => (
+                <SellerCard key={sel._id || i} seller={sel} />
+              ))}
             </ScrollView>
           </View>
         )}
 
-        {/* ══════════════ CONFIANCE ══════════════════════════════════════════ */}
+        {/* ══════════════════════════════════════════════════════════════════
+            CONFIANCE
+        ═══════════════════════════════════════════════════════════════════ */}
         <View style={s.trustSection}>
-          <Text style={s.trustTitle}>Pourquoi MarketHub ?</Text>
-          <View style={s.trustGrid}>
+          <SectionHeader title="Pourquoi MarketHub ?" light />
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={s.trustList}
+          >
             {[
-              { icon: '🔒', title: 'Membres vérifiés',    desc: 'Chaque compte est contrôlé pour votre sérénité' },
-              { icon: '💬', title: 'Messagerie intégrée', desc: 'Discutez directement avec n\'importe quel annonceur' },
-              { icon: '🆓', title: '100 % Gratuit',       desc: 'Publiez autant d\'annonces que vous voulez, sans frais' },
-              { icon: '📍', title: 'Très local',           desc: 'Des annonces dans votre ville, votre quartier' },
+              { icon: '🔒', title: 'Membres vérifiés',    color: P.peachSoft,   border: 'rgba(236,90,19,0.18)' },
+              { icon: '💬', title: 'Messagerie directe',  color: '#e8f4fd',     border: 'rgba(59,130,246,0.18)' },
+              { icon: '🆓', title: '100 % Gratuit',       color: '#e8faf0',     border: 'rgba(34,197,94,0.18)' },
+              { icon: '📍', title: 'Très local',          color: P.amberSoft,   border: 'rgba(245,158,11,0.18)' },
             ].map((t, i) => (
-              <View key={i} style={s.trustCard}>
-                <Text style={s.trustIcon}>{t.icon}</Text>
-                <Text style={s.trustCardTitle}>{t.title}</Text>
-                <Text style={s.trustCardDesc}>{t.desc}</Text>
+              <View key={i} style={[s.trustPill, { backgroundColor: t.color, borderColor: t.border }]}>
+                <Text style={s.trustPillIcon}>{t.icon}</Text>
+                <Text style={s.trustPillTitle}>{t.title}</Text>
               </View>
             ))}
-          </View>
+          </ScrollView>
         </View>
 
-        {/* ══════════════ FOOTER CTA ═════════════════════════════════════════ */}
-        <LinearGradient colors={[P.charcoal, '#2A1206']} style={s.footerCta}>
-          <View style={s.footerDeco1} /><View style={s.footerDeco2} />
-          <Text style={s.footerTitle}>Vous avez quelque{'\n'}chose à proposer ?</Text>
+        {/* ══════════════════════════════════════════════════════════════════
+            FOOTER CTA
+        ═══════════════════════════════════════════════════════════════════ */}
+        <View style={s.footerCta}>
+          {/* Ligne accent haut */}
+          <LinearGradient
+            colors={['transparent', P.terra, 'transparent']}
+            start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
+            style={s.footerAccentLine}
+          />
+
+          {/* Icône */}
+          <View style={s.footerIconWrap}>
+            <LinearGradient colors={[P.orange500, P.orange700]} style={s.footerIconGrad}>
+              <Text style={{ fontSize: 26 }}>📣</Text>
+            </LinearGradient>
+          </View>
+
+          <Text style={s.footerTitle}>Quelque chose à vendre ?</Text>
           <Text style={s.footerSub}>
-            Des milliers de personnes au Niger cherchent ce que vous avez.{'\n'}
-            Publiez votre annonce — c'est gratuit et ça prend 2 minutes.
+            Publiez gratuitement en 2 minutes.
           </Text>
+
           <TouchableOpacity
             style={s.footerBtn}
             onPress={() => navigation.navigate('CreateProduct')}
             activeOpacity={0.85}
           >
             <LinearGradient
-              colors={[P.terra, P.amber]}
+              colors={[P.orange500, P.orange700]}
               start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
               style={s.footerBtnGrad}
             >
-              <Text style={s.footerBtnTxt}>📣  Déposer une annonce gratuite</Text>
+              <Text style={s.footerBtnTxt}>Déposer une annonce gratuite</Text>
             </LinearGradient>
           </TouchableOpacity>
+
           <Text style={s.footerBadge}>✅ Sans commission · Sans frais cachés</Text>
-        </LinearGradient>
+        </View>
 
       </ScrollView>
     </View>
@@ -556,142 +721,219 @@ export default function ProductsListScreen({ navigation }) {
 
 // ─── STYLES ───────────────────────────────────────────────────────────────────
 const s = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: P.cream },
 
-  // Loading
+  screen: { flex: 1, backgroundColor: P.surface },
+
+  // ─── Loading ────────────────────────────────────────────────────────────────
   loadScreen:   { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  loadLogoBox:  { width: 74, height: 74, borderRadius: 22, backgroundColor: P.gold, justifyContent: 'center', alignItems: 'center', marginBottom: 16, shadowColor: P.brown, shadowOpacity: 0.3, shadowOffset: { width: 0, height: 6 }, shadowRadius: 16, elevation: 10 },
-  loadLogoTxt:  { fontSize: 40, fontWeight: '900', color: P.brown },
-  loadBrand:    { fontSize: 32, fontWeight: '900', color: P.cream, letterSpacing: -1 },
-  loadSlogan:   { fontSize: 13, color: 'rgba(253,246,236,0.65)', marginTop: 6 },
+  loadLogoWrap: { position: 'relative', marginBottom: 20, alignItems: 'center', justifyContent: 'center' },
+  loadLogoBox:  {
+    width: 76, height: 76, borderRadius: 24,
+    justifyContent: 'center', alignItems: 'center',
+    shadowColor: P.terra, shadowOpacity: 0.5,
+    shadowOffset: { width: 0, height: 8 }, shadowRadius: 20, elevation: 12,
+  },
+  loadRing: {
+    position: 'absolute', width: 100, height: 100,
+    borderRadius: 50, borderWidth: 1.5,
+    borderColor: 'rgba(236,90,19,0.3)',
+  },
+  loadLogoTxt: { fontSize: 42, fontWeight: '900', color: P.white },
+  loadBrand:   { fontSize: 32, fontWeight: '900', color: P.white, letterSpacing: -1 },
+  loadSlogan:  { fontSize: 13, color: 'rgba(255,255,255,0.4)', marginTop: 6 },
 
-  // Hero
-  hero:  { paddingHorizontal: 20, paddingBottom: 28, overflow: 'hidden' },
-  deco1: { position: 'absolute', top: -80, right: -80, width: 220, height: 220, borderRadius: 110, backgroundColor: 'rgba(240,165,0,0.10)' },
-  deco2: { position: 'absolute', bottom: -40, left: -50, width: 160, height: 160, borderRadius: 80, backgroundColor: 'rgba(193,68,14,0.16)' },
-  deco3: { position: 'absolute', top: 70, right: 50, width: 55, height: 55, borderRadius: 28, backgroundColor: 'rgba(240,165,0,0.07)' },
+  // ─── Hero ───────────────────────────────────────────────────────────────────
+  hero: { paddingHorizontal: 20, paddingBottom: 28, overflow: 'hidden', position: 'relative' },
+  heroTopLine: {
+    position: 'absolute', top: 0, left: 0, right: 0, height: 3, backgroundColor: P.terra,
+  },
+  deco1: { position: 'absolute', top: -100, right: -80,  width: 240, height: 240, borderRadius: 120, backgroundColor: 'rgba(236,90,19,0.09)' },
+  deco2: { position: 'absolute', bottom: -50, left: -60, width: 180, height: 180, borderRadius: 90,  backgroundColor: 'rgba(245,158,11,0.07)' },
+  deco3: { position: 'absolute', top: 80, right: 60,     width: 60,  height: 60,  borderRadius: 30,  backgroundColor: 'rgba(236,90,19,0.08)' },
 
-  // Marque
-  brandBar:  { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 20 },
-  logoBox:   { width: 44, height: 44, borderRadius: 13, backgroundColor: P.gold, justifyContent: 'center', alignItems: 'center' },
-  logoTxt:   { fontSize: 24, fontWeight: '900', color: P.brown },
-  brandName: { fontSize: 19, fontWeight: '800', color: P.cream, letterSpacing: -0.4 },
-  brandSub:  { fontSize: 11, color: 'rgba(253,246,236,0.52)', marginTop: 1 },
-  notifBox:  { width: 44, height: 44, borderRadius: 22, backgroundColor: 'rgba(255,255,255,0.12)', justifyContent: 'center', alignItems: 'center' },
-  pulseBadge: { position: 'absolute', top: 5, right: 5, width: 16, height: 16, borderRadius: 8, backgroundColor: P.gold, justifyContent: 'center', alignItems: 'center', borderWidth: 1.5, borderColor: P.brown },
-  pulseBadgeTxt: { fontSize: 8, fontWeight: '900', color: P.brown },
+  // Brand bar
+  brandBar:  { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 24 },
+  logoBox:   { width: 46, height: 46, borderRadius: 14, justifyContent: 'center', alignItems: 'center', shadowColor: P.terra, shadowOpacity: 0.4, shadowOffset: { width: 0, height: 4 }, shadowRadius: 10, elevation: 8 },
+  logoTxt:   { fontSize: 26, fontWeight: '900', color: P.white },
+  brandName: { fontSize: 19, fontWeight: '800', color: P.white, letterSpacing: -0.4 },
+  brandSub:  { fontSize: 11, color: 'rgba(255,255,255,0.38)', marginTop: 1 },
+  notifBox:  { width: 44, height: 44, borderRadius: 22, backgroundColor: 'rgba(255,255,255,0.08)', justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)' },
+  pulseBadge:    { position: 'absolute', top: 4, right: 4, width: 16, height: 16, borderRadius: 8, backgroundColor: P.terra, justifyContent: 'center', alignItems: 'center', borderWidth: 1.5, borderColor: P.charcoal },
+  pulseBadgeTxt: { fontSize: 8, fontWeight: '900', color: P.white },
 
-  // Titres hero
-  heroH1: { fontSize: 30, fontWeight: '900', color: P.cream, letterSpacing: -0.8, lineHeight: 38, marginBottom: 8 },
-  heroH2: { fontSize: 13, color: 'rgba(253,246,236,0.68)', lineHeight: 19, marginBottom: 18 },
+  // Accroche
+  heroTextWrap: { marginBottom: 18 },
+  heroH1:       { fontSize: 32, fontWeight: '900', color: P.white, letterSpacing: -1, lineHeight: 40 },
+  heroH1Accent: { color: P.amber },
+  heroH2:       { fontSize: 13, color: 'rgba(255,255,255,0.5)', lineHeight: 20, marginTop: 8 },
 
   // Ticker
-  ticker:     { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.10)', borderRadius: 22, paddingHorizontal: 14, paddingVertical: 9, marginBottom: 18, overflow: 'hidden' },
-  tickerDot:  { width: 8, height: 8, borderRadius: 4, backgroundColor: P.gold, marginRight: 10, flexShrink: 0 },
-  tickerTrack:{ flex: 1, overflow: 'hidden' },
-  tickerTxt:  { fontSize: 13, color: P.cream, fontWeight: '500' },
+  ticker:      { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.07)', borderRadius: 24, paddingHorizontal: 14, paddingVertical: 10, marginBottom: 18, overflow: 'hidden', borderWidth: 1, borderColor: 'rgba(255,255,255,0.07)' },
+  tickerPill:  { width: 8, height: 8, borderRadius: 4, backgroundColor: P.terra, marginRight: 10, flexShrink: 0 },
+  tickerTrack: { flex: 1, overflow: 'hidden' },
+  tickerTxt:   { fontSize: 13, color: 'rgba(255,255,255,0.8)', fontWeight: '500' },
 
   // Recherche
-  searchBar:  { flexDirection: 'row', gap: 8 },
-  searchLeft: { flex: 1, flexDirection: 'row', alignItems: 'center', backgroundColor: P.cream, borderRadius: 14, paddingHorizontal: 14, paddingVertical: 13 },
-  searchInput:{ flex: 1, fontSize: 14, color: P.charcoal },
-  searchCta:  { backgroundColor: P.gold, borderRadius: 14, paddingHorizontal: 18, justifyContent: 'center', alignItems: 'center' },
-  searchCtaTxt:{ fontSize: 14, fontWeight: '800', color: P.brown },
+  searchBar:    { flexDirection: 'row', gap: 10 },
+  searchInner:  { flex: 1, flexDirection: 'row', alignItems: 'center', backgroundColor: P.white, borderRadius: 14, paddingHorizontal: 14, paddingVertical: 13, gap: 8 },
+  searchIcon:   { fontSize: 16 },
+  searchInput:  { flex: 1, fontSize: 14, color: P.charcoal },
+  searchCta:    { borderRadius: 14, overflow: 'hidden', alignSelf: 'stretch' },
+  searchCtaGrad:{ flex: 1, paddingHorizontal: 20, justifyContent: 'center', alignItems: 'center' },
+  searchCtaTxt: { fontSize: 14, fontWeight: '900', color: P.white },
 
-  // Stats strip
-  statsStrip: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-around', paddingVertical: 16, paddingHorizontal: 20, backgroundColor: P.surface, borderBottomWidth: 1, borderBottomColor: 'rgba(157,136,114,0.12)' },
-  statsDiv:   { width: 1, height: 36, backgroundColor: 'rgba(157,136,114,0.2)' },
-  statItem:   { alignItems: 'center', gap: 3 },
-  statIcon:   { fontSize: 20 },
-  statNum:    { fontSize: 21, fontWeight: '900', color: P.terra, letterSpacing: -0.5 },
-  statLbl:    { fontSize: 11, color: P.muted, fontWeight: '600' },
+  // ─── Stats strip ────────────────────────────────────────────────────────────
+  statsStrip: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-around',
+    paddingVertical: 18, paddingHorizontal: 16,
+    backgroundColor: P.white,
+    borderBottomWidth: 1, borderBottomColor: P.dim,
+    shadowColor: P.charcoal, shadowOpacity: 0.04,
+    shadowOffset: { width: 0, height: 2 }, shadowRadius: 6, elevation: 2,
+  },
+  statsDiv:  { width: 1, height: 36, backgroundColor: P.dim },
+  statItem:  { alignItems: 'center', gap: 2 },
+  statIcon:  { fontSize: 20, marginBottom: 2 },
+  statNum:   { fontSize: 22, fontWeight: '900', color: P.terra, letterSpacing: -0.5 },
+  statLbl:   { fontSize: 11, color: P.muted, fontWeight: '600' },
 
-  // Section générique
-  section: { paddingVertical: 20, backgroundColor: P.surface, marginTop: 8, borderTopWidth: 1, borderTopColor: P.dim },
+  // ─── Section générique ──────────────────────────────────────────────────────
+  section: {
+    paddingVertical: 22,
+    backgroundColor: P.white,
+    marginTop: 8,
+  },
 
   // Section header
-  secHead:    { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', paddingHorizontal: 18, marginBottom: 16 },
-  secTitleRow:{ flexDirection: 'row', alignItems: 'center', gap: 10 },
-  secAccent:  { width: 4, height: 24, borderRadius: 2, backgroundColor: P.terra },
-  secTitle:   { fontSize: 18, fontWeight: '900', color: P.charcoal, letterSpacing: -0.4 },
-  secSub:     { fontSize: 12, color: P.muted, marginTop: 4, marginLeft: 14 },
-  seeAllBtn:  { backgroundColor: 'rgba(193,68,14,0.08)', paddingHorizontal: 12, paddingVertical: 7, borderRadius: 9, marginTop: 2 },
-  seeAllTxt:  { fontSize: 12, fontWeight: '700', color: P.terra },
+  secHead:     { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', paddingHorizontal: 18, marginBottom: 16 },
+  secTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  secAccent:   { width: 4, height: 26, borderRadius: 2 },
+  secTitle:    { fontSize: 18, fontWeight: '900', color: P.charcoal, letterSpacing: -0.4 },
+  secSub:      { fontSize: 12, color: P.muted, marginTop: 4, marginLeft: 14 },
+  seeAllBtn:   { backgroundColor: P.peachSoft, paddingHorizontal: 12, paddingVertical: 7, borderRadius: 10 },
+  seeAllTxt:   { fontSize: 12, fontWeight: '700', color: P.terra },
 
-  // Chips catégorie
-  chipList:   { paddingHorizontal: 18, gap: 10 },
-  chip:       { alignItems: 'center', backgroundColor: P.cream, borderRadius: 18, paddingVertical: 12, paddingHorizontal: 14, minWidth: 82, borderWidth: 1.5, borderColor: 'rgba(193,68,14,0.13)', shadowColor: P.terra, shadowOpacity: 0.07, shadowOffset: { width: 0, height: 3 }, shadowRadius: 8, elevation: 2 },
-  chipIconWrap:{ width: 50, height: 50, borderRadius: 25, backgroundColor: 'rgba(193,68,14,0.07)', justifyContent: 'center', alignItems: 'center', marginBottom: 8 },
-  chipEmoji:  { fontSize: 25 },
-  chipLabel:  { fontSize: 11, color: P.brown, fontWeight: '700', textAlign: 'center' },
+  // ─── Chips catégorie ────────────────────────────────────────────────────────
+  chipList: { paddingHorizontal: 18, gap: 10 },
+  chip: {
+    alignItems: 'center', backgroundColor: P.white, borderRadius: 18,
+    paddingVertical: 12, paddingHorizontal: 14, minWidth: 80,
+    borderWidth: 1.5, borderColor: 'rgba(236,90,19,0.15)',
+    shadowColor: P.terra, shadowOpacity: 0.06,
+    shadowOffset: { width: 0, height: 3 }, shadowRadius: 8, elevation: 2,
+  },
+  chipIconWrap: { width: 50, height: 50, borderRadius: 25, backgroundColor: P.peachSoft, justifyContent: 'center', alignItems: 'center', marginBottom: 8 },
+  chipEmoji:    { fontSize: 24 },
+  chipLabel:    { fontSize: 11, color: P.charcoal, fontWeight: '700', textAlign: 'center' },
 
-  // Bannière
-  banner:    { borderRadius: 22, padding: 22, flexDirection: 'row', alignItems: 'center', shadowColor: P.terra, shadowOpacity: 0.28, shadowOffset: { width: 0, height: 6 }, shadowRadius: 18, elevation: 8 },
-  bannerEye: { fontSize: 12, color: 'rgba(61,28,2,0.6)', fontWeight: '700', marginBottom: 5 },
-  bannerTitle:{ fontSize: 18, fontWeight: '900', color: P.brown, lineHeight: 25, marginBottom: 14 },
-  bannerBtn: { backgroundColor: P.brown, borderRadius: 11, paddingVertical: 11, paddingHorizontal: 16, alignSelf: 'flex-start' },
-  bannerBtnTxt:{ fontSize: 13, fontWeight: '700', color: P.cream },
+  // ─── Bannière publier ───────────────────────────────────────────────────────
+  bannerWrap: { paddingHorizontal: 16, paddingVertical: 8, marginTop: 8 },
+  banner: {
+    borderRadius: 22, padding: 22,
+    flexDirection: 'row', alignItems: 'center',
+    overflow: 'hidden', position: 'relative',
+    shadowColor: P.charcoal, shadowOpacity: 0.25,
+    shadowOffset: { width: 0, height: 8 }, shadowRadius: 20, elevation: 10,
+  },
+  bannerAccentBar: { position: 'absolute', left: 0, top: 20, bottom: 20, width: 4, backgroundColor: P.terra, borderRadius: 2 },
+  bannerEyeWrap:  { backgroundColor: 'rgba(236,90,19,0.18)', alignSelf: 'flex-start', borderRadius: 8, paddingHorizontal: 8, paddingVertical: 4, marginBottom: 8 },
+  bannerEyeTxt:   { fontSize: 11, fontWeight: '700', color: P.amber },
+  bannerTitle:    { fontSize: 18, fontWeight: '900', color: P.white, lineHeight: 25, marginBottom: 14 },
+  bannerBtn:      { paddingVertical: 11, paddingHorizontal: 16, borderRadius: 11, alignSelf: 'flex-start', shadowColor: P.terra, shadowOpacity: 0.35, shadowOffset: { width: 0, height: 4 }, shadowRadius: 10, elevation: 6 },
+  bannerBtnTxt:   { fontSize: 13, fontWeight: '800', color: P.white },
+  bannerEmoji:    { fontSize: 60, marginLeft: 10 },
 
-  // Cartes annonces
-  cardList:   { paddingHorizontal: 18, gap: 14, paddingBottom: 4 },
-  card:       { width: 190, backgroundColor: P.cream, borderRadius: 20, overflow: 'hidden', borderWidth: 1, borderColor: 'rgba(157,136,114,0.18)', shadowColor: P.brown, shadowOpacity: 0.11, shadowOffset: { width: 0, height: 4 }, shadowRadius: 12, elevation: 5 },
-  cardImgWrap:{ height: 145, backgroundColor: P.sand, position: 'relative' },
-  cardImg:    { width: '100%', height: '100%' },
-  hotBadge:   { position: 'absolute', top: 10, right: 10, backgroundColor: P.terra, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6 },
-  hotBadgeTxt:{ fontSize: 9, fontWeight: '800', color: P.white },
-  typeBadge:  { position: 'absolute', bottom: 10, left: 10, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6 },
+  // ─── Cartes annonces ────────────────────────────────────────────────────────
+  cardList: { paddingHorizontal: 18, gap: 14, paddingBottom: 4 },
+  card: {
+    width: 192, backgroundColor: P.white, borderRadius: 20, overflow: 'hidden',
+    shadowColor: P.charcoal, shadowOpacity: 0.10,
+    shadowOffset: { width: 0, height: 5 }, shadowRadius: 14, elevation: 5,
+  },
+  cardImgWrap: { height: 148, backgroundColor: P.sand, position: 'relative' },
+  cardImg:     { width: '100%', height: '100%' },
+  hotBadge:    { position: 'absolute', top: 10, right: 10, backgroundColor: 'rgba(236,90,19,0.92)', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 7 },
+  hotBadgeTxt: { fontSize: 9, fontWeight: '800', color: P.white },
+  typeBadge:   { position: 'absolute', top: 10, left: 10, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 7 },
   typeBadgeTxt:{ fontSize: 9, fontWeight: '800', color: P.white },
-  cardBody:   { padding: 13 },
-  cardTitle:  { fontSize: 14, fontWeight: '700', color: P.charcoal, lineHeight: 20, marginBottom: 7, minHeight: 40 },
-  cardLoc:    { fontSize: 11, color: P.muted, marginBottom: 10 },
-  cardBottom: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderTopWidth: 1, borderTopColor: P.dim, paddingTop: 10 },
-  cardPrice:  { fontSize: 14, fontWeight: '900', color: P.terra, flex: 1 },
-  contactBtn: { backgroundColor: P.terra, borderRadius: 8, paddingVertical: 6, paddingHorizontal: 10 },
+  cardPriceTag:{ position: 'absolute', bottom: 10, left: 8, backgroundColor: 'rgba(17,24,39,0.82)', paddingHorizontal: 9, paddingVertical: 4, borderRadius: 8 },
+  cardPriceTagTxt:{ fontSize: 11, fontWeight: '900', color: P.white },
+  cardBody:    { padding: 12 },
+  cardTitle:   { fontSize: 13, fontWeight: '700', color: P.charcoal, lineHeight: 19, marginBottom: 10, minHeight: 38 },
+  cardFooter:  { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  cardLocRow:  { flexDirection: 'row', alignItems: 'center', gap: 4, flex: 1 },
+  cardLocDot:  { fontSize: 7, color: P.terra },
+  cardLoc:     { fontSize: 11, color: P.muted, flex: 1 },
+  contactBtn:  { backgroundColor: P.terra, borderRadius: 8, paddingVertical: 6, paddingHorizontal: 10, shadowColor: P.terra, shadowOpacity: 0.3, shadowOffset: { width: 0, height: 2 }, shadowRadius: 6, elevation: 3 },
   contactBtnTxt:{ fontSize: 11, fontWeight: '800', color: P.white },
 
-  // Comment ça marche
-  howSection: { backgroundColor: P.sand, paddingVertical: 22, paddingHorizontal: 18, marginTop: 8, borderTopWidth: 1, borderTopColor: 'rgba(193,68,14,0.08)' },
-  howRow:     { flexDirection: 'row', justifyContent: 'space-between', marginTop: 4 },
+  // ─── Comment ça marche ──────────────────────────────────────────────────────
+  howSection: { paddingVertical: 26, paddingHorizontal: 18, marginTop: 8 },
+  howRow:     { flexDirection: 'row', justifyContent: 'space-between', marginTop: 8 },
   howStep:    { flex: 1, alignItems: 'center', paddingHorizontal: 4, position: 'relative' },
-  howLine:    { position: 'absolute', top: 24, left: '55%', right: '-55%', height: 2, backgroundColor: 'rgba(193,68,14,0.18)', zIndex: 0 },
-  howIconWrap:{ position: 'relative', marginBottom: 10, zIndex: 1 },
-  howIcon:    { fontSize: 38 },
-  howNum:     { position: 'absolute', top: -8, right: -10, width: 20, height: 20, borderRadius: 10, backgroundColor: P.terra, justifyContent: 'center', alignItems: 'center' },
+  howLine:    { position: 'absolute', top: 30, left: '55%', right: '-55%', height: 1.5, backgroundColor: 'rgba(236,90,19,0.2)', zIndex: 0 },
+  howIconWrap:{ position: 'relative', marginBottom: 12, zIndex: 1 },
+  howIconBg:  { width: 62, height: 62, borderRadius: 31, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: 'rgba(236,90,19,0.2)' },
+  howIcon:    { fontSize: 30 },
+  howNum:     { position: 'absolute', top: -6, right: -8, width: 20, height: 20, borderRadius: 10, justifyContent: 'center', alignItems: 'center' },
   howNumTxt:  { fontSize: 9, fontWeight: '900', color: P.white },
-  howTitle:   { fontSize: 13, fontWeight: '800', color: P.brown, textAlign: 'center', marginBottom: 5 },
-  howDesc:    { fontSize: 11, color: P.muted, textAlign: 'center', lineHeight: 16 },
+  howTitle:   { fontSize: 13, fontWeight: '800', color: P.white, textAlign: 'center', marginBottom: 5 },
+  howDesc:    { fontSize: 11, color: 'rgba(255,255,255,0.45)', textAlign: 'center', lineHeight: 16 },
 
-  // Vendeurs actifs
-  sellerList:   { paddingHorizontal: 18, gap: 12, paddingBottom: 4 },
-  sellerCard:   { alignItems: 'center', backgroundColor: P.cream, borderRadius: 18, padding: 16, width: 100, borderWidth: 1, borderColor: 'rgba(157,136,114,0.18)', shadowColor: P.brown, shadowOpacity: 0.07, shadowOffset: { width: 0, height: 3 }, shadowRadius: 8, elevation: 2, position: 'relative' },
-  sellerAvatar: { width: 52, height: 52, borderRadius: 26, backgroundColor: P.terra, justifyContent: 'center', alignItems: 'center', marginBottom: 8 },
+  // ─── Vendeurs actifs ────────────────────────────────────────────────────────
+  sellerList:    { paddingHorizontal: 18, gap: 12, paddingBottom: 4 },
+  sellerCard:    {
+    alignItems: 'center', backgroundColor: P.white, borderRadius: 18,
+    padding: 16, width: 102,
+    borderWidth: 1, borderColor: P.dim,
+    shadowColor: P.charcoal, shadowOpacity: 0.06,
+    shadowOffset: { width: 0, height: 3 }, shadowRadius: 8, elevation: 2,
+    position: 'relative',
+  },
+  sellerAvatar:  { width: 52, height: 52, borderRadius: 26, justifyContent: 'center', alignItems: 'center', marginBottom: 8 },
   sellerInitials:{ fontSize: 18, fontWeight: '800', color: P.white },
-  sellerName:   { fontSize: 12, fontWeight: '700', color: P.brown, textAlign: 'center', marginBottom: 3 },
-  sellerCount:  { fontSize: 10, color: P.muted, fontWeight: '600', textAlign: 'center' },
-  onlineDot:    { position: 'absolute', top: 12, right: 12, width: 10, height: 10, borderRadius: 5, borderWidth: 1.5, borderColor: P.cream },
+  sellerName:    { fontSize: 12, fontWeight: '700', color: P.charcoal, textAlign: 'center', marginBottom: 3 },
+  sellerCount:   { fontSize: 10, color: P.muted, fontWeight: '600', textAlign: 'center' },
+  onlineDot:     { position: 'absolute', top: 12, right: 12, width: 10, height: 10, borderRadius: 5, borderWidth: 1.5, borderColor: P.white },
 
-  // Trust
-  trustSection: { padding: 18, backgroundColor: P.surface, marginTop: 8 },
-  trustTitle:   { fontSize: 20, fontWeight: '900', color: P.charcoal, letterSpacing: -0.4, marginBottom: 16 },
-  trustGrid:    { flexDirection: 'row', flexWrap: 'wrap', gap: 12 },
-  trustCard:    { width: (width - 36 - 12) / 2, backgroundColor: P.cream, borderRadius: 18, padding: 16, borderWidth: 1, borderColor: 'rgba(157,136,114,0.18)' },
-  trustIcon:    { fontSize: 28, marginBottom: 8 },
-  trustCardTitle:{ fontSize: 14, fontWeight: '800', color: P.brown, marginBottom: 4 },
-  trustCardDesc: { fontSize: 12, color: P.muted, lineHeight: 17 },
+  // ─── Confiance ──────────────────────────────────────────────────────────────
+  trustSection: { paddingTop: 20, paddingBottom: 22, backgroundColor: '#374151', marginTop: 8 },
+  trustList:    { paddingHorizontal: 18, gap: 10, paddingBottom: 4 },
+  trustPill:    {
+    flexDirection: 'row', alignItems: 'center', gap: 10,
+    paddingVertical: 12, paddingHorizontal: 16,
+    borderRadius: 50, borderWidth: 1.5,
+  },
+  trustPillIcon:  { fontSize: 20 },
+  trustPillTitle: { fontSize: 13, fontWeight: '700', color: P.charcoal },
 
-  // Footer CTA
-  footerCta:   { padding: 28, alignItems: 'center', marginTop: 8, overflow: 'hidden', position: 'relative' },
-  footerDeco1: { position: 'absolute', top: -60, right: -60, width: 180, height: 180, borderRadius: 90, backgroundColor: 'rgba(193,68,14,0.10)' },
-  footerDeco2: { position: 'absolute', bottom: -40, left: -50, width: 140, height: 140, borderRadius: 70, backgroundColor: 'rgba(240,165,0,0.07)' },
-  footerTitle: { fontSize: 26, fontWeight: '900', color: P.cream, letterSpacing: -0.6, textAlign: 'center', lineHeight: 34, marginBottom: 12 },
-  footerSub:   { fontSize: 13, color: 'rgba(253,246,236,0.58)', textAlign: 'center', lineHeight: 19, marginBottom: 26 },
-  footerBtn:   { width: '100%', borderRadius: 16, overflow: 'hidden', shadowColor: P.terra, shadowOpacity: 0.42, shadowOffset: { width: 0, height: 8 }, shadowRadius: 18, elevation: 10, marginBottom: 16 },
-  footerBtnGrad:{ paddingVertical: 17, alignItems: 'center', borderRadius: 16 },
-  footerBtnTxt:{ fontSize: 16, fontWeight: '800', color: P.white, letterSpacing: 0.2 },
-  footerBadge: { fontSize: 12, color: 'rgba(253,246,236,0.45)', fontWeight: '600' },
+  // ─── Footer CTA ─────────────────────────────────────────────────────────────
+  footerCta: {
+    padding: 24, alignItems: 'center', marginTop: 8,
+    backgroundColor: '#374151',
+  },
+  footerAccentLine: { height: 2, width: '40%', marginBottom: 20, borderRadius: 1 },
+  footerIconWrap:   { marginBottom: 16 },
+  footerIconGrad:   {
+    width: 60, height: 60, borderRadius: 20,
+    justifyContent: 'center', alignItems: 'center',
+    shadowColor: P.terra, shadowOpacity: 0.3,
+    shadowOffset: { width: 0, height: 4 }, shadowRadius: 12, elevation: 6,
+  },
+  footerTitle:   { fontSize: 20, fontWeight: '900', color: P.white, letterSpacing: -0.4, textAlign: 'center', marginBottom: 6 },
+  footerSub:     { fontSize: 13, color: 'rgba(255,255,255,0.45)', textAlign: 'center', marginBottom: 20 },
+  footerBtn:     {
+    width: '100%', borderRadius: 14, overflow: 'hidden',
+    shadowColor: P.terra, shadowOpacity: 0.3,
+    shadowOffset: { width: 0, height: 5 }, shadowRadius: 14, elevation: 7,
+    marginBottom: 14,
+  },
+  footerBtnGrad: { paddingVertical: 15, alignItems: 'center' },
+  footerBtnTxt:  { fontSize: 15, fontWeight: '800', color: P.white, letterSpacing: 0.1 },
+  footerBadge:   { fontSize: 12, color: 'rgba(255,255,255,0.3)', fontWeight: '600' },
 
-  // Empty
-  emptyCard:  { width: 200, height: 190, borderRadius: 20, backgroundColor: P.cream, justifyContent: 'center', alignItems: 'center', borderWidth: 1.5, borderColor: P.sand, borderStyle: 'dashed', gap: 6, paddingHorizontal: 16 },
-  emptyTxt:   { fontSize: 13, color: P.muted, fontWeight: '700', textAlign: 'center' },
-  emptySub:   { fontSize: 11, color: P.amber, fontWeight: '600', textAlign: 'center' },
+  // ─── Empty card ─────────────────────────────────────────────────────────────
+  emptyCard: { width: 200, height: 190, borderRadius: 20, backgroundColor: P.white, justifyContent: 'center', alignItems: 'center', borderWidth: 1.5, borderColor: P.dim, borderStyle: 'dashed', gap: 4, paddingHorizontal: 16 },
+  emptyTxt:  { fontSize: 13, color: P.muted, fontWeight: '700', textAlign: 'center' },
+  emptySub:  { fontSize: 11, color: P.amber, fontWeight: '600' },
 });

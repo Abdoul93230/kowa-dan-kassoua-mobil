@@ -125,6 +125,17 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
+  const updateUserProfile = async (updatedData) => {
+    try {
+      const newUser = { ...user, ...updatedData };
+      setUser(newUser);
+      await saveUserData(newUser);
+      console.log('✅ User local mis à jour:', newUser?.name || 'Utilisateur');
+    } catch (error) {
+      console.error('❌ Erreur updateUserProfile:', error);
+    }
+  };
+
   const refreshUserProfile = async () => {
     try {
       const response = await getProfile();
@@ -147,6 +158,7 @@ export const AuthProvider = ({ children }) => {
     register,
     logout,
     refreshUserProfile,
+    updateUserProfile,
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
