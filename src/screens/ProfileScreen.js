@@ -433,19 +433,26 @@ export default function ProfileScreen({ navigation }) {
           disabled={loggingOut}
           activeOpacity={0.85}
         >
-          <LinearGradient
-            colors={['rgba(239, 68, 68, 0.15)', 'rgba(220, 38, 38, 0.15)']}
-            style={s.logoutBtnGrad}
-          >
+          <View style={s.logoutAccent} />
+          <View style={s.logoutBtnContent}>
             {loggingOut ? (
-              <ActivityIndicator color={P.error} size="small" />
+              <View style={s.logoutLoadingWrap}>
+                <ActivityIndicator color={P.error} size="small" />
+                <Text style={s.logoutLoadingText}>Déconnexion...</Text>
+              </View>
             ) : (
               <>
-                <Text style={s.logoutIcon}>🚪</Text>
-                <Text style={s.logoutText}>Se déconnecter</Text>
+                <View style={s.logoutIconChip}>
+                  <Text style={s.logoutIcon}>⎋</Text>
+                </View>
+                <View style={s.logoutTextWrap}>
+                  <Text style={s.logoutText}>Se déconnecter</Text>
+                  <Text style={s.logoutHint}>Fermer votre session sur cet appareil</Text>
+                </View>
+                <Text style={s.logoutArrow}>›</Text>
               </>
             )}
-          </LinearGradient>
+          </View>
         </TouchableOpacity>
 
       </ScrollView>
@@ -856,25 +863,67 @@ const s = StyleSheet.create({
   logoutBtn: {
     marginHorizontal: 6,
     marginBottom: 20,
-    borderRadius: 14,
+    borderRadius: 16,
     overflow: 'hidden',
+    backgroundColor: P.white,
+    borderWidth: 1,
+    borderColor: P.error + '35',
     shadowColor: P.error,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 2,
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.12,
+    shadowRadius: 10,
+    elevation: 4,
   },
-  logoutBtnGrad: {
+  logoutAccent: {
+    height: 3,
+    backgroundColor: P.error,
+  },
+  logoutBtnContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    gap: 10,
+  },
+  logoutIconChip: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: P.error + '18',
+    borderWidth: 1,
+    borderColor: P.error + '45',
+  },
+  logoutIcon: { fontSize: 17, color: P.error, fontWeight: '800' },
+  logoutTextWrap: {
+    flex: 1,
+  },
+  logoutText: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: P.error,
+  },
+  logoutHint: {
+    marginTop: 1,
+    fontSize: 11,
+    color: P.muted,
+  },
+  logoutArrow: {
+    fontSize: 22,
+    color: P.error,
+    fontWeight: '300',
+    marginTop: -1,
+  },
+  logoutLoadingWrap: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 14,
-    paddingHorizontal: 20,
-    gap: 10,
+    width: '100%',
+    gap: 8,
   },
-  logoutIcon: { fontSize: 18 },
-  logoutText: {
-    fontSize: 15,
+  logoutLoadingText: {
+    fontSize: 14,
     fontWeight: '700',
     color: P.error,
   },

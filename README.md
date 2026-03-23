@@ -144,6 +144,8 @@ npm install
 
 ## 📱 Commandes Utiles
 
+Guide detaille APK + OTA: [README_COMMANDES_OTA.md](README_COMMANDES_OTA.md)
+
 ```bash
 # Démarrer l'app
 npm start
