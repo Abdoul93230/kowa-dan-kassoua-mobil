@@ -13,7 +13,7 @@ const api = axios.create({
   headers: {
     'Content-Type': 'application/json',
   },
-  timeout: 10000,
+  timeout: 120000,
 });
 
 // Intercepteur de requête : Ajouter automatiquement le token
@@ -35,9 +35,20 @@ api.interceptors.response.use(
   (response) => response,
   async (error) => {
     const originalRequest = error.config;
+    const requestUrl = originalRequest?.url || '';
+    const shouldSkipRefresh = [
+      '/auth/login',
+      '/auth/register',
+      '/auth/send-otp',
+      '/auth/verify-otp',
+      '/auth/forgot-password',
+      '/auth/verify-reset-code',
+      '/auth/reset-password',
+      '/auth/refresh',
+    ].includes(requestUrl);
 
     // Si 401 et pas déjà réessayé
-    if (error.response?.status === 401 && !originalRequest._retry) {
+    if (error.response?.status === 401 && !originalRequest._retry && !shouldSkipRefresh) {
       originalRequest._retry = true;
 
       try {
@@ -113,7 +124,9 @@ export const login = async (phoneOrEmail, password) => {
   } catch (error) {
     console.error('❌ Erreur connexion:', error);
     throw new Error(
-      error.response?.data?.message || 'Erreur lors de la connexion'
+      error.response?.data?.message ||
+      error.response?.data?.error ||
+      'Erreur lors de la connexion'
     );
   }
 };
@@ -233,6 +246,57 @@ export const resetPassword = async (identifier, code, newPassword) => {
     console.error('❌ Erreur réinitialisation mot de passe:', error);
     throw new Error(
       error.response?.data?.message || 'Erreur lors de la réinitialisation du mot de passe'
+    );
+  }
+};
+
+/**
+ * Vérifier si un numéro de téléphone existe (Mode 1)
+ * @param {string} phone - Numéro de téléphone au format "+227 12345678"
+ * @returns {Promise<{success: boolean, data: {exists: boolean}}>}
+ */
+export const checkPhone = async (phone) => {
+  try {
+    const response = await api.post('/auth/check-phone', { phone });
+    return response.data;
+  } catch (error) {
+    console.error('❌ Erreur check-phone:', error);
+    throw new Error(
+      error.response?.data?.message || 'Erreur lors de la vérification du numéro'
+    );
+  }
+};
+
+/**
+ * Inscription rapide contextuelle (Mode 1)
+ * @param {Object} data - { name, phone }
+ * @returns {Promise<{success: boolean, data: {user, tokens}, devTempPassword?}>}
+ */
+export const quickRegister = async ({ name, phone }) => {
+  try {
+    const response = await api.post('/auth/quick-register', { name, phone });
+    return response.data;
+  } catch (error) {
+    console.error('❌ Erreur quick-register:', error);
+    throw new Error(
+      error.response?.data?.message || 'Erreur lors de l\'inscription rapide'
+    );
+  }
+};
+
+/**
+ * Changer le mot de passe (authentifié)
+ * @param {Object} data - { currentPassword?, newPassword }
+ * @returns {Promise<{success: boolean}>}
+ */
+export const changePassword = async ({ currentPassword, newPassword }) => {
+  try {
+    const response = await api.put('/auth/change-password', { currentPassword, newPassword });
+    return response.data;
+  } catch (error) {
+    console.error('❌ Erreur change-password:', error);
+    throw new Error(
+      error.response?.data?.message || 'Erreur lors du changement de mot de passe'
     );
   }
 };

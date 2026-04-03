@@ -1,4 +1,4 @@
-﻿// ─── VerifyOTPScreen v2 PREMIUM ─ MarketHub Niger ────────────────────────────
+// ─── VerifyOTPScreen v2 PREMIUM ─ MarketHub Niger ────────────────────────────
 // Vérification OTP — design cohérent, épuré, user-friendly
 
 import React, { useState, useEffect, useRef } from 'react';
@@ -9,6 +9,8 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
+import * as Clipboard from 'expo-clipboard';
+import { useAuth } from '../contexts/AuthContext';
 import { sendOTP, verifyOTP, forgotPassword } from '../api/auth';
 import AlertModal from '../components/AlertModal';
 import { MOBILE_COLORS as P } from '../theme/colors';
@@ -21,7 +23,9 @@ export default function VerifyOTPScreen({ navigation, route }) {
   } = route.params || {};
 
   const insets = useSafeAreaInsets();
+  const { setAuthData } = useAuth();
   const isRegister       = type === 'register';
+  const isQuickRegister  = type === 'quick-register';
   const displayIdentifier = phone || identifier;
 
   const [code,             setCode]             = useState(['', '', '', '', '', '']);
@@ -97,6 +101,76 @@ export default function VerifyOTPScreen({ navigation, route }) {
           navigation.replace('RegisterStep2', {
             phone: displayIdentifier, verified: true, formData,
           });
+        }
+      } else if (isQuickRegister) {
+        const result = await verifyOTP(displayIdentifier, full);
+        if (result.success && result.data.verified) {
+          // Appel direct du quickRegister après OTP
+          const { quickRegister } = await import('../api/auth');
+          const regResult = await quickRegister({
+            name: formData.name,
+            phone: displayIdentifier
+          });
+          
+          if (regResult.success) {
+            const navigateAfterOnboarding = () => {
+              const { pendingAction, returnScreen, returnParams } = route.params || {};
+              const targetParams = returnParams || pendingAction?.params || {};
+
+              if (returnScreen) {
+                const mainTabs = ['Home', 'Favorites', 'Publish', 'Messages', 'Profile'];
+                if (mainTabs.includes(returnScreen)) {
+                  navigation.navigate({
+                    name: 'MainTabs',
+                    params: {
+                      screen: returnScreen,
+                      params: targetParams,
+                    },
+                    merge: true,
+                  });
+                } else {
+                  navigation.navigate({
+                    name: returnScreen,
+                    params: targetParams,
+                    merge: true,
+                  });
+                }
+              } else {
+                navigation.goBack();
+              }
+            };
+
+            await setAuthData(regResult.data.user, regResult.data.tokens);
+
+            if (regResult.devTempPassword) {
+              setAlert({
+                visible: true,
+                type: 'success',
+                title: 'Compte créé ! 🎉',
+                message: `Votre mot de passe temporaire est :\n\n${regResult.devTempPassword}\n\n(Ce message ne s'affiche qu'en mode développement)`,
+                buttons: [
+                  {
+                    text: 'Copier',
+                    onPress: async () => {
+                      await Clipboard.setStringAsync(regResult.devTempPassword);
+                      setAlert((prev) => ({ ...prev, visible: false }));
+                      navigateAfterOnboarding();
+                    }
+                  },
+                  {
+                    text: 'Continuer',
+                    onPress: () => {
+                      setAlert((prev) => ({ ...prev, visible: false }));
+                      navigateAfterOnboarding();
+                    }
+                  }
+                ]
+              });
+              return;
+            }
+            
+            navigateAfterOnboarding();
+          }
         }
       } else {
         const { verifyResetCode } = await import('../api/auth');

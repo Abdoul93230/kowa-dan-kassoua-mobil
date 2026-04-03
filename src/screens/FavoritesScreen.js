@@ -1,4 +1,4 @@
-﻿// ─── FavoritesScreen — MarketHub Niger ──────────────────────────────────────
+// ─── FavoritesScreen — MarketHub Niger ──────────────────────────────────────
 // Version premium redesign — moderne, bling-bling, engageant
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
@@ -10,6 +10,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from 'expo-blur';
+import { Feather } from '@expo/vector-icons';
 import { useAuth } from '../contexts/AuthContext';
 import { getMyFavorites, removeFavorite } from '../api/favorites';
 import { MOBILE_COLORS as P } from '../theme/colors';
@@ -31,6 +32,30 @@ const getCityName = (location) => {
 };
 
 const getProductId = (product) => product?._id || product?.id;
+
+const getPostedLabel = (dateValue) => {
+  if (!dateValue) return 'Récent';
+  const date = new Date(dateValue);
+  if (Number.isNaN(date.getTime())) return 'Récent';
+  const diffMs = Date.now() - date.getTime();
+  const mins = Math.max(1, Math.floor(diffMs / 60000));
+  if (mins < 60) return `${mins} min`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours} h`;
+  const days = Math.floor(hours / 24);
+  if (days < 7) return `${days} j`;
+  return `${Math.floor(days / 7)} sem`;
+};
+
+const getDistanceKm = (itemId) => {
+  const distances = [0.5, 1.2, 2.3, 3.5, 4.8, 5.1, 6.7, 8.2, 10.5];
+  if (typeof itemId === 'string') {
+    const hash = itemId.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+    return distances[hash % distances.length];
+  }
+  const n = Number(itemId) || 0;
+  return distances[Math.abs(n) % distances.length];
+};
 
 // ─── ANIMATED CARD ────────────────────────────────────────────────────────────
 
@@ -84,6 +109,9 @@ const FavoriteCard = ({ item, onPress, onRemove, index }) => {
 
   const isSold = item.status === 'sold';
   const isPending = item.status === 'pending';
+  const isService = item.type === 'service';
+  const posted = getPostedLabel(item.createdAt || item.updatedAt);
+  const distance = getDistanceKm(getProductId(item));
 
   return (
     <Animated.View
@@ -110,31 +138,14 @@ const FavoriteCard = ({ item, onPress, onRemove, index }) => {
             resizeMode="cover"
           />
 
-          {/* Gradient overlay on image */}
-          <LinearGradient
-            colors={['transparent', 'rgba(0,0,0,0.45)']}
-            style={s.imgGradient}
-            pointerEvents="none"
-          />
-
-          {/* Price badge sur image */}
-          <View style={s.priceBadge}>
-            <LinearGradient
-              colors={[P.orange600, P.orange500]}
-              style={s.priceBadgeGradient}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 0 }}
-            >
-              <Text style={s.priceBadgeText}>{formatPrice(item.price)}</Text>
-            </LinearGradient>
+          <View style={s.timeBadge}>
+            <Feather name="clock" size={10} color={P.charcoal} />
+            <Text style={s.timeBadgeTxt}>Il y a {posted}</Text>
           </View>
 
-          {/* Status badge */}
           {(isSold || isPending) && (
             <View style={[s.statusBadge, { backgroundColor: isSold ? 'rgba(17,24,39,0.85)' : 'rgba(245,158,11,0.9)' }]}>
-              <Text style={s.statusBadgeTxt}>
-                {isSold ? '● Vendu' : '⏳ En attente'}
-              </Text>
+              <Text style={s.statusBadgeTxt}>{isSold ? '● Vendu' : '⏳ En attente'}</Text>
             </View>
           )}
 
@@ -154,18 +165,24 @@ const FavoriteCard = ({ item, onPress, onRemove, index }) => {
 
         {/* Content */}
         <View style={s.cardContent}>
-          <Text style={s.cardTitle} numberOfLines={2}>
-            {item.title}
-          </Text>
-
-          {item.location ? (
-            <View style={s.locationRow}>
-              <Text style={s.locationDot}>●</Text>
-              <Text style={s.locationTxt} numberOfLines={1}>
-                {getCityName(item.location)}
-              </Text>
+          <View style={s.cardTitleRow}>
+            <View style={s.typeIconWrap}>
+              <Text style={s.typeIcon}>{isService ? '🛠️' : '📦'}</Text>
             </View>
-          ) : null}
+            <Text style={s.cardTitle} numberOfLines={1}>{item.title}</Text>
+          </View>
+
+          <View style={s.locationRow}>
+            <Feather name="map-pin" size={10} color={P.terra} />
+            <Text style={s.locationTxt} numberOfLines={1}>{getCityName(item.location) || 'Niger'}</Text>
+            <Text style={s.locationSep}>•</Text>
+            <Text style={s.locationKm}>{distance.toFixed(1)} km</Text>
+          </View>
+
+          <View style={s.priceRow}>
+            <View style={s.priceSpacer} />
+            <Text style={[s.priceTxt, { color: isService ? '#2563EB' : P.terra }]}>{formatPrice(item.price)}</Text>
+          </View>
         </View>
       </TouchableOpacity>
     </Animated.View>
@@ -241,7 +258,7 @@ const EmptyState = ({ type, onAction }) => {
           style={s.emptyBtn}
         >
           <Text style={s.emptyBtnTxt}>
-            {type === 'auth' ? 'Se connecter →' : 'Explorer les annonces →'}
+            {type === 'auth' ? 'Continuer →' : 'Explorer les annonces →'}
           </Text>
         </LinearGradient>
       </TouchableOpacity>
@@ -415,7 +432,13 @@ export default function FavoritesScreen({ navigation }) {
     return (
       <View style={[s.container, { paddingTop: insets.top }]}>
         {renderHeader()}
-        <EmptyState type="auth" onAction={() => navigation.navigate('Login')} />
+        <EmptyState 
+          type="auth" 
+          onAction={() => navigation.navigate('QuickAuth', { 
+            pendingAction: { type: 'favorites' }, 
+            returnScreen: 'Favorites' 
+          })} 
+        />
       </View>
     );
   }
@@ -639,33 +662,22 @@ const s = StyleSheet.create({
     height: '100%',
     backgroundColor: P.sand,
   },
-  imgGradient: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    height: 70,
-  },
-  priceBadge: {
-    position: 'absolute',
-    bottom: 10,
-    left: 8,
-    borderRadius: 8,
-    overflow: 'hidden',
-  },
-  priceBadgeGradient: {
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-  },
-  priceBadgeText: {
-    fontSize: 12,
-    fontWeight: '800',
-    color: P.white,
-    letterSpacing: 0.2,
-  },
-  statusBadge: {
+  timeBadge: {
     position: 'absolute',
     top: 8,
+    left: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    backgroundColor: 'rgba(255,255,255,0.92)',
+    borderRadius: 8,
+    paddingHorizontal: 7,
+    paddingVertical: 4,
+  },
+  timeBadgeTxt: { fontSize: 9, fontWeight: '700', color: P.charcoal },
+  statusBadge: {
+    position: 'absolute',
+    bottom: 8,
     left: 8,
     paddingHorizontal: 8,
     paddingVertical: 3,
@@ -679,16 +691,20 @@ const s = StyleSheet.create({
   heartBtn: {
     position: 'absolute',
     top: 8,
-    right: 8,
+    right: 10,
     borderRadius: 16,
     overflow: 'hidden',
+    zIndex: 6,
+    elevation: 6,
   },
   heartBlur: {
-    width: 32,
-    height: 32,
+    width: 34,
+    height: 34,
     justifyContent: 'center',
     alignItems: 'center',
-    borderRadius: 16,
+    borderRadius: 17,
+    borderWidth: 1,
+    borderColor: 'rgba(236,90,19,0.2)',
   },
   heartIcon: {
     fontSize: 14,
@@ -698,31 +714,35 @@ const s = StyleSheet.create({
 
   // ─── Card content ───────────────────────────────────────────────────────────
   cardContent: {
-    padding: 10,
-    paddingBottom: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 9,
+    gap: 6,
   },
+  cardTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  typeIconWrap: { width: 18, minWidth: 18, alignItems: 'center', justifyContent: 'center' },
+  typeIcon: { fontSize: 14 },
   cardTitle: {
-    fontSize: 13,
+    flex: 1,
+    fontSize: 12,
     fontWeight: '700',
     color: P.charcoal,
-    lineHeight: 18,
-    marginBottom: 6,
   },
   locationRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
   },
-  locationDot: {
-    fontSize: 7,
-    color: P.terra,
-    lineHeight: 14,
-  },
   locationTxt: {
-    fontSize: 11,
+    flexShrink: 1,
+    maxWidth: CARD_WIDTH * 0.32,
+    fontSize: 10,
     color: P.muted,
-    flex: 1,
   },
+  locationSep: { fontSize: 11, color: P.muted },
+  locationKm: { fontSize: 9, color: P.muted, fontWeight: '600' },
+  priceRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: 5 },
+  priceSpacer: { width: 14 },
+  priceTxt: { fontSize: 12, fontWeight: '900', color: P.terra },
 
   // ─── Empty state ────────────────────────────────────────────────────────────
   emptyContainer: {

@@ -4,15 +4,16 @@
 import React, { useEffect, useRef } from 'react';
 import { View, Text, StyleSheet, Animated } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
+import { Feather } from '@expo/vector-icons';
 import { MOBILE_COLORS as P } from '../theme/colors';
 
 // ─── ICÔNES ───────────────────────────────────────────────────────────────────
 const ICONS = {
-  home:      { active: '⌂', inactive: '⌂' },
-  favorites: { active: '♥', inactive: '♡' },
-  publish:   { active: '+', inactive: '+' },
-  messages:  { active: '✉', inactive: '✉' },
-  profile:   { active: '◉', inactive: '○' },
+  home: { feather: 'home' },
+  favorites: { feather: 'heart' },
+  publish: { active: '+', inactive: '+' },
+  messages: { feather: 'message-circle' },
+  profile: { feather: 'user' },
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -42,70 +43,47 @@ function AnimatedBadge({ count }) {
 // ─────────────────────────────────────────────────────────────────────────────
 // BOUTON PUBLIER — modéré mais impactant
 // ─────────────────────────────────────────────────────────────────────────────
-function PublishButton({ focused }) {
-  const scale  = useRef(new Animated.Value(0.85)).current;
-  const rotate = useRef(new Animated.Value(0)).current;
-  const glow   = useRef(new Animated.Value(0.4)).current;
 
-  // Animation d'entrée au montage
+function PublishButton({ focused }) {
+  const scale = useRef(new Animated.Value(1)).current;
+  const shadowAnim = useRef(new Animated.Value(0.3)).current; // JS driver uniquement
+
   useEffect(() => {
+    // scale → useNativeDriver: true
     Animated.spring(scale, {
-      toValue: 1,
-      tension: 100,
-      friction: 7,
+      toValue: focused ? 1.04 : 1,
+      tension: 160,
+      friction: 8,
       useNativeDriver: true,
     }).start();
-  }, []);
 
-  // Rotation du + et intensité du glow selon focus
-  useEffect(() => {
-    Animated.parallel([
-      Animated.spring(rotate, {
-        toValue: focused ? 1 : 0,
-        tension: 140,
-        friction: 7,
-        useNativeDriver: true,
-      }),
-      Animated.timing(glow, {
-        toValue: focused ? 1 : 0.4,
-        duration: 250,
-        useNativeDriver: true,
-      }),
-    ]).start();
+    // shadowOpacity → useNativeDriver: false (obligatoire pour les styles de layout)
+    Animated.timing(shadowAnim, {
+      toValue: focused ? 0.6 : 0.3,
+      duration: 220,
+      useNativeDriver: false,
+    }).start();
   }, [focused]);
-
-  const spin = rotate.interpolate({
-    inputRange:  [0, 1],
-    outputRange: ['0deg', '45deg'],
-  });
 
   return (
     <View style={s.publishWrap}>
-      {/* Halo orange — toujours présent, plus fort si focused */}
-      <Animated.View style={[s.publishHalo, { opacity: glow }]} />
-
-      {/* Bouton principal */}
-      <Animated.View style={[s.publishOuter, { transform: [{ scale }] }]}>
-        <LinearGradient
-          colors={focused
-            ? [P.amber, P.terra, P.terraDark]
-            : [P.orange500, P.orange700]}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 1 }}
-          style={s.publishGrad}
-        >
-          {/* Reflet subtil en haut */}
-          <View style={s.publishShine} />
-          <Animated.Text style={[s.publishIcon, { transform: [{ rotate: spin }] }]}>
-            +
-          </Animated.Text>
-        </LinearGradient>
+      {/* Wrapper JS pour shadowOpacity */}
+      <Animated.View style={[s.publishShadow, { shadowOpacity: shadowAnim }]}>
+        {/* Wrapper natif pour le scale */}
+        <Animated.View style={[s.publishOuter, { transform: [{ scale }] }]}>
+          <LinearGradient
+            colors={focused
+              ? ['#FFA347', '#EC5A13', '#c74910']
+              : ['#EC5A13', '#c74910']}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={s.publishGrad}
+          >
+            <View style={s.publishShine} />
+            <Text style={s.publishLabel}>PUBLIER</Text>
+          </LinearGradient>
+        </Animated.View>
       </Animated.View>
-
-      {/* Label */}
-      <Text style={[s.publishLabel, focused && s.publishLabelActive]}>
-        Publier
-      </Text>
     </View>
   );
 }
@@ -114,9 +92,8 @@ function PublishButton({ focused }) {
 // ICÔNE STANDARD
 // ─────────────────────────────────────────────────────────────────────────────
 function StandardIcon({ name, focused, badge }) {
-  const scale    = useRef(new Animated.Value(1)).current;
+  const scale = useRef(new Animated.Value(1)).current;
   const pillAnim = useRef(new Animated.Value(focused ? 1 : 0)).current;
-  const dotScale = useRef(new Animated.Value(focused ? 1 : 0)).current;
 
   useEffect(() => {
     Animated.parallel([
@@ -131,16 +108,14 @@ function StandardIcon({ name, focused, badge }) {
         duration: 200,
         useNativeDriver: true,
       }),
-      Animated.spring(dotScale, {
-        toValue: focused ? 1 : 0,
-        tension: 200,
-        friction: 8,
-        useNativeDriver: true,
-      }),
     ]).start();
   }, [focused]);
 
   const icon = ICONS[name] || ICONS.profile;
+  const iconColor = focused ? P.amber : 'rgba(255,255,255,0.4)';
+  const iconSize = name === 'profile'
+    ? (focused ? 25 : 23)
+    : (focused ? 23 : 21);
 
   return (
     <View style={s.iconWrap}>
@@ -155,21 +130,9 @@ function StandardIcon({ name, focused, badge }) {
       </Animated.View>
 
       {/* Icône */}
-      <Animated.Text
-        style={[
-          s.icon,
-          {
-            color: focused ? P.amber : 'rgba(255,255,255,0.4)',
-            transform: [{ scale }],
-            fontSize: focused ? 22 : 20,
-          },
-        ]}
-      >
-        {focused ? icon.active : icon.inactive}
-      </Animated.Text>
-
-      {/* Point indicateur */}
-      <Animated.View style={[s.dot, { transform: [{ scale: dotScale }] }]} />
+      <Animated.View style={{ transform: [{ scale }] }}>
+        <Feather name={icon.feather} size={iconSize} color={iconColor} />
+      </Animated.View>
 
       {/* Badge */}
       <AnimatedBadge count={badge} />
@@ -192,38 +155,20 @@ const s = StyleSheet.create({
 
   // ── Icône standard ──────────────────────────────────────────────────────────
   iconWrap: {
-    width: 50,
-    height: 44,
+    width: 54,
+    height: 46,
     justifyContent: 'center',
     alignItems: 'center',
     position: 'relative',
   },
   iconPill: {
     position: 'absolute',
-    width: 44,
-    height: 28,
-    borderRadius: 14,
+    width: 50,
+    height: 34,
+    borderRadius: 17,
     overflow: 'hidden',
     borderWidth: 1,
     borderColor: 'rgba(236,90,19,0.22)',
-  },
-  icon: {
-    fontWeight: '400',
-    lineHeight: 26,
-    marginBottom: 2,
-  },
-  dot: {
-    position: 'absolute',
-    bottom: 2,
-    width: 4,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: P.amber,
-    shadowColor: P.amber,
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.8,
-    shadowRadius: 3,
-    elevation: 2,
   },
 
   // ── Badge ────────────────────────────────────────────────────────────────────
@@ -256,9 +201,18 @@ const s = StyleSheet.create({
   // ── Bouton Publier ──────────────────────────────────────────────────────────
   publishWrap: {
     alignItems: 'center',
-    position: 'absolute',
-    top: -26,
-    width: 70,
+    justifyContent: 'center',
+    width: 110,
+    height: 56,
+    marginTop: 10
+  },
+  publishShadow: {
+    borderRadius: 5,
+    shadowColor: '#EC5A13',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.35,   // valeur initiale, sera animée
+    shadowRadius: 10,
+    elevation: 8,
   },
   publishHalo: {
     position: 'absolute',
@@ -274,33 +228,23 @@ const s = StyleSheet.create({
     elevation: 0,
   },
   publishOuter: {
-    width: 58,
-    height: 58,
-    borderRadius: 29,
+    width: 100,
+    height: 38,
+    borderRadius: 10,
     overflow: 'hidden',
-    shadowColor: P.terra,
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.4,
-    shadowRadius: 12,
-    elevation: 12,
-    borderWidth: 2.5,
-    borderColor: '#111827',
   },
   publishGrad: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    position: 'relative',
   },
   publishShine: {
     position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    height: '40%',
-    backgroundColor: 'rgba(255,255,255,0.12)',
-    borderBottomLeftRadius: 28,
-    borderBottomRightRadius: 28,
+    top: 0, left: 0, right: 0,
+    height: '50%',
+    backgroundColor: 'rgba(255,255,255,0.09)',
+    borderBottomLeftRadius: 8,
+    borderBottomRightRadius: 8,
   },
   publishIcon: {
     fontSize: 30,
@@ -310,14 +254,9 @@ const s = StyleSheet.create({
     marginTop: 2,
   },
   publishLabel: {
-    fontSize: 10,
-    fontWeight: '600',
-    color: 'rgba(255,255,255,0.38)',
-    marginTop: 6,
-    letterSpacing: 0.3,
-  },
-  publishLabelActive: {
-    color: P.amber,
+    color: '#FFFFFF',
+    fontSize: 12,
     fontWeight: '700',
+    letterSpacing: 1.2,
   },
 });

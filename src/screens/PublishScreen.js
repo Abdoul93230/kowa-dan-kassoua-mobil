@@ -1,11 +1,11 @@
-﻿// ─── PublishScreen v2 PREMIUM ─ MarketHub Niger ───────────────────────────────
+// ─── PublishScreen v2 PREMIUM ─ MarketHub Niger ───────────────────────────────
 // Formulaire de publication — design cohérent, épuré, 3 étapes
 
 import React, { useState, useEffect } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
   TextInput, Image, ActivityIndicator, KeyboardAvoidingView,
-  Platform, Dimensions, Switch, StatusBar,
+  Platform, Dimensions, Switch, StatusBar, Modal, Keyboard
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
@@ -13,7 +13,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import * as ImagePicker from 'expo-image-picker';
 import { useAuth } from '../contexts/AuthContext';
 import { getCategories } from '../api/categories';
-import { createProduct, imagesToBase64 } from '../api/products';
+import { createProduct, updateProduct, imagesToBase64 } from '../api/products';
 import AlertModal from '../components/AlertModal';
 import { MOBILE_COLORS as P } from '../theme/colors';
 
@@ -25,8 +25,29 @@ const iconToEmoji = {
   Book:'📚', Palette:'🎨', Briefcase:'💼', Gamepad2:'🎮', HardHat:'⛑️', Package:'📦',
 };
 const getEmoji = (icon) => iconToEmoji[icon] || '📦';
+const CATEGORY_CARD_GAP = 8;
+const CATEGORY_CARD_WIDTH = Math.floor((width - 18 * 2 - CATEGORY_CARD_GAP * 3) / 4);
+
+const normalizeCategoryValue = (value) => {
+  if (!value) return '';
+  if (typeof value === 'string') return value;
+  if (typeof value === 'object') return value._id || value.id || value.slug || value.name || '';
+  return '';
+};
+
+const normalizeSubcategoryValue = (value) => {
+  if (!value) return '';
+  if (typeof value === 'string') return value;
+  if (typeof value === 'object') return value.slug || value._id || value.id || value.name || '';
+  return '';
+};
+
+const isRemoteImageUrl = (value) => /^https?:\/\//i.test(String(value || ''));
 
 // ─── COMPOSANTS RÉUTILISABLES ─────────────────────────────────────────────────
+
+// Variable globale pour stocker le brouillon temporaire pendant l'authentification
+let temporaryDraftStore = null;
 
 function Field({ label, error, children }) {
   return (
@@ -54,15 +75,21 @@ function StepInput({ placeholder, value, onChangeText, keyboardType, multiline, 
   );
 }
 
-function ChoiceBtn({ label, emoji, active, onPress }) {
+function ChoiceBtn({ label, emoji, active, onPress, accent = P.terra, activeBg = P.peachSoft }) {
   return (
     <TouchableOpacity
-      style={[f.choice, active && f.choiceActive]}
+      style={[
+        f.choice,
+        active && {
+          borderColor: accent,
+          backgroundColor: activeBg,
+        },
+      ]}
       onPress={onPress}
       activeOpacity={0.8}
     >
       {emoji ? <Text style={f.choiceEmoji}>{emoji}</Text> : null}
-      <Text style={[f.choiceTxt, active && f.choiceTxtActive]}>{label}</Text>
+      <Text style={[f.choiceTxt, active && { color: accent, fontWeight: '800' }]}>{label}</Text>
     </TouchableOpacity>
   );
 }
@@ -76,12 +103,16 @@ export default function PublishScreen({ navigation, route }) {
   const footerOffset = Math.max(tabBarHeight - insets.bottom, 0);
   const { user, isAuthenticated } = useAuth();
   const editItem = route?.params?.editItem;
+  const editItemId = editItem?._id || editItem?.id || '';
+  const isEditing = Boolean(editItemId);
 
   const [step,       setStep]       = useState(1);
   const [categories, setCategories] = useState([]);
   const [loadingCats,setLoadingCats]= useState(true);
   const [submitting, setSubmitting] = useState(false);
-  const [catIdx,     setCatIdx]     = useState(0);
+  const [keyboardVisible, setKeyboardVisible] = useState(false);
+  const [originalImages, setOriginalImages] = useState([]);
+  const [deletedImages, setDeletedImages] = useState([]);
   const [specKey,    setSpecKey]    = useState('');
   const [specVal,    setSpecVal]    = useState('');
   const [delArea,    setDelArea]    = useState('');
@@ -110,12 +141,27 @@ export default function PublishScreen({ navigation, route }) {
   }, []);
 
   useEffect(() => {
+    const showEvt = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEvt = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+    const showSub = Keyboard.addListener(showEvt, () => setKeyboardVisible(true));
+    const hideSub = Keyboard.addListener(hideEvt, () => setKeyboardVisible(false));
+
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, []);
+
+  useEffect(() => {
     if (!editItem) return;
+    const existingImages = Array.isArray(editItem.images) ? editItem.images.filter(isRemoteImageUrl) : [];
+    setOriginalImages(existingImages);
+    setDeletedImages([]);
     setForm({
       type: editItem.type || 'product',
       title: editItem.title || '',
-      category: editItem.category?._id || editItem.category || '',
-      subcategory: editItem.subcategory || '',
+      category: normalizeCategoryValue(editItem.category),
+      subcategory: normalizeSubcategoryValue(editItem.subcategory),
       price: editItem.price?.toString().replace(/[^\d]/g, '') || '',
       description: editItem.description || '',
       condition: editItem.condition || 'used',
@@ -127,6 +173,72 @@ export default function PublishScreen({ navigation, route }) {
       availability: editItem.availability || { openingTime: '', closingTime: '', days: [] },
     });
   }, [editItem]);
+
+  const handleRemoveImage = (indexToRemove) => {
+    const imageToRemove = form.images[indexToRemove];
+    if (isEditing && isRemoteImageUrl(imageToRemove)) {
+      setDeletedImages((prev) => (prev.includes(imageToRemove) ? prev : [...prev, imageToRemove]));
+    }
+    set('images', form.images.filter((_, index) => index !== indexToRemove));
+  };
+
+  useEffect(() => {
+    if (!categories.length || !form.category) return;
+
+    const rawCategory = String(form.category);
+    const categoryMatch = categories.find((c) => {
+      const id = String(c?._id || '');
+      const slug = String(c?.slug || '');
+      const name = String(c?.name || '').toLowerCase();
+      const rawLower = rawCategory.toLowerCase();
+      return rawCategory === id || rawCategory === slug || rawLower === name;
+    });
+
+    if (!categoryMatch) return;
+
+    const nextCategoryId = String(categoryMatch._id || '');
+    let nextSubcategory = form.subcategory;
+
+    if (form.subcategory && Array.isArray(categoryMatch.subcategories)) {
+      const rawSub = String(form.subcategory);
+      const rawSubLower = rawSub.toLowerCase();
+      const subMatch = categoryMatch.subcategories.find((sub) => {
+        const slug = String(sub?.slug || '');
+        const id = String(sub?._id || sub?.id || '');
+        const name = String(sub?.name || '').toLowerCase();
+        return rawSub === slug || rawSub === id || rawSubLower === name;
+      });
+      if (subMatch?.slug) nextSubcategory = subMatch.slug;
+    }
+
+    if (nextCategoryId !== rawCategory || nextSubcategory !== form.subcategory) {
+      setForm((prev) => ({
+        ...prev,
+        category: nextCategoryId,
+        subcategory: nextSubcategory,
+      }));
+    }
+  }, [categories, form.category, form.subcategory]);
+
+  useEffect(() => {
+    if (isAuthenticated && route?.params?.autoSubmit) {
+      navigation.setParams({ autoSubmit: false });
+      
+      // Restaurer le brouillon s'il existe
+      if (temporaryDraftStore) {
+        setForm(temporaryDraftStore.form);
+        setStep(temporaryDraftStore.step);
+        
+        // Déclencher le submit avec le brouillon
+        setTimeout(() => {
+          doSubmitDraft(temporaryDraftStore.form);
+          temporaryDraftStore = null;
+        }, 500);
+      } else {
+        submit();
+      }
+    }
+  }, [isAuthenticated, route?.params?.autoSubmit]);
 
   const loadCategories = async () => {
     try {
@@ -184,34 +296,64 @@ export default function PublishScreen({ navigation, route }) {
   const next = () => validate(step) && setStep(s => s + 1);
   const prev = () => setStep(s => s - 1);
 
+  const resetPublishState = () => {
+    setForm({
+      type:'product',
+      title:'',
+      category:'',
+      subcategory:'',
+      price:'',
+      description:'',
+      condition:'used',
+      images:[],
+      delivery:false,
+      deliveryCost:'',
+      deliveryAreas:[],
+      specifications:{},
+      availability:{ openingTime:'', closingTime:'', days:[] },
+    });
+    setStep(1);
+    setOriginalImages([]);
+    setDeletedImages([]);
+    navigation.setParams?.({ editItem: undefined });
+  };
+
   const doSubmit = async () => {
     try {
       setSubmitting(true);
-      const imagesB64 = await imagesToBase64(form.images);
       const data = {
         title: form.title, description: form.description,
         category: form.category, subcategory: form.subcategory || '',
         type: form.type, price: form.price,
-        location: user.location || 'Niger', quantity: '1',
-        images: imagesB64,
+        location: user?.location || 'Niger', quantity: '1',
             delivery: { available: form.delivery, cost: form.deliveryCost, areas: form.deliveryAreas, estimatedTime: '' },
             availability: form.availability,
             specifications: form.specifications,
             promoted: false, featured: false,
           };
           if (form.type === 'product') data.condition = form.condition;
-          await createProduct(data);
+          if (isEditing) {
+            const newLocalUris = form.images.filter((img) => !isRemoteImageUrl(img));
+            const newImagesBase64 = newLocalUris.length ? await imagesToBase64(newLocalUris) : [];
+            const removed = deletedImages.filter((url) => originalImages.includes(url));
+            data.newImages = newImagesBase64;
+            data.deleteImages = removed;
+            await updateProduct(editItemId, data);
+          } else {
+            const imagesB64 = await imagesToBase64(form.images);
+            data.images = imagesB64;
+            await createProduct(data);
+          }
           setAlert({
             visible: true,
             type: 'success',
             title: 'Succès 🎉',
-            message: 'Annonce publiée avec succès',
+            message: isEditing ? 'Annonce mise à jour avec succès' : 'Annonce publiée avec succès',
             buttons: [{
               text: 'OK',
               onPress: () => {
-                setForm({type:'product',title:'',category:'',subcategory:'',price:'',description:'',condition:'used',images:[],delivery:false,deliveryCost:'',deliveryAreas:[],specifications:{},availability:{openingTime:'',closingTime:'',days:[]}});
-                setStep(1);
-                navigation.navigate('Home');
+                resetPublishState();
+                navigation.navigate('MyListings');
               }
             }],
           });
@@ -226,52 +368,111 @@ export default function PublishScreen({ navigation, route }) {
         } finally { setSubmitting(false); }
   };
 
+  const doSubmitDraft = async (draftForm) => {
+    try {
+      setSubmitting(true);
+      const data = {
+        title: draftForm.title, description: draftForm.description,
+        category: draftForm.category, subcategory: draftForm.subcategory || '',
+        type: draftForm.type, price: draftForm.price,
+        location: user?.location || 'Niger', quantity: '1',
+        delivery: { available: draftForm.delivery, cost: draftForm.deliveryCost, areas: draftForm.deliveryAreas, estimatedTime: '' },
+        availability: draftForm.availability,
+        specifications: draftForm.specifications,
+        promoted: false, featured: false,
+      };
+      if (draftForm.type === 'product') data.condition = draftForm.condition;
+      if (draftForm.editItemId) {
+        const newLocalUris = (draftForm.images || []).filter((img) => !isRemoteImageUrl(img));
+        const newImagesBase64 = newLocalUris.length ? await imagesToBase64(newLocalUris) : [];
+        data.newImages = newImagesBase64;
+        data.deleteImages = deletedImages;
+        await updateProduct(draftForm.editItemId, data);
+      } else {
+        const imagesB64 = await imagesToBase64(draftForm.images);
+        data.images = imagesB64;
+        await createProduct(data);
+      }
+      setAlert({
+        visible: true,
+        type: 'success',
+        title: 'Succès 🎉',
+        message: draftForm.editItemId
+          ? 'Votre annonce a été mise à jour automatiquement après la connexion !'
+          : 'Votre annonce a été publiée automatiquement après la connexion !',
+        buttons: [{
+          text: 'Super !',
+          onPress: () => {
+            resetPublishState();
+            navigation.navigate('MyListings');
+          }
+        }],
+      });
+    } catch (e) {
+      setAlert({
+        visible: true,
+        type: 'error',
+        title: 'Erreur lors de la publication',
+        message: e.message || "L'annonce n'a pas pu être publiée.",
+        buttons: [{ text: 'OK', onPress: () => {} }],
+      });
+    } finally { setSubmitting(false); }
+  };
+
   const submit = async () => {
     if (!validate(2)) return;
-    setAlert({
-      visible: true,
-      type: 'info',
-      title: 'Confirmer',
-      message: 'Publier cette annonce ?',
-      buttons: [
-        { text: 'Annuler', onPress: () => {} },
-        { text: 'Publier', onPress: doSubmit },
-      ],
-    });
+    
+    if (!isAuthenticated) {
+      // Sauvegarder le brouillon dans le store global
+      temporaryDraftStore = { form: { ...form, editItemId: isEditing ? editItemId : '' }, step };
+
+      navigation.navigate('QuickAuth', {
+        pendingAction: { 
+          type: 'publish_submit',
+          params: { autoSubmit: true }
+        },
+        returnScreen: 'Publish'
+      });
+      return;
+    }
+
+    // On soumet directement sans demander de confirmation supplémentaire
+    doSubmit();
   };
 
   const selectedCat = categories.find(c => c._id === form.category);
   const wordCount   = form.description.trim().split(/\s+/).filter(Boolean).length;
-
-  // ── Non connecté ────────────────────────────────────────────────────────────
-  if (!isAuthenticated) {
-    return (
-      <View style={s.container}>
-        <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
-        <LinearGradient colors={['#2d3748','#374151']} style={[s.header,{paddingTop:(insets.top||0)+6}]}>
-          <View style={s.headerAccent} />
-          <Text style={s.headerTitle}>Publier une annonce</Text>
-        </LinearGradient>
-        <View style={s.emptyWrap}>
-          <View style={s.emptyIconBg}><Text style={{fontSize:36}}>📝</Text></View>
-          <Text style={s.emptyTitle}>Connectez-vous</Text>
-          <Text style={s.emptyDesc}>Publiez vos annonces gratuitement après connexion</Text>
-          <TouchableOpacity onPress={() => navigation.navigate('Login')} activeOpacity={0.85}>
-            <LinearGradient colors={[P.orange500,P.orange700]} start={{x:0,y:0}} end={{x:1,y:0}} style={s.emptyBtn}>
-              <Text style={s.emptyBtnTxt}>Se connecter →</Text>
-            </LinearGradient>
-          </TouchableOpacity>
-        </View>
-      </View>
-    );
-  }
+  const isService   = form.type === 'service';
+  
+  const d = {
+    headerAccent: { backgroundColor: P.blue },
+    progSegActive: { backgroundColor: '#60A5FA' },
+    progSegDone: { backgroundColor: P.blue },
+    catCardActive: { borderColor: P.blue, backgroundColor: '#DBEAFE' },
+    catIconWrapActive: { backgroundColor: '#DBEAFE' },
+    catEmojiActive: { transform: [{ scale: 1.02 }] },
+    catNameActive: { color: P.blue },
+    dotActive: { backgroundColor: P.blue },
+    subChipActive: { borderColor: P.blue, backgroundColor: '#DBEAFE' },
+    subChipTxtActive: { color: P.blue },
+    pricePreview: { color: P.blue },
+    imgPrimaryBadge: { backgroundColor: P.blue },
+    tagAddBtn: { backgroundColor: P.blue },
+    sellerBoxAccent: { backgroundColor: P.blue },
+    headerBg: { borderBottomColor: 'rgba(59,130,246,0.2)' },
+    btnBack: { borderColor: 'rgba(59,130,246,0.35)', backgroundColor: '#EFF6FF' },
+    btnBackTxt: { color: P.blue },
+    loaderIconWrap: { backgroundColor: P.blue },
+    stepLabelActive: { color: P.blue, fontWeight: '700' },
+    emptyIconBg: { backgroundColor: '#DBEAFE' },
+  };
 
   // ── Rendu principal ─────────────────────────────────────────────────────────
   return (
     <KeyboardAvoidingView
       style={s.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'padding'}
-      keyboardVerticalOffset={0}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      keyboardVerticalOffset={Platform.OS === 'ios' ? insets.top : 0}
     >
       <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
 
@@ -280,7 +481,7 @@ export default function PublishScreen({ navigation, route }) {
         colors={['#2d3748','#374151']}
         style={[s.header, { paddingTop: (insets.top || 0) + 6 }]}
       >
-        <View style={s.headerAccent} />
+        <View style={[s.headerAccent, isService && d.headerAccent]} />
         <View style={s.headerRow}>
           <View>
             <Text style={s.headerEye}>MarketHub Niger</Text>
@@ -294,21 +495,21 @@ export default function PublishScreen({ navigation, route }) {
         {/* Barre de progression */}
         <View style={s.progWrap}>
           {[1,2,3].map(n => (
-            <View key={n} style={[s.progSeg, n <= step && s.progSegActive, n < step && s.progSegDone]} />
+            <View key={n} style={[s.progSeg, n <= step && s.progSegActive, n <= step && isService && d.progSegActive, n < step && s.progSegDone, n < step && isService && d.progSegDone]} />
           ))}
         </View>
 
         {/* Labels étapes */}
         <View style={s.stepLabels}>
           {['Infos de base','Détails','Résumé'].map((l,i) => (
-            <Text key={i} style={[s.stepLabel, i+1 === step && s.stepLabelActive]}>
+            <Text key={i} style={[s.stepLabel, i+1 === step && s.stepLabelActive, i+1 === step && isService && d.stepLabelActive]}>
               {i+1 === step ? '● ' : ''}{l}
             </Text>
           ))}
         </View>
 
         <LinearGradient
-          colors={['transparent',P.terra,'transparent']}
+          colors={['transparent', isService ? P.blue : P.terra, 'transparent']}
           start={{x:0,y:0}} end={{x:1,y:0}}
           style={s.headerGlow}
         />
@@ -317,8 +518,9 @@ export default function PublishScreen({ navigation, route }) {
       {/* ── SCROLL ─────────────────────────────────────────────────────── */}
       <ScrollView
         style={{flex:1}}
-        contentContainerStyle={[s.scroll,{paddingBottom: 20}]}
+        contentContainerStyle={[s.scroll, { paddingBottom: keyboardVisible ? 20 : 24 }]}
         keyboardShouldPersistTaps="handled"
+        keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
         showsVerticalScrollIndicator={false}
       >
 
@@ -330,8 +532,22 @@ export default function PublishScreen({ navigation, route }) {
             {/* Type */}
             <Field label="Type d'annonce *">
               <View style={f.row}>
-                <ChoiceBtn label="Produit" emoji="📦" active={form.type==='product'} onPress={() => set('type','product')} />
-                <ChoiceBtn label="Service" emoji="🛠️" active={form.type==='service'} onPress={() => set('type','service')} />
+                  <ChoiceBtn
+                    label="Produit"
+                    emoji="📦"
+                    active={form.type === 'product'}
+                    onPress={() => set('type', 'product')}
+                    accent={form.type === 'service' ? P.blue : P.terra}
+                    activeBg={form.type === 'service' ? '#DBEAFE' : P.peachSoft}
+                  />
+                  <ChoiceBtn
+                    label="Service"
+                    emoji="🛠️"
+                    active={form.type === 'service'}
+                    onPress={() => set('type', 'service')}
+                    accent={form.type === 'service' ? P.blue : P.terra}
+                    activeBg={form.type === 'service' ? '#DBEAFE' : P.peachSoft}
+                  />
               </View>
             </Field>
 
@@ -348,41 +564,30 @@ export default function PublishScreen({ navigation, route }) {
             {/* Catégories */}
             <Field label="Catégorie *" error={errors.category}>
               {loadingCats ? (
-                <ActivityIndicator color={P.terra} style={{marginVertical:12}} />
+                <ActivityIndicator color={isService ? P.blue : P.terra} style={{marginVertical:12}} />
               ) : (
                 <>
                   <ScrollView
-                    horizontal pagingEnabled
+                    horizontal
                     showsHorizontalScrollIndicator={false}
-                    onScroll={e => setCatIdx(Math.round(e.nativeEvent.contentOffset.x / (width-40)))}
-                    scrollEventThrottle={16}
-                    contentContainerStyle={{paddingRight:20}}
+                    contentContainerStyle={s.catCarousel}
                   >
                     {categories.map(cat => (
                       <TouchableOpacity
                         key={cat._id}
-                        style={[s.catCard, form.category===cat._id && s.catCardActive]}
+                        style={[s.catCard, form.category===cat._id && s.catCardActive, form.category===cat._id && isService && d.catCardActive]}
                         onPress={() => set('category', cat._id)}
                         activeOpacity={0.8}
                       >
-                        <View style={s.catIconWrap}>
-                          <Text style={{fontSize:28}}>{getEmoji(cat.icon)}</Text>
+                        <View style={[s.catIconWrap, form.category===cat._id && isService && d.catIconWrapActive, form.category===cat._id && !isService && s.catIconWrapActive]}>
+                          <Text style={[s.catEmoji, form.category===cat._id && isService && d.catEmojiActive]}>{getEmoji(cat.icon)}</Text>
                         </View>
-                        <Text style={[s.catName, form.category===cat._id && s.catNameActive]}>
+                        <Text style={[s.catName, form.category===cat._id && s.catNameActive, form.category===cat._id && isService && d.catNameActive]}>
                           {cat.name}
                         </Text>
-                        {cat.description ? (
-                          <Text style={s.catDesc} numberOfLines={2}>{cat.description}</Text>
-                        ) : null}
                       </TouchableOpacity>
                     ))}
                   </ScrollView>
-                  {/* Dots */}
-                  <View style={s.dots}>
-                    {categories.map((_,i) => (
-                      <View key={i} style={[s.dot, i===catIdx && s.dotActive]} />
-                    ))}
-                  </View>
                 </>
               )}
             </Field>
@@ -394,12 +599,12 @@ export default function PublishScreen({ navigation, route }) {
                   {selectedCat.subcategories.map(sub => (
                     <TouchableOpacity
                       key={sub._id}
-                      style={[s.subChip, form.subcategory===sub.slug && s.subChipActive]}
+                      style={[s.subChip, form.subcategory===sub.slug && s.subChipActive, form.subcategory===sub.slug && isService && d.subChipActive]}
                       onPress={() => set('subcategory', sub.slug)}
                       activeOpacity={0.8}
                     >
                       <Text style={{fontSize:16}}>{getEmoji(sub.icon)}</Text>
-                      <Text style={[s.subChipTxt, form.subcategory===sub.slug && s.subChipTxtActive]}>
+                      <Text style={[s.subChipTxt, form.subcategory===sub.slug && s.subChipTxtActive, form.subcategory===sub.slug && isService && d.subChipTxtActive]}>
                         {sub.name}
                       </Text>
                     </TouchableOpacity>
@@ -463,11 +668,11 @@ export default function PublishScreen({ navigation, route }) {
                     <Image source={{uri}} style={s.imgThumbImg} />
                     <TouchableOpacity
                       style={s.imgRemove}
-                      onPress={() => set('images', form.images.filter((_,j) => j!==i))}
+                      onPress={() => handleRemoveImage(i)}
                     >
                       <Text style={s.imgRemoveTxt}>✕</Text>
                     </TouchableOpacity>
-                    {i===0 && <View style={s.imgPrimaryBadge}><Text style={s.imgPrimaryTxt}>Principale</Text></View>}
+                    {i===0 && <View style={[s.imgPrimaryBadge, isService && d.imgPrimaryBadge]}><Text style={s.imgPrimaryTxt}>Principale</Text></View>}
                   </View>
                 ))}
                 {form.images.length < 5 && (
@@ -515,7 +720,7 @@ export default function PublishScreen({ navigation, route }) {
                           onChangeText={setDelArea}
                         />
                         <TouchableOpacity
-                          style={s.tagAddBtn}
+                          style={[s.tagAddBtn, isService && d.tagAddBtn]}
                           onPress={() => {
                             if (delArea.trim() && !form.deliveryAreas.includes(delArea.trim())) {
                               set('deliveryAreas', [...form.deliveryAreas, delArea.trim()]);
@@ -560,7 +765,7 @@ export default function PublishScreen({ navigation, route }) {
                       onChangeText={setSpecVal}
                     />
                     <TouchableOpacity
-                      style={s.tagAddBtn}
+                      style={[s.tagAddBtn, isService && d.tagAddBtn]}
                       onPress={() => {
                         if (specKey.trim() && specVal.trim()) {
                           set('specifications', {...form.specifications, [specKey.trim()]: specVal.trim()});
@@ -631,7 +836,7 @@ export default function PublishScreen({ navigation, route }) {
                   </Text>
                 </View>
                 <View style={s.previewPrice}>
-                  <Text style={s.previewPriceTxt}>{parseInt(form.price).toLocaleString('fr-FR')} FCFA</Text>
+                  <Text style={[s.previewPriceTxt, isService && d.pricePreview]}>{parseInt(form.price).toLocaleString('fr-FR')} FCFA</Text>
                 </View>
               </View>
             )}
@@ -668,21 +873,35 @@ export default function PublishScreen({ navigation, route }) {
 
             {/* Vendeur info */}
             <View style={s.sellerBox}>
-              <View style={s.sellerBoxAccent} />
+              <View style={[s.sellerBoxAccent, isService && d.sellerBoxAccent]} />
               <Text style={s.sellerBoxTitle}>Vos coordonnées</Text>
-              <Text style={s.sellerBoxItem}>📍 {user.location || 'Niger'}</Text>
-              <Text style={s.sellerBoxItem}>👤 {user.name}</Text>
-              <Text style={s.sellerBoxItem}>📞 {user.phone}</Text>
+              {isAuthenticated && user ? (
+                <>
+                  <Text style={s.sellerBoxItem}>📍 {user.location || 'Niger'}</Text>
+                  <Text style={s.sellerBoxItem}>👤 {user.name}</Text>
+                  <Text style={s.sellerBoxItem}>📞 {user.phone}</Text>
+                </>
+              ) : (
+                <Text style={s.sellerBoxItem}>🔒 Vos informations apparaîtront après la connexion</Text>
+              )}
             </View>
           </View>
         )}
       </ScrollView>
 
       {/* ── FOOTER ─────────────────────────────────────────────────────── */}
-      <View style={[s.footer, { paddingBottom: Math.max(insets.bottom, 12) + 4 }]}>
+      <View
+        style={[
+          s.footer,
+          {
+            marginBottom: keyboardVisible ? 0 : footerOffset,
+            paddingBottom: Math.max(insets.bottom, 12) + 4,
+          },
+        ]}
+      >
         {step > 1 && (
-          <TouchableOpacity style={s.btnBack} onPress={prev} activeOpacity={0.8}>
-            <Text style={s.btnBackTxt}>← Retour</Text>
+          <TouchableOpacity style={[s.btnBack, isService && d.btnBack]} onPress={prev} activeOpacity={0.8}>
+            <Text style={[s.btnBackTxt, isService && d.btnBackTxt]}>← Retour</Text>
           </TouchableOpacity>
         )}
         <TouchableOpacity
@@ -692,16 +911,13 @@ export default function PublishScreen({ navigation, route }) {
           activeOpacity={0.85}
         >
           <LinearGradient
-            colors={[P.orange500, P.orange700]}
+            colors={isService ? [P.blue, '#1D4ED8'] : [P.orange500, P.orange700]}
             start={{x:0,y:0}} end={{x:1,y:0}}
             style={s.btnNextGrad}
           >
-            {submitting
-              ? <ActivityIndicator size="small" color={P.white} />
-              : <Text style={s.btnNextTxt}>
-                  {step < 3 ? 'Suivant →' : '✓ Publier l\'annonce'}
-                </Text>
-            }
+            <Text style={s.btnNextTxt}>
+              {step < 3 ? 'Suivant →' : isEditing ? '✓ Mettre à jour' : '✓ Publier l\'annonce'}
+            </Text>
           </LinearGradient>
         </TouchableOpacity>
       </View>
@@ -714,6 +930,23 @@ export default function PublishScreen({ navigation, route }) {
         buttons={alert.buttons}
         onDismiss={() => setAlert({ ...alert, visible: false })}
       />
+
+      {/* ── LOADER FULL SCREEN BLAZING FAST RENDERING ── */}
+      <Modal visible={submitting} transparent={true} animationType="fade" statusBarTranslucent>
+        <View style={s.loaderOverlay}>
+          <View style={s.loaderBox}>
+            <View style={[s.loaderIconWrap, isService && d.loaderIconWrap]}>
+              <ActivityIndicator size="large" color={P.white} />
+            </View>
+            <Text style={s.loaderTitle}>{isEditing ? 'Mise a jour en cours...' : 'Creation en cours...'}</Text>
+            <Text style={s.loaderSub}>
+              {isEditing
+                ? 'Veuillez patienter pendant la mise a jour de votre annonce'
+                : 'Veuillez patienter pendant la publication de votre annonce'}
+            </Text>
+          </View>
+        </View>
+      </Modal>
     </KeyboardAvoidingView>
   );
 }
@@ -740,6 +973,7 @@ const s = StyleSheet.create({
 
   // Header
   header:       { paddingHorizontal: 20, paddingBottom: 16, overflow: 'hidden', position: 'relative' },
+    header:       { paddingHorizontal: 20, paddingBottom: 16, overflow: 'hidden', position: 'relative' },
   headerAccent: { position: 'absolute', top: 0, left: 0, right: 0, height: 3, backgroundColor: P.terra },
   headerRow:    { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 },
   headerEye:    { fontSize: 10, fontWeight: '700', color: P.amber, letterSpacing: 2, textTransform: 'uppercase', marginBottom: 3 },
@@ -760,15 +994,18 @@ const s = StyleSheet.create({
   sectionTitle: { fontSize: 18, fontWeight: '900', color: P.charcoal, marginBottom: 20, letterSpacing: -0.3 },
 
   // Catégories
-  catCard:       { width: width - 76, backgroundColor: P.white, borderWidth: 1.5, borderColor: P.dim, borderRadius: 16, padding: 18, marginRight: 14, alignItems: 'center', shadowColor: P.charcoal, shadowOpacity: 0.06, shadowOffset: {width:0,height:3}, shadowRadius: 8, elevation: 2 },
+  catCarousel:   { paddingRight: 18, gap: CATEGORY_CARD_GAP },
+  catCard:       { width: CATEGORY_CARD_WIDTH, minHeight: 82, backgroundColor: P.white, borderWidth: 1.5, borderColor: P.dim, borderRadius: 12, paddingVertical: 8, paddingHorizontal: 5, alignItems: 'center', justifyContent: 'center', shadowColor: P.charcoal, shadowOpacity: 0.06, shadowOffset: {width:0,height:3}, shadowRadius: 8, elevation: 2, marginRight: 8 },
   catCardActive: { borderColor: P.terra, backgroundColor: P.peachSoft, borderWidth: 2 },
-  catIconWrap:   { width: 56, height: 56, borderRadius: 28, backgroundColor: P.surface, justifyContent: 'center', alignItems: 'center', marginBottom: 12 },
-  catName:       { fontSize: 15, fontWeight: '700', color: P.charcoal, textAlign: 'center', marginBottom: 4 },
+  catIconWrap:   { width: 30, height: 30, borderRadius: 15, backgroundColor: P.surface, justifyContent: 'center', alignItems: 'center', marginBottom: 6 },
+  catIconWrapActive: { backgroundColor: P.peachSoft },
+  catEmoji:      { fontSize: 18 },
+  catName:       { fontSize: 9, fontWeight: '800', color: P.charcoal, textAlign: 'center', lineHeight: 11 },
   catNameActive: { color: P.terra },
-  catDesc:       { fontSize: 12, color: P.muted, textAlign: 'center', lineHeight: 17 },
-  dots:          { flexDirection: 'row', justifyContent: 'center', gap: 5, marginTop: 10, marginBottom: 4 },
-  dot:           { width: 6, height: 6, borderRadius: 3, backgroundColor: P.dim },
-  dotActive:     { width: 20, backgroundColor: P.terra },
+  catDesc:       { fontSize: 10, color: P.muted, textAlign: 'center', lineHeight: 13 },
+  dots:          { flexDirection: 'row', justifyContent: 'center', gap: 4, marginTop: 8, marginBottom: 2 },
+  dot:           { width: 5, height: 5, borderRadius: 2.5, backgroundColor: P.dim },
+  dotActive:     { width: 14, backgroundColor: P.terra },
 
   // Sous-catégories
   subChip:        { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: P.white, borderWidth: 1.5, borderColor: P.dim, borderRadius: 20, paddingVertical: 9, paddingHorizontal: 14 },
@@ -840,6 +1077,41 @@ const s = StyleSheet.create({
   btnNext:     { flex: 1, borderRadius: 12, overflow: 'hidden', shadowColor: P.terra, shadowOpacity: 0.3, shadowOffset: {width:0,height:4}, shadowRadius: 10, elevation: 6 },
   btnNextGrad: { paddingVertical: 15, alignItems: 'center' },
   btnNextTxt:  { fontSize: 15, fontWeight: '800', color: P.white, letterSpacing: 0.2 },
+
+  // Loader Overlay
+  loaderOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(17, 24, 39, 0.85)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loaderBox: {
+    width: '80%',
+    backgroundColor: P.white,
+    borderRadius: 20,
+    padding: 24,
+    alignItems: 'center',
+  },
+  loaderIconWrap: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    backgroundColor: P.terra,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  loaderTitle: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: P.charcoal,
+    marginBottom: 8,
+  },
+  loaderSub: {
+    fontSize: 14,
+    color: P.muted,
+    textAlign: 'center',
+  },
 
   // Empty
   emptyWrap:  { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 40 },

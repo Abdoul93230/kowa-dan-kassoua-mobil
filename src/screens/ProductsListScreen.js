@@ -9,6 +9,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
+import { Feather } from '@expo/vector-icons';
 import { CATEGORIES } from '../utils/constants';
 import { apiClient } from '../api/auth';
 import { getUnreadCount } from '../api/messaging';
@@ -32,13 +33,44 @@ const getCityName = (location) => {
   return location.split(',')[0].trim();
 };
 
+const getPostedLabel = (dateValue) => {
+  if (!dateValue) return 'Récent';
+  const date = new Date(dateValue);
+  if (Number.isNaN(date.getTime())) return 'Récent';
+
+  const diffMs = Date.now() - date.getTime();
+  const mins = Math.max(1, Math.floor(diffMs / 60000));
+  if (mins < 60) return `${mins} min`;
+
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours} h`;
+
+  const days = Math.floor(hours / 24);
+  if (days < 7) return `${days} j`;
+
+  const weeks = Math.floor(days / 7);
+  return `${weeks} sem`;
+};
+
+const getDistanceKm = (itemId) => {
+  const distances = [0.5, 1.2, 2.3, 3.5, 4.8, 5.1, 6.7, 8.2, 10.5];
+  if (typeof itemId === 'string') {
+    const hash = itemId.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+    return distances[hash % distances.length];
+  }
+  const n = Number(itemId) || 0;
+  return distances[Math.abs(n) % distances.length];
+};
+
 // ─── HOW IT WORKS DATA ────────────────────────────────────────────────────────
 
 const HOW_IT_WORKS = [
-  { step: '01', icon: '📸', title: 'Publiez',    desc: 'Ajoutez vos photos et décrivez votre annonce' },
-  { step: '02', icon: '💬', title: 'Discutez',   desc: 'Échangez directement par messagerie' },
+  { step: '01', icon: '📸', title: 'Publiez', desc: 'Ajoutez vos photos et décrivez votre annonce' },
+  { step: '02', icon: '💬', title: 'Discutez', desc: 'Échangez directement par messagerie' },
   { step: '03', icon: '🤝', title: 'Rencontrez', desc: "Convenez d'un lieu et concluez entre vous" },
 ];
+
+const POPULAR_SEARCHES = ['Telephones', 'Immobilier', 'Services', 'Vehicules'];
 
 // ─────────────────────────────────────────────────────────────────────────────
 // MICRO-COMPOSANTS
@@ -51,7 +83,7 @@ function PulseBadge({ text }) {
     Animated.loop(
       Animated.sequence([
         Animated.timing(pulse, { toValue: 1.25, duration: 700, useNativeDriver: true }),
-        Animated.timing(pulse, { toValue: 1,    duration: 700, useNativeDriver: true }),
+        Animated.timing(pulse, { toValue: 1, duration: 700, useNativeDriver: true }),
       ])
     ).start();
   }, []);
@@ -97,24 +129,34 @@ function StatsTicker({ stats }) {
 }
 
 // En-tête de section avec accent latéral
-function SectionHeader({ title, subtitle, onSeeAll, light }) {
+function SectionHeader({
+  title,
+  subtitle,
+  onSeeAll,
+  light,
+  accent = P.orange500,
+  accentSoft = P.orange300,
+  titleColor = P.charcoal,
+  subtitleColor = P.muted,
+  buttonColor = P.terra,
+}) {
   return (
     <View style={s.secHead}>
       <View style={{ flex: 1 }}>
         <View style={s.secTitleRow}>
           <LinearGradient
-            colors={[P.orange500, P.orange300]}
+            colors={[accent, accentSoft]}
             style={s.secAccent}
           />
-          <Text style={[s.secTitle, light && { color: P.white }]}>{title}</Text>
+          <Text style={[s.secTitle, { color: light ? P.white : titleColor }]}>{title}</Text>
         </View>
         {subtitle ? (
-          <Text style={[s.secSub, light && { color: 'rgba(255,255,255,0.55)' }]}>{subtitle}</Text>
+          <Text style={[s.secSub, light && { color: 'rgba(255,255,255,0.55)' }, !light && { color: subtitleColor }]}>{subtitle}</Text>
         ) : null}
       </View>
       {onSeeAll && (
-        <TouchableOpacity style={s.seeAllBtn} onPress={onSeeAll} activeOpacity={0.7}>
-          <Text style={s.seeAllTxt}>Tout voir →</Text>
+        <TouchableOpacity style={[s.seeAllBtn, { backgroundColor: accentSoft }]} onPress={onSeeAll} activeOpacity={0.7}>
+          <Text style={[s.seeAllTxt, { color: buttonColor }]}>Tout voir →</Text>
         </TouchableOpacity>
       )}
     </View>
@@ -128,8 +170,8 @@ function CategoryChip({ category, onPress }) {
     <TouchableOpacity
       activeOpacity={1}
       onPress={onPress}
-      onPressIn={()  => Animated.spring(sc, { toValue: 0.88, useNativeDriver: true, speed: 50 }).start()}
-      onPressOut={() => Animated.spring(sc, { toValue: 1,    useNativeDriver: true, speed: 50 }).start()}
+      onPressIn={() => Animated.spring(sc, { toValue: 0.88, useNativeDriver: true, speed: 50 }).start()}
+      onPressOut={() => Animated.spring(sc, { toValue: 1, useNativeDriver: true, speed: 50 }).start()}
     >
       <Animated.View style={[s.chip, { transform: [{ scale: sc }] }]}>
         <View style={s.chipIconWrap}>
@@ -145,13 +187,15 @@ function CategoryChip({ category, onPress }) {
 function AnnounceCard({ item, onPress, hot }) {
   const sc = useRef(new Animated.Value(1)).current;
   const isService = item.type === 'service';
+  const posted = getPostedLabel(item.createdAt || item.updatedAt);
+  const distance = getDistanceKm(item._id || item.id);
 
   return (
     <TouchableOpacity
       activeOpacity={1}
       onPress={onPress}
-      onPressIn={()  => Animated.spring(sc, { toValue: 0.96, useNativeDriver: true, speed: 30 }).start()}
-      onPressOut={() => Animated.spring(sc, { toValue: 1,    useNativeDriver: true, speed: 30 }).start()}
+      onPressIn={() => Animated.spring(sc, { toValue: 0.96, useNativeDriver: true, speed: 30 }).start()}
+      onPressOut={() => Animated.spring(sc, { toValue: 1, useNativeDriver: true, speed: 30 }).start()}
     >
       <Animated.View style={[s.card, { transform: [{ scale: sc }] }]}>
 
@@ -162,44 +206,38 @@ function AnnounceCard({ item, onPress, hot }) {
             style={s.cardImg}
             resizeMode="cover"
           />
-          {/* Gradient image bas */}
-          <LinearGradient
-            colors={['transparent', 'rgba(17,24,39,0.6)']}
-            style={StyleSheet.absoluteFill}
-            pointerEvents="none"
-          />
 
-          {/* Badge populaire */}
-          {hot && (
-            <View style={s.hotBadge}>
-              <Text style={s.hotBadgeTxt}>🔥 Populaire</Text>
-            </View>
-          )}
-
-          {/* Badge type — bas gauche */}
-          <View style={[s.typeBadge, { backgroundColor: isService ? 'rgba(236,90,19,0.9)' : 'rgba(245,158,11,0.9)' }]}>
-            <Text style={s.typeBadgeTxt}>{isService ? '🛠 Service' : '📦 Produit'}</Text>
+          <View style={s.cardTimeBadge}>
+            <Feather name="clock" size={11} color={P.charcoal} />
+            <Text style={s.cardTimeTxt}>Il y a {posted}</Text>
           </View>
 
-          {/* Prix — bas droit */}
-          <View style={s.cardPriceTag}>
-            <Text style={s.cardPriceTagTxt}>
-              {item.price ? `${parseInt(item.price).toLocaleString('fr-FR')} FCFA` : 'À discuter'}
-            </Text>
+          <View style={s.cardFavGhost}>
+            <Feather name="heart" size={14} color={isService ? '#2563EB' : P.terra} />
           </View>
         </View>
 
         {/* Contenu */}
         <View style={s.cardBody}>
-          <Text style={s.cardTitle} numberOfLines={2}>{item.title}</Text>
-          <View style={s.cardFooter}>
-            <View style={s.cardLocRow}>
-              <Text style={s.cardLocDot}>●</Text>
-              <Text style={s.cardLoc} numberOfLines={1}>{getCityName(item.location)}</Text>
+          <View style={s.cardTitleRow}>
+            <View style={s.cardTypeGlyphWrap}>
+              <Text style={s.cardTypeGlyph}>{isService ? '🛠️' : '📦'}</Text>
             </View>
-            <TouchableOpacity style={s.contactBtn} onPress={onPress}>
-              <Text style={s.contactBtnTxt}>Contacter</Text>
-            </TouchableOpacity>
+            <Text style={s.cardTitle} numberOfLines={1}>{item.title}</Text>
+          </View>
+
+          <View style={s.cardMetaRow}>
+            <Feather name="map-pin" size={11} color={isService ? '#2563EB' : P.terra} />
+            <Text style={s.cardLoc} numberOfLines={1}>{getCityName(item.location)}</Text>
+            <Text style={s.cardMetaDot}>•</Text>
+            <Text style={s.cardMetaTail}>{distance.toFixed(1)} km</Text>
+          </View>
+
+          <View style={s.cardPriceRow}>
+            <View style={s.cardPriceSpacer} />
+            <Text style={[s.cardPriceTxt, { color: isService ? '#2563EB' : P.terra }]}>
+              {item.price ? `${parseInt(item.price).toLocaleString('fr-FR')} FCFA` : 'À discuter'}
+            </Text>
           </View>
         </View>
 
@@ -209,7 +247,7 @@ function AnnounceCard({ item, onPress, hot }) {
 }
 
 // Carte vendeur actif
-function SellerCard({ seller }) {
+function SellerCard({ seller, onPress }) {
   const sc = useRef(new Animated.Value(1)).current;
   const getInitials = (name) => {
     if (!name) return '??';
@@ -222,8 +260,9 @@ function SellerCard({ seller }) {
   return (
     <TouchableOpacity
       activeOpacity={1}
-      onPressIn={()  => Animated.spring(sc, { toValue: 0.93, useNativeDriver: true, speed: 40 }).start()}
-      onPressOut={() => Animated.spring(sc, { toValue: 1,    useNativeDriver: true, speed: 40 }).start()}
+      onPress={onPress}
+      onPressIn={() => Animated.spring(sc, { toValue: 0.93, useNativeDriver: true, speed: 40 }).start()}
+      onPressOut={() => Animated.spring(sc, { toValue: 1, useNativeDriver: true, speed: 40 }).start()}
     >
       <Animated.View style={[s.sellerCard, { transform: [{ scale: sc }] }]}>
         {/* Indicateur online */}
@@ -266,21 +305,58 @@ export default function ProductsListScreen({ navigation }) {
     token,
   });
 
-  const [allProducts,    setAllProducts]    = useState([]);
-  const [loading,        setLoading]        = useState(true);
-  const [refreshing,     setRefreshing]     = useState(false);
-  const [searchQuery,    setSearchQuery]    = useState('');
-  const [platformStats,  setPlatformStats]  = useState({ totalProducts: 0, totalUsers: 0, totalCities: 0 });
-  const [activeSellers,  setActiveSellers]  = useState([]);
-  const [unreadCount,    setUnreadCount]    = useState(0);
+  const [allProducts, setAllProducts] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [locations, setLocations] = useState([]);
+  const [selectedLocation, setSelectedLocation] = useState('all');
+  const [locationsLoading, setLocationsLoading] = useState(false);
+  const [showQuickSearch, setShowQuickSearch] = useState(false);
+  const [platformStats, setPlatformStats] = useState({ totalProducts: 0, totalUsers: 0, totalCities: 0 });
+  const [activeSellers, setActiveSellers] = useState([]);
+  const [unreadCount, setUnreadCount] = useState(0);
+
+  const navigateToStackScreen = useCallback((screenName, params) => {
+    const parentNav = navigation.getParent?.();
+    if (parentNav?.navigate) {
+      parentNav.navigate(screenName, params);
+      return;
+    }
+    navigation.navigate(screenName, params);
+  }, [navigation]);
+
+  const handleHomeSearch = useCallback(() => {
+    const q = (searchQuery || '').trim();
+    const params = {
+      type: 'all',
+      q,
+    };
+    if (selectedLocation && selectedLocation !== 'all') {
+      params.location = selectedLocation;
+    }
+    navigation.navigate('AllProducts', params);
+  }, [navigation, searchQuery, selectedLocation]);
+
+  const handlePopularSearch = useCallback((value) => {
+    setSearchQuery(value);
+    const params = {
+      type: 'all',
+      q: value,
+    };
+    if (selectedLocation && selectedLocation !== 'all') {
+      params.location = selectedLocation;
+    }
+    navigation.navigate('AllProducts', params);
+  }, [navigation, selectedLocation]);
 
   // Animations d'entrée
-  const fade   = useRef(new Animated.Value(0)).current;
+  const fade = useRef(new Animated.Value(0)).current;
   const slideY = useRef(new Animated.Value(28)).current;
 
   useEffect(() => {
     Animated.parallel([
-      Animated.timing(fade,   { toValue: 1, duration: 550, useNativeDriver: true }),
+      Animated.timing(fade, { toValue: 1, duration: 550, useNativeDriver: true }),
       Animated.spring(slideY, { toValue: 0, tension: 65, friction: 10, useNativeDriver: true }),
     ]).start();
   }, []);
@@ -339,10 +415,29 @@ export default function ProductsListScreen({ navigation }) {
     } catch (e) { console.error(e); }
   };
 
+  const fetchLocations = async () => {
+    try {
+      setLocationsLoading(true);
+      const res = await apiClient.get('/products/locations');
+      const raw = res?.data?.data || [];
+      const cities = [...new Set(raw
+        .map((loc) => (loc ? String(loc).split(',')[0].trim() : ''))
+        .filter(Boolean))
+      ];
+      setLocations(cities.slice(0, 12));
+    } catch (e) {
+      console.error('Erreur chargement villes:', e);
+      setLocations([]);
+    } finally {
+      setLocationsLoading(false);
+    }
+  };
+
   useEffect(() => {
     fetchProducts();
     fetchStats();
     fetchSellers();
+    fetchLocations();
   }, []);
 
   const onRefresh = useCallback(() => {
@@ -350,6 +445,7 @@ export default function ProductsListScreen({ navigation }) {
     fetchProducts();
     fetchStats();
     fetchSellers();
+    fetchLocations();
   }, []);
 
   // ─── Loading screen ────────────────────────────────────────────────────────
@@ -391,7 +487,7 @@ export default function ProductsListScreen({ navigation }) {
           colors={['#2d3748', '#374151', '#3d4a5c']}
           start={{ x: 0, y: 0 }}
           end={{ x: 1, y: 1 }}
-          style={[s.hero, { paddingTop: (insets.top || 0) + 14 }]}
+          style={[s.hero, { paddingTop: (insets.top || 0) + 8 }]}
         >
           {/* Décos cercles ambiance */}
           <View style={s.deco1} />
@@ -413,8 +509,30 @@ export default function ProductsListScreen({ navigation }) {
               </View>
               <TouchableOpacity
                 style={s.notifBox}
-                onPress={() => navigation.navigate('Messages')}
+                onPress={() => {
+                  if (!isAuthenticated) {
+                    navigation.navigate('QuickAuth', {
+                      pendingAction: { type: 'messages_list' },
+                      returnScreen: 'Messages',
+                    });
+                  } else {
+                    navigation.navigate('Messages')
+                  }
+                }}
               >
+
+
+
+
+
+
+
+
+
+
+
+
+
                 <Text style={{ fontSize: 20 }}>🔔</Text>
                 {unreadCount > 0 && <PulseBadge text={String(unreadCount)} />}
               </TouchableOpacity>
@@ -426,9 +544,9 @@ export default function ProductsListScreen({ navigation }) {
                 Trouvez, contactez,{'\n'}
                 <Text style={s.heroH1Accent}>concluez.</Text>
               </Text>
-              <Text style={s.heroH2}>
+              {/* <Text style={s.heroH2}>
                 La place de marché du Niger — entre particuliers et professionnels.
-              </Text>
+              </Text> */}
             </View>
 
             {/* ── Ticker live ── */}
@@ -445,19 +563,107 @@ export default function ProductsListScreen({ navigation }) {
                   value={searchQuery}
                   onChangeText={setSearchQuery}
                   returnKeyType="search"
-                  onSubmitEditing={() => navigation.navigate('Search', { query: searchQuery })}
+                  onSubmitEditing={handleHomeSearch}
                 />
               </View>
               <TouchableOpacity
                 style={s.searchCta}
-                onPress={() => navigation.navigate('Search', { query: searchQuery })}
+                onPress={handleHomeSearch}
                 activeOpacity={0.85}
               >
                 <LinearGradient colors={[P.orange500, P.orange700]} style={s.searchCtaGrad}>
-                  <Text style={s.searchCtaTxt}>OK</Text>
+                  <Text style={s.searchCtaTxt}>→</Text>
                 </LinearGradient>
               </TouchableOpacity>
             </View>
+
+            <TouchableOpacity
+              activeOpacity={0.8}
+              onPress={() => setShowQuickSearch((value) => !value)}
+              style={s.searchToggle}
+            >
+              <Feather name={showQuickSearch ? 'chevron-up' : 'chevron-down'} size={12} color={P.amber} />
+              <Text style={s.searchToggleTxt}>
+                {showQuickSearch ? 'Masquer les options' : 'Plus d’options'}
+              </Text>
+            </TouchableOpacity>
+
+            {showQuickSearch && (
+              <View style={s.quickSearchCard}>
+                <View style={s.quickSearchHead}>
+                  <View style={s.quickSearchHeadLeft}>
+                    <Feather name="sliders" size={11} color={P.amber} />
+                    <Text style={s.quickSearchTitle}>Filtres rapides</Text>
+                  </View>
+                  <TouchableOpacity
+                    activeOpacity={0.8}
+                    onPress={() => {
+                      setSelectedLocation('all');
+                      setSearchQuery('');
+                    }}
+                    style={s.quickResetBtn}
+                  >
+                    <Text style={s.quickResetTxt}>Effacer</Text>
+                  </TouchableOpacity>
+                </View>
+
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={s.quickRail}
+                >
+                  <TouchableOpacity
+                    activeOpacity={0.85}
+                    onPress={() => setSelectedLocation('all')}
+                    style={[
+                      s.quickChip,
+                      selectedLocation === 'all' && s.quickChipActive,
+                    ]}
+                  >
+                    <Feather name="map-pin" size={10} color={selectedLocation === 'all' ? P.amber : 'rgba(255,255,255,0.72)'} />
+                    <Text style={[
+                      s.quickChipTxt,
+                      selectedLocation === 'all' && s.quickChipTxtActive,
+                    ]}>Toutes</Text>
+                  </TouchableOpacity>
+
+                  {(locations.slice(0, 3)).map((city) => (
+                    <TouchableOpacity
+                      key={city}
+                      activeOpacity={0.85}
+                      onPress={() => setSelectedLocation(city)}
+                      style={[
+                        s.quickChip,
+                        selectedLocation === city && s.quickChipActive,
+                      ]}
+                    >
+                      <Text style={[
+                        s.quickChipTxt,
+                        selectedLocation === city && s.quickChipTxtActive,
+                      ]}>{city}</Text>
+                    </TouchableOpacity>
+                  ))}
+
+                  {locationsLoading && (
+                    <View style={s.quickChipLoader}>
+                      <ActivityIndicator size="small" color={P.amber} />
+                    </View>
+                  )}
+
+                  {POPULAR_SEARCHES.slice(0, 3).map((term) => (
+                    <TouchableOpacity
+                      key={term}
+                      activeOpacity={0.85}
+                      style={s.quickChip}
+                      onPress={() => handlePopularSearch(term)}
+                    >
+                      <Feather name="trending-up" size={10} color="rgba(255,255,255,0.72)" />
+                      <Text style={s.quickChipTxt}>{term}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              </View>
+            )}
 
           </Animated.View>
         </LinearGradient>
@@ -465,7 +671,7 @@ export default function ProductsListScreen({ navigation }) {
         {/* ══════════════════════════════════════════════════════════════════
             STATS STRIP — 3 chiffres clés
         ═══════════════════════════════════════════════════════════════════ */}
-        <View style={s.statsStrip}>
+        {/* <View style={s.statsStrip}>
           {[
             { n: formatStatNumber(platformStats.totalProducts), lbl: 'Annonces',  icon: '📋' },
             { n: formatStatNumber(platformStats.totalUsers),    lbl: 'Membres',   icon: '👥' },
@@ -480,6 +686,96 @@ export default function ProductsListScreen({ navigation }) {
               </View>
             </React.Fragment>
           ))}
+        </View> */}
+
+
+
+        {/* ══════════════════════════════════════════════════════════════════
+            ANNONCES DU MOMENT 🔥
+        ═══════════════════════════════════════════════════════════════════ */}
+        <View style={s.section}>
+          <SectionHeader
+            title="Annonces du moment 🔥"
+            subtitle="Les plus consultées aujourd'hui"
+            onSeeAll={() => navigation.navigate('AllProducts', { type: 'product' })}
+          />
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={s.cardList}
+          >
+            {products.length === 0
+              ? <EmptyCard text="Aucun produit pour l'instant" />
+              : products.slice(0, 10).map((item, idx) => (
+                <AnnounceCard
+                  key={item._id || item.id || idx}
+                  item={item}
+                  hot={idx < 2}
+                  onPress={() => navigation.navigate('ProductDetail', { productId: item._id || item.id })}
+                />
+              ))
+            }
+          </ScrollView>
+        </View>
+
+        {/* ══════════════════════════════════════════════════════════════════
+            COMMENT ÇA MARCHE
+        ═══════════════════════════════════════════════════════════════════ */}
+        {/* <LinearGradient
+          colors={['#2d3748', '#374151']}
+          style={s.howSection}
+        >
+          <SectionHeader title="Comment ça marche ?" light />
+          <View style={s.howRow}>
+            {HOW_IT_WORKS.map((h, i) => (
+              <View key={i} style={s.howStep}>
+                {i < HOW_IT_WORKS.length - 1 && <View style={s.howLine} />}
+                <View style={s.howIconWrap}>
+                  <LinearGradient colors={['rgba(236,90,19,0.18)', 'rgba(236,90,19,0.06)']} style={s.howIconBg}>
+                    <Text style={s.howIcon}>{h.icon}</Text>
+                  </LinearGradient>
+                  <LinearGradient colors={[P.orange500, P.orange700]} style={s.howNum}>
+                    <Text style={s.howNumTxt}>{h.step}</Text>
+                  </LinearGradient>
+                </View>
+                <Text style={s.howTitle}>{h.title}</Text>
+                <Text style={s.howDesc}>{h.desc}</Text>
+              </View>
+            ))}
+          </View>
+        </LinearGradient> */}
+
+        {/* ══════════════════════════════════════════════════════════════════
+            SERVICES À LA UNE
+        ═══════════════════════════════════════════════════════════════════ */}
+        <View style={s.section}>
+          <SectionHeader
+            title="Services à la une"
+            subtitle="Artisans, prestataires et experts près de vous"
+            accent="#2563EB"
+            accentSoft={P.blue100}
+            titleColor="#1D4ED8"
+            subtitleColor={P.blue200}
+            buttonColor="#2563EB"
+            onSeeAll={() => navigation.navigate('AllProducts', { type: 'service' })}
+          />
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={s.cardList}
+          >
+            {services.length === 0
+              ? <EmptyCard text="Aucun service pour l'instant" />
+              : services.slice(0, 10).map((item, idx) => (
+                <AnnounceCard
+                  key={item._id || item.id || idx}
+                  item={item}
+                  hot={false}
+                  onPress={() => navigation.navigate('ProductDetail', { productId: item._id || item.id })}
+                />
+              ))
+            }
+          </ScrollView>
         </View>
 
         {/* ══════════════════════════════════════════════════════════════════
@@ -489,7 +785,7 @@ export default function ProductsListScreen({ navigation }) {
           <SectionHeader
             title="Parcourir par catégorie"
             subtitle="Trouvez exactement ce que vous cherchez"
-            onSeeAll={() => navigation.navigate('Categories')}
+            onSeeAll={() => navigateToStackScreen('Categories')}
           />
           <ScrollView
             horizontal
@@ -512,14 +808,14 @@ export default function ProductsListScreen({ navigation }) {
         {/* ══════════════════════════════════════════════════════════════════
             BANNIÈRE — PUBLIER GRATUITEMENT
         ═══════════════════════════════════════════════════════════════════ */}
-        <View style={s.bannerWrap}>
+        {/* <View style={s.bannerWrap}>
           <LinearGradient
             colors={['#374151', '#3d4a5c']}
             start={{ x: 0, y: 0 }}
             end={{ x: 1, y: 1 }}
             style={s.banner}
           >
-            {/* Accent orange côté gauche */}
+            
             <View style={s.bannerAccentBar} />
             <View style={{ flex: 1 }}>
               <View style={s.bannerEyeWrap}>
@@ -544,90 +840,7 @@ export default function ProductsListScreen({ navigation }) {
             </View>
             <Text style={s.bannerEmoji}>📣</Text>
           </LinearGradient>
-        </View>
-
-        {/* ══════════════════════════════════════════════════════════════════
-            ANNONCES DU MOMENT 🔥
-        ═══════════════════════════════════════════════════════════════════ */}
-        <View style={s.section}>
-          <SectionHeader
-            title="Annonces du moment 🔥"
-            subtitle="Les plus consultées aujourd'hui"
-            onSeeAll={() => navigation.navigate('AllProducts', { type: 'product' })}
-          />
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={s.cardList}
-          >
-            {products.length === 0
-              ? <EmptyCard text="Aucun produit pour l'instant" />
-              : products.slice(0, 10).map((item, idx) => (
-                  <AnnounceCard
-                    key={item._id || item.id || idx}
-                    item={item}
-                    hot={idx < 2}
-                    onPress={() => navigation.navigate('ProductDetail', { productId: item._id || item.id })}
-                  />
-                ))
-            }
-          </ScrollView>
-        </View>
-
-        {/* ══════════════════════════════════════════════════════════════════
-            COMMENT ÇA MARCHE
-        ═══════════════════════════════════════════════════════════════════ */}
-        <LinearGradient
-          colors={['#2d3748', '#374151']}
-          style={s.howSection}
-        >
-          <SectionHeader title="Comment ça marche ?" light />
-          <View style={s.howRow}>
-            {HOW_IT_WORKS.map((h, i) => (
-              <View key={i} style={s.howStep}>
-                {i < HOW_IT_WORKS.length - 1 && <View style={s.howLine} />}
-                <View style={s.howIconWrap}>
-                  <LinearGradient colors={['rgba(236,90,19,0.18)', 'rgba(236,90,19,0.06)']} style={s.howIconBg}>
-                    <Text style={s.howIcon}>{h.icon}</Text>
-                  </LinearGradient>
-                  <LinearGradient colors={[P.orange500, P.orange700]} style={s.howNum}>
-                    <Text style={s.howNumTxt}>{h.step}</Text>
-                  </LinearGradient>
-                </View>
-                <Text style={s.howTitle}>{h.title}</Text>
-                <Text style={s.howDesc}>{h.desc}</Text>
-              </View>
-            ))}
-          </View>
-        </LinearGradient>
-
-        {/* ══════════════════════════════════════════════════════════════════
-            SERVICES À LA UNE
-        ═══════════════════════════════════════════════════════════════════ */}
-        <View style={s.section}>
-          <SectionHeader
-            title="Services à la une"
-            subtitle="Artisans, prestataires et experts près de vous"
-            onSeeAll={() => navigation.navigate('AllProducts', { type: 'service' })}
-          />
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={s.cardList}
-          >
-            {services.length === 0
-              ? <EmptyCard text="Aucun service pour l'instant" />
-              : services.slice(0, 10).map((item, idx) => (
-                  <AnnounceCard
-                    key={item._id || item.id || idx}
-                    item={item}
-                    hot={false}
-                    onPress={() => navigation.navigate('ProductDetail', { productId: item._id || item.id })}
-                  />
-                ))
-            }
-          </ScrollView>
-        </View>
+        </View> */}
 
         {/* ══════════════════════════════════════════════════════════════════
             VENDEURS ACTIFS
@@ -644,7 +857,11 @@ export default function ProductsListScreen({ navigation }) {
               contentContainerStyle={s.sellerList}
             >
               {activeSellers.map((sel, i) => (
-                <SellerCard key={sel._id || i} seller={sel} />
+                <SellerCard
+                  key={sel._id || i}
+                  seller={sel}
+                  onPress={() => navigation.navigate('SellerProfile', { sellerId: sel.id || sel._id })}
+                />
               ))}
             </ScrollView>
           </View>
@@ -661,10 +878,10 @@ export default function ProductsListScreen({ navigation }) {
             contentContainerStyle={s.trustList}
           >
             {[
-              { icon: '🔒', title: 'Membres vérifiés',    color: P.peachSoft,   border: 'rgba(236,90,19,0.18)' },
-              { icon: '💬', title: 'Messagerie directe',  color: '#e8f4fd',     border: 'rgba(59,130,246,0.18)' },
-              { icon: '🆓', title: '100 % Gratuit',       color: '#e8faf0',     border: 'rgba(34,197,94,0.18)' },
-              { icon: '📍', title: 'Très local',          color: P.amberSoft,   border: 'rgba(245,158,11,0.18)' },
+              { icon: '🔒', title: 'Membres vérifiés', color: P.peachSoft, border: 'rgba(236,90,19,0.18)' },
+              { icon: '💬', title: 'Messagerie directe', color: '#e8f4fd', border: 'rgba(59,130,246,0.18)' },
+              { icon: '🆓', title: '100 % Gratuit', color: '#e8faf0', border: 'rgba(34,197,94,0.18)' },
+              { icon: '📍', title: 'Très local', color: P.amberSoft, border: 'rgba(245,158,11,0.18)' },
             ].map((t, i) => (
               <View key={i} style={[s.trustPill, { backgroundColor: t.color, borderColor: t.border }]}>
                 <Text style={s.trustPillIcon}>{t.icon}</Text>
@@ -677,15 +894,15 @@ export default function ProductsListScreen({ navigation }) {
         {/* ══════════════════════════════════════════════════════════════════
             FOOTER CTA
         ═══════════════════════════════════════════════════════════════════ */}
-        <View style={s.footerCta}>
-          {/* Ligne accent haut */}
+        {/* <View style={s.footerCta}>
+          
           <LinearGradient
             colors={['transparent', P.terra, 'transparent']}
             start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
             style={s.footerAccentLine}
           />
 
-          {/* Icône */}
+          
           <View style={s.footerIconWrap}>
             <LinearGradient colors={[P.orange500, P.orange700]} style={s.footerIconGrad}>
               <Text style={{ fontSize: 26 }}>📣</Text>
@@ -712,7 +929,7 @@ export default function ProductsListScreen({ navigation }) {
           </TouchableOpacity>
 
           <Text style={s.footerBadge}>✅ Sans commission · Sans frais cachés</Text>
-        </View>
+        </View> */}
 
       </ScrollView>
     </View>
@@ -725,9 +942,9 @@ const s = StyleSheet.create({
   screen: { flex: 1, backgroundColor: P.surface },
 
   // ─── Loading ────────────────────────────────────────────────────────────────
-  loadScreen:   { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  loadScreen: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   loadLogoWrap: { position: 'relative', marginBottom: 20, alignItems: 'center', justifyContent: 'center' },
-  loadLogoBox:  {
+  loadLogoBox: {
     width: 76, height: 76, borderRadius: 24,
     justifyContent: 'center', alignItems: 'center',
     shadowColor: P.terra, shadowOpacity: 0.5,
@@ -739,48 +956,99 @@ const s = StyleSheet.create({
     borderColor: 'rgba(236,90,19,0.3)',
   },
   loadLogoTxt: { fontSize: 42, fontWeight: '900', color: P.white },
-  loadBrand:   { fontSize: 32, fontWeight: '900', color: P.white, letterSpacing: -1 },
-  loadSlogan:  { fontSize: 13, color: 'rgba(255,255,255,0.4)', marginTop: 6 },
+  loadBrand: { fontSize: 32, fontWeight: '900', color: P.white, letterSpacing: -1 },
+  loadSlogan: { fontSize: 13, color: 'rgba(255,255,255,0.4)', marginTop: 6 },
 
   // ─── Hero ───────────────────────────────────────────────────────────────────
-  hero: { paddingHorizontal: 20, paddingBottom: 28, overflow: 'hidden', position: 'relative' },
+  hero: { paddingHorizontal: 18, paddingBottom: 20, overflow: 'hidden', position: 'relative' },
   heroTopLine: {
     position: 'absolute', top: 0, left: 0, right: 0, height: 3, backgroundColor: P.terra,
   },
-  deco1: { position: 'absolute', top: -100, right: -80,  width: 240, height: 240, borderRadius: 120, backgroundColor: 'rgba(236,90,19,0.09)' },
-  deco2: { position: 'absolute', bottom: -50, left: -60, width: 180, height: 180, borderRadius: 90,  backgroundColor: 'rgba(245,158,11,0.07)' },
-  deco3: { position: 'absolute', top: 80, right: 60,     width: 60,  height: 60,  borderRadius: 30,  backgroundColor: 'rgba(236,90,19,0.08)' },
+  deco1: { position: 'absolute', top: -100, right: -80, width: 240, height: 240, borderRadius: 120, backgroundColor: 'rgba(236,90,19,0.09)' },
+  deco2: { position: 'absolute', bottom: -50, left: -60, width: 180, height: 180, borderRadius: 90, backgroundColor: 'rgba(245,158,11,0.07)' },
+  deco3: { position: 'absolute', top: 80, right: 60, width: 60, height: 60, borderRadius: 30, backgroundColor: 'rgba(236,90,19,0.08)' },
 
   // Brand bar
-  brandBar:  { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 24 },
-  logoBox:   { width: 46, height: 46, borderRadius: 14, justifyContent: 'center', alignItems: 'center', shadowColor: P.terra, shadowOpacity: 0.4, shadowOffset: { width: 0, height: 4 }, shadowRadius: 10, elevation: 8 },
-  logoTxt:   { fontSize: 26, fontWeight: '900', color: P.white },
-  brandName: { fontSize: 19, fontWeight: '800', color: P.white, letterSpacing: -0.4 },
-  brandSub:  { fontSize: 11, color: 'rgba(255,255,255,0.38)', marginTop: 1 },
-  notifBox:  { width: 44, height: 44, borderRadius: 22, backgroundColor: 'rgba(255,255,255,0.08)', justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)' },
-  pulseBadge:    { position: 'absolute', top: 4, right: 4, width: 16, height: 16, borderRadius: 8, backgroundColor: P.terra, justifyContent: 'center', alignItems: 'center', borderWidth: 1.5, borderColor: P.charcoal },
+  brandBar: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 16 },
+  logoBox: { width: 42, height: 42, borderRadius: 12, justifyContent: 'center', alignItems: 'center', shadowColor: P.terra, shadowOpacity: 0.4, shadowOffset: { width: 0, height: 4 }, shadowRadius: 10, elevation: 8 },
+  logoTxt: { fontSize: 23, fontWeight: '900', color: P.white },
+  brandName: { fontSize: 17, fontWeight: '800', color: P.white, letterSpacing: -0.4 },
+  brandSub: { fontSize: 11, color: 'rgba(255,255,255,0.38)', marginTop: 1 },
+  notifBox: { width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(255,255,255,0.08)', justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)' },
+  pulseBadge: { position: 'absolute', top: 4, right: 4, width: 16, height: 16, borderRadius: 8, backgroundColor: P.terra, justifyContent: 'center', alignItems: 'center', borderWidth: 1.5, borderColor: P.charcoal },
   pulseBadgeTxt: { fontSize: 8, fontWeight: '900', color: P.white },
 
   // Accroche
-  heroTextWrap: { marginBottom: 18 },
-  heroH1:       { fontSize: 32, fontWeight: '900', color: P.white, letterSpacing: -1, lineHeight: 40 },
+  heroTextWrap: { marginBottom: 9 },
+  heroH1: { fontSize: 24, fontWeight: '900', color: P.white, letterSpacing: -0.8, lineHeight: 29 },
   heroH1Accent: { color: P.amber },
-  heroH2:       { fontSize: 13, color: 'rgba(255,255,255,0.5)', lineHeight: 20, marginTop: 8 },
+  heroH2: { fontSize: 12, color: 'rgba(255,255,255,0.5)', lineHeight: 18, marginTop: 6 },
 
   // Ticker
-  ticker:      { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.07)', borderRadius: 24, paddingHorizontal: 14, paddingVertical: 10, marginBottom: 18, overflow: 'hidden', borderWidth: 1, borderColor: 'rgba(255,255,255,0.07)' },
-  tickerPill:  { width: 8, height: 8, borderRadius: 4, backgroundColor: P.terra, marginRight: 10, flexShrink: 0 },
+  ticker: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.07)', borderRadius: 18, paddingHorizontal: 11, paddingVertical: 7, marginBottom: 10, overflow: 'hidden', borderWidth: 1, borderColor: 'rgba(255,255,255,0.07)' },
+  tickerPill: { width: 8, height: 8, borderRadius: 4, backgroundColor: P.terra, marginRight: 10, flexShrink: 0 },
   tickerTrack: { flex: 1, overflow: 'hidden' },
-  tickerTxt:   { fontSize: 13, color: 'rgba(255,255,255,0.8)', fontWeight: '500' },
+  tickerTxt: { fontSize: 13, color: 'rgba(255,255,255,0.8)', fontWeight: '500' },
 
   // Recherche
-  searchBar:    { flexDirection: 'row', gap: 10 },
-  searchInner:  { flex: 1, flexDirection: 'row', alignItems: 'center', backgroundColor: P.white, borderRadius: 14, paddingHorizontal: 14, paddingVertical: 13, gap: 8 },
-  searchIcon:   { fontSize: 16 },
-  searchInput:  { flex: 1, fontSize: 14, color: P.charcoal },
-  searchCta:    { borderRadius: 14, overflow: 'hidden', alignSelf: 'stretch' },
-  searchCtaGrad:{ flex: 1, paddingHorizontal: 20, justifyContent: 'center', alignItems: 'center' },
-  searchCtaTxt: { fontSize: 14, fontWeight: '900', color: P.white },
+  searchBar: { flexDirection: 'row', gap: 5, alignItems: 'center' },
+  searchInner: { flex: 1, flexDirection: 'row', alignItems: 'center', backgroundColor: P.white, borderRadius: 10, paddingHorizontal: 9, paddingVertical: 6, gap: 6 },
+  searchIcon: { fontSize: 13 },
+  searchInput: { flex: 1, fontSize: 11.5, color: P.charcoal, paddingVertical: 0 },
+  searchCta: { width: 32, height: 32, borderRadius: 9, overflow: 'hidden' },
+  searchCtaGrad: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  searchCtaTxt: { fontSize: 15, fontWeight: '900', color: P.white, marginTop: -1 },
+  searchToggle: { marginTop: 6, alignSelf: 'flex-start', flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 9, paddingVertical: 5, borderRadius: 999, backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)' },
+  searchToggleTxt: { fontSize: 10, fontWeight: '700', color: 'rgba(255,255,255,0.72)' },
+  quickSearchCard: {
+    marginTop: 7,
+    borderRadius: 14,
+    paddingHorizontal: 7,
+    paddingVertical: 6,
+    backgroundColor: 'rgba(255,255,255,0.055)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.085)',
+  },
+  quickSearchHead: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 5,
+    gap: 5,
+  },
+  quickSearchHeadLeft: { flexDirection: 'row', alignItems: 'center', gap: 5, flexShrink: 1 },
+  quickSearchTitle: { fontSize: 10, fontWeight: '800', color: 'rgba(255,255,255,0.8)', textTransform: 'uppercase', letterSpacing: 0.55 },
+  quickSearchSub: { fontSize: 9, color: 'rgba(255,255,255,0.52)', fontWeight: '600', maxWidth: 120 },
+  quickResetBtn: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 999, backgroundColor: 'rgba(255,255,255,0.07)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.09)' },
+  quickResetTxt: { fontSize: 9, fontWeight: '800', color: 'rgba(255,255,255,0.82)' },
+  quickRail: { gap: 6, paddingRight: 4 },
+  quickChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 9,
+    paddingVertical: 6,
+    borderRadius: 999,
+    backgroundColor: 'rgba(255,255,255,0.07)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.14)',
+  },
+  quickChipActive: {
+    backgroundColor: 'rgba(245,158,11,0.18)',
+    borderColor: 'rgba(245,158,11,0.50)',
+  },
+  quickChipTxt: { fontSize: 9, color: 'rgba(255,255,255,0.84)', fontWeight: '700' },
+  quickChipTxtActive: { color: P.amber },
+  quickChipLoader: {
+    width: 30,
+    height: 28,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.07)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.14)',
+  },
 
   // ─── Stats strip ────────────────────────────────────────────────────────────
   statsStrip: {
@@ -791,11 +1059,11 @@ const s = StyleSheet.create({
     shadowColor: P.charcoal, shadowOpacity: 0.04,
     shadowOffset: { width: 0, height: 2 }, shadowRadius: 6, elevation: 2,
   },
-  statsDiv:  { width: 1, height: 36, backgroundColor: P.dim },
-  statItem:  { alignItems: 'center', gap: 2 },
-  statIcon:  { fontSize: 20, marginBottom: 2 },
-  statNum:   { fontSize: 22, fontWeight: '900', color: P.terra, letterSpacing: -0.5 },
-  statLbl:   { fontSize: 11, color: P.muted, fontWeight: '600' },
+  statsDiv: { width: 1, height: 36, backgroundColor: P.dim },
+  statItem: { alignItems: 'center', gap: 2 },
+  statIcon: { fontSize: 20, marginBottom: 2 },
+  statNum: { fontSize: 22, fontWeight: '900', color: P.terra, letterSpacing: -0.5 },
+  statLbl: { fontSize: 11, color: P.muted, fontWeight: '600' },
 
   // ─── Section générique ──────────────────────────────────────────────────────
   section: {
@@ -805,13 +1073,13 @@ const s = StyleSheet.create({
   },
 
   // Section header
-  secHead:     { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', paddingHorizontal: 18, marginBottom: 16 },
+  secHead: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', paddingHorizontal: 18, marginBottom: 16 },
   secTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  secAccent:   { width: 4, height: 26, borderRadius: 2 },
-  secTitle:    { fontSize: 18, fontWeight: '900', color: P.charcoal, letterSpacing: -0.4 },
-  secSub:      { fontSize: 12, color: P.muted, marginTop: 4, marginLeft: 14 },
-  seeAllBtn:   { backgroundColor: P.peachSoft, paddingHorizontal: 12, paddingVertical: 7, borderRadius: 10 },
-  seeAllTxt:   { fontSize: 12, fontWeight: '700', color: P.terra },
+  secAccent: { width: 4, height: 26, borderRadius: 2 },
+  secTitle: { fontSize: 18, fontWeight: '900', color: P.charcoal, letterSpacing: -0.4 },
+  secSub: { fontSize: 12, color: P.muted, marginTop: 4, marginLeft: 14 },
+  seeAllBtn: { backgroundColor: P.peachSoft, paddingHorizontal: 12, paddingVertical: 7, borderRadius: 10 },
+  seeAllTxt: { fontSize: 12, fontWeight: '700', color: P.terra },
 
   // ─── Chips catégorie ────────────────────────────────────────────────────────
   chipList: { paddingHorizontal: 18, gap: 10 },
@@ -823,8 +1091,8 @@ const s = StyleSheet.create({
     shadowOffset: { width: 0, height: 3 }, shadowRadius: 8, elevation: 2,
   },
   chipIconWrap: { width: 50, height: 50, borderRadius: 25, backgroundColor: P.peachSoft, justifyContent: 'center', alignItems: 'center', marginBottom: 8 },
-  chipEmoji:    { fontSize: 24 },
-  chipLabel:    { fontSize: 11, color: P.charcoal, fontWeight: '700', textAlign: 'center' },
+  chipEmoji: { fontSize: 24 },
+  chipLabel: { fontSize: 11, color: P.charcoal, fontWeight: '700', textAlign: 'center' },
 
   // ─── Bannière publier ───────────────────────────────────────────────────────
   bannerWrap: { paddingHorizontal: 16, paddingVertical: 8, marginTop: 8 },
@@ -836,12 +1104,12 @@ const s = StyleSheet.create({
     shadowOffset: { width: 0, height: 8 }, shadowRadius: 20, elevation: 10,
   },
   bannerAccentBar: { position: 'absolute', left: 0, top: 20, bottom: 20, width: 4, backgroundColor: P.terra, borderRadius: 2 },
-  bannerEyeWrap:  { backgroundColor: 'rgba(236,90,19,0.18)', alignSelf: 'flex-start', borderRadius: 8, paddingHorizontal: 8, paddingVertical: 4, marginBottom: 8 },
-  bannerEyeTxt:   { fontSize: 11, fontWeight: '700', color: P.amber },
-  bannerTitle:    { fontSize: 18, fontWeight: '900', color: P.white, lineHeight: 25, marginBottom: 14 },
-  bannerBtn:      { paddingVertical: 11, paddingHorizontal: 16, borderRadius: 11, alignSelf: 'flex-start', shadowColor: P.terra, shadowOpacity: 0.35, shadowOffset: { width: 0, height: 4 }, shadowRadius: 10, elevation: 6 },
-  bannerBtnTxt:   { fontSize: 13, fontWeight: '800', color: P.white },
-  bannerEmoji:    { fontSize: 60, marginLeft: 10 },
+  bannerEyeWrap: { backgroundColor: 'rgba(236,90,19,0.18)', alignSelf: 'flex-start', borderRadius: 8, paddingHorizontal: 8, paddingVertical: 4, marginBottom: 8 },
+  bannerEyeTxt: { fontSize: 11, fontWeight: '700', color: P.amber },
+  bannerTitle: { fontSize: 18, fontWeight: '900', color: P.white, lineHeight: 25, marginBottom: 14 },
+  bannerBtn: { paddingVertical: 11, paddingHorizontal: 16, borderRadius: 11, alignSelf: 'flex-start', shadowColor: P.terra, shadowOpacity: 0.35, shadowOffset: { width: 0, height: 4 }, shadowRadius: 10, elevation: 6 },
+  bannerBtnTxt: { fontSize: 13, fontWeight: '800', color: P.white },
+  bannerEmoji: { fontSize: 60, marginLeft: 10 },
 
   // ─── Cartes annonces ────────────────────────────────────────────────────────
   cardList: { paddingHorizontal: 18, gap: 14, paddingBottom: 4 },
@@ -849,40 +1117,79 @@ const s = StyleSheet.create({
     width: 192, backgroundColor: P.white, borderRadius: 20, overflow: 'hidden',
     shadowColor: P.charcoal, shadowOpacity: 0.10,
     shadowOffset: { width: 0, height: 5 }, shadowRadius: 14, elevation: 5,
+    borderWidth: 1,
+    borderColor: P.dim,
   },
   cardImgWrap: { height: 148, backgroundColor: P.sand, position: 'relative' },
-  cardImg:     { width: '100%', height: '100%' },
-  hotBadge:    { position: 'absolute', top: 10, right: 10, backgroundColor: 'rgba(236,90,19,0.92)', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 7 },
-  hotBadgeTxt: { fontSize: 9, fontWeight: '800', color: P.white },
-  typeBadge:   { position: 'absolute', top: 10, left: 10, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 7 },
-  typeBadgeTxt:{ fontSize: 9, fontWeight: '800', color: P.white },
-  cardPriceTag:{ position: 'absolute', bottom: 10, left: 8, backgroundColor: 'rgba(17,24,39,0.82)', paddingHorizontal: 9, paddingVertical: 4, borderRadius: 8 },
-  cardPriceTagTxt:{ fontSize: 11, fontWeight: '900', color: P.white },
-  cardBody:    { padding: 12 },
-  cardTitle:   { fontSize: 13, fontWeight: '700', color: P.charcoal, lineHeight: 19, marginBottom: 10, minHeight: 38 },
-  cardFooter:  { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  cardLocRow:  { flexDirection: 'row', alignItems: 'center', gap: 4, flex: 1 },
-  cardLocDot:  { fontSize: 7, color: P.terra },
-  cardLoc:     { fontSize: 11, color: P.muted, flex: 1 },
-  contactBtn:  { backgroundColor: P.terra, borderRadius: 8, paddingVertical: 6, paddingHorizontal: 10, shadowColor: P.terra, shadowOpacity: 0.3, shadowOffset: { width: 0, height: 2 }, shadowRadius: 6, elevation: 3 },
-  contactBtnTxt:{ fontSize: 11, fontWeight: '800', color: P.white },
+  cardImg: { width: '100%', height: '100%' },
+  cardHotBadge: {
+    position: 'absolute',
+    top: 8,
+    left: 8,
+    zIndex: 6,
+    backgroundColor: '#2563EB',
+    borderRadius: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  cardHotTxt: { fontSize: 9, fontWeight: '800', color: P.white, letterSpacing: 0.3 },
+  cardTimeBadge: {
+    position: 'absolute',
+    top: 8,
+    left: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: 'rgba(255,255,255,0.92)',
+    borderRadius: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  cardTimeTxt: { fontSize: 10, fontWeight: '700', color: P.charcoal },
+  cardFavGhost: {
+    position: 'absolute',
+    top: 8,
+    right: 10,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: 'rgba(255,255,255,0.9)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 6,
+    elevation: 6,
+    borderWidth: 1,
+    borderColor: 'rgba(236,90,19,0.2)',
+  },
+  cardBody: { paddingHorizontal: 10, paddingVertical: 9, gap: 6 },
+  cardTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  cardTypeGlyphWrap: { width: 18, minWidth: 18, alignItems: 'center', justifyContent: 'center' },
+  cardTypeGlyph: { fontSize: 14 },
+  cardTitle: { flex: 1, fontSize: 13, fontWeight: '700', color: P.charcoal },
+  cardMetaRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  cardLoc: { flexShrink: 1, fontSize: 11, color: P.muted, maxWidth: 74 },
+  cardMetaDot: { fontSize: 12, color: P.muted },
+  cardMetaTail: { fontSize: 10, color: P.muted, fontWeight: '600' },
+  cardPriceRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: 5 },
+  cardPriceSpacer: { flex: 1 },
+  cardPriceTxt: { fontSize: 12, fontWeight: '800', color: P.terra },
 
   // ─── Comment ça marche ──────────────────────────────────────────────────────
   howSection: { paddingVertical: 26, paddingHorizontal: 18, marginTop: 8 },
-  howRow:     { flexDirection: 'row', justifyContent: 'space-between', marginTop: 8 },
-  howStep:    { flex: 1, alignItems: 'center', paddingHorizontal: 4, position: 'relative' },
-  howLine:    { position: 'absolute', top: 30, left: '55%', right: '-55%', height: 1.5, backgroundColor: 'rgba(236,90,19,0.2)', zIndex: 0 },
-  howIconWrap:{ position: 'relative', marginBottom: 12, zIndex: 1 },
-  howIconBg:  { width: 62, height: 62, borderRadius: 31, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: 'rgba(236,90,19,0.2)' },
-  howIcon:    { fontSize: 30 },
-  howNum:     { position: 'absolute', top: -6, right: -8, width: 20, height: 20, borderRadius: 10, justifyContent: 'center', alignItems: 'center' },
-  howNumTxt:  { fontSize: 9, fontWeight: '900', color: P.white },
-  howTitle:   { fontSize: 13, fontWeight: '800', color: P.white, textAlign: 'center', marginBottom: 5 },
-  howDesc:    { fontSize: 11, color: 'rgba(255,255,255,0.45)', textAlign: 'center', lineHeight: 16 },
+  howRow: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 8 },
+  howStep: { flex: 1, alignItems: 'center', paddingHorizontal: 4, position: 'relative' },
+  howLine: { position: 'absolute', top: 30, left: '55%', right: '-55%', height: 1.5, backgroundColor: 'rgba(236,90,19,0.2)', zIndex: 0 },
+  howIconWrap: { position: 'relative', marginBottom: 12, zIndex: 1 },
+  howIconBg: { width: 62, height: 62, borderRadius: 31, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: 'rgba(236,90,19,0.2)' },
+  howIcon: { fontSize: 30 },
+  howNum: { position: 'absolute', top: -6, right: -8, width: 20, height: 20, borderRadius: 10, justifyContent: 'center', alignItems: 'center' },
+  howNumTxt: { fontSize: 9, fontWeight: '900', color: P.white },
+  howTitle: { fontSize: 13, fontWeight: '800', color: P.white, textAlign: 'center', marginBottom: 5 },
+  howDesc: { fontSize: 11, color: 'rgba(255,255,255,0.45)', textAlign: 'center', lineHeight: 16 },
 
   // ─── Vendeurs actifs ────────────────────────────────────────────────────────
-  sellerList:    { paddingHorizontal: 18, gap: 12, paddingBottom: 4 },
-  sellerCard:    {
+  sellerList: { paddingHorizontal: 18, gap: 12, paddingBottom: 4 },
+  sellerCard: {
     alignItems: 'center', backgroundColor: P.white, borderRadius: 18,
     padding: 16, width: 102,
     borderWidth: 1, borderColor: P.dim,
@@ -890,21 +1197,21 @@ const s = StyleSheet.create({
     shadowOffset: { width: 0, height: 3 }, shadowRadius: 8, elevation: 2,
     position: 'relative',
   },
-  sellerAvatar:  { width: 52, height: 52, borderRadius: 26, justifyContent: 'center', alignItems: 'center', marginBottom: 8 },
-  sellerInitials:{ fontSize: 18, fontWeight: '800', color: P.white },
-  sellerName:    { fontSize: 12, fontWeight: '700', color: P.charcoal, textAlign: 'center', marginBottom: 3 },
-  sellerCount:   { fontSize: 10, color: P.muted, fontWeight: '600', textAlign: 'center' },
-  onlineDot:     { position: 'absolute', top: 12, right: 12, width: 10, height: 10, borderRadius: 5, borderWidth: 1.5, borderColor: P.white },
+  sellerAvatar: { width: 52, height: 52, borderRadius: 26, justifyContent: 'center', alignItems: 'center', marginBottom: 8 },
+  sellerInitials: { fontSize: 18, fontWeight: '800', color: P.white },
+  sellerName: { fontSize: 12, fontWeight: '700', color: P.charcoal, textAlign: 'center', marginBottom: 3 },
+  sellerCount: { fontSize: 10, color: P.muted, fontWeight: '600', textAlign: 'center' },
+  onlineDot: { position: 'absolute', top: 12, right: 12, width: 10, height: 10, borderRadius: 5, borderWidth: 1.5, borderColor: P.white },
 
   // ─── Confiance ──────────────────────────────────────────────────────────────
-  trustSection: { paddingTop: 20, paddingBottom: 22, backgroundColor: '#374151', marginTop: 8 },
-  trustList:    { paddingHorizontal: 18, gap: 10, paddingBottom: 4 },
-  trustPill:    {
+  trustSection: { paddingTop: 20, paddingBottom: 22, backgroundColor: '#374151', marginTop: 8, marginBottom: -28 },
+  trustList: { paddingHorizontal: 18, gap: 10, paddingBottom: 4 },
+  trustPill: {
     flexDirection: 'row', alignItems: 'center', gap: 10,
     paddingVertical: 12, paddingHorizontal: 16,
     borderRadius: 50, borderWidth: 1.5,
   },
-  trustPillIcon:  { fontSize: 20 },
+  trustPillIcon: { fontSize: 20 },
   trustPillTitle: { fontSize: 13, fontWeight: '700', color: P.charcoal },
 
   // ─── Footer CTA ─────────────────────────────────────────────────────────────
@@ -913,27 +1220,27 @@ const s = StyleSheet.create({
     backgroundColor: '#374151',
   },
   footerAccentLine: { height: 2, width: '40%', marginBottom: 20, borderRadius: 1 },
-  footerIconWrap:   { marginBottom: 16 },
-  footerIconGrad:   {
+  footerIconWrap: { marginBottom: 16 },
+  footerIconGrad: {
     width: 60, height: 60, borderRadius: 20,
     justifyContent: 'center', alignItems: 'center',
     shadowColor: P.terra, shadowOpacity: 0.3,
     shadowOffset: { width: 0, height: 4 }, shadowRadius: 12, elevation: 6,
   },
-  footerTitle:   { fontSize: 20, fontWeight: '900', color: P.white, letterSpacing: -0.4, textAlign: 'center', marginBottom: 6 },
-  footerSub:     { fontSize: 13, color: 'rgba(255,255,255,0.45)', textAlign: 'center', marginBottom: 20 },
-  footerBtn:     {
+  footerTitle: { fontSize: 20, fontWeight: '900', color: P.white, letterSpacing: -0.4, textAlign: 'center', marginBottom: 6 },
+  footerSub: { fontSize: 13, color: 'rgba(255,255,255,0.45)', textAlign: 'center', marginBottom: 20 },
+  footerBtn: {
     width: '100%', borderRadius: 14, overflow: 'hidden',
     shadowColor: P.terra, shadowOpacity: 0.3,
     shadowOffset: { width: 0, height: 5 }, shadowRadius: 14, elevation: 7,
     marginBottom: 14,
   },
   footerBtnGrad: { paddingVertical: 15, alignItems: 'center' },
-  footerBtnTxt:  { fontSize: 15, fontWeight: '800', color: P.white, letterSpacing: 0.1 },
-  footerBadge:   { fontSize: 12, color: 'rgba(255,255,255,0.3)', fontWeight: '600' },
+  footerBtnTxt: { fontSize: 15, fontWeight: '800', color: P.white, letterSpacing: 0.1 },
+  footerBadge: { fontSize: 12, color: 'rgba(255,255,255,0.3)', fontWeight: '600' },
 
   // ─── Empty card ─────────────────────────────────────────────────────────────
   emptyCard: { width: 200, height: 190, borderRadius: 20, backgroundColor: P.white, justifyContent: 'center', alignItems: 'center', borderWidth: 1.5, borderColor: P.dim, borderStyle: 'dashed', gap: 4, paddingHorizontal: 16 },
-  emptyTxt:  { fontSize: 13, color: P.muted, fontWeight: '700', textAlign: 'center' },
-  emptySub:  { fontSize: 11, color: P.amber, fontWeight: '600' },
+  emptyTxt: { fontSize: 13, color: P.muted, fontWeight: '700', textAlign: 'center' },
+  emptySub: { fontSize: 11, color: P.amber, fontWeight: '600' },
 });

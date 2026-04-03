@@ -6,16 +6,18 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View, Text, StyleSheet, FlatList, TouchableOpacity, Image,
   RefreshControl, ActivityIndicator, Dimensions, StatusBar,
-  Animated, Modal, ScrollView, PanResponder,
+  Animated, ScrollView, PanResponder,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
+import { Feather } from '@expo/vector-icons';
 import { CATEGORIES } from '../utils/constants';
 import { apiClient } from '../api/auth';
 import { MOBILE_COLORS as P } from '../theme/colors';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const { width } = Dimensions.get('window');
+const SCREEN_HEIGHT = Dimensions.get('window').height;
 const CARD_WIDTH  = (width - 48) / 2;
 const HERO_HEIGHT = 220;
 const HEADER_MAX  = 162; // ligne principale (54px) + gap + stats (52px) + paddings
@@ -24,53 +26,112 @@ const HEADER_MIN  = 60;
 // ─── Utilitaires ──────────────────────────────────────────────────────────────
 const getCityName = (loc) => (loc ? loc.split(',')[0].trim() : 'Niger');
 const fmtPrice    = (p)   => p ? `${parseInt(p).toLocaleString()} FCFA` : 'À discuter';
+const getPostedLabel = (dateValue) => {
+  if (!dateValue) return 'Récent';
+  const date = new Date(dateValue);
+  if (Number.isNaN(date.getTime())) return 'Récent';
+  const diffMs = Date.now() - date.getTime();
+  const mins = Math.max(1, Math.floor(diffMs / 60000));
+  if (mins < 60) return `${mins} min`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours} h`;
+  const days = Math.floor(hours / 24);
+  if (days < 7) return `${days} j`;
+  return `${Math.floor(days / 7)} sem`;
+};
+const getDistanceKm = (itemId) => {
+  const distances = [0.5, 1.2, 2.3, 3.5, 4.8, 5.1, 6.7, 8.2, 10.5];
+  if (typeof itemId === 'string') {
+    const hash = itemId.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+    return distances[hash % distances.length];
+  }
+  const n = Number(itemId) || 0;
+  return distances[Math.abs(n) % distances.length];
+};
 
 // ─────────────────────────────────────────────────────────────────────────────
-// SLIDER PRIX (réutilisé depuis AllProductsScreen)
+// SLIDER DE PRIX (custom, sans lib externe)
 // ─────────────────────────────────────────────────────────────────────────────
-function PriceSlider({ min, max, values, onChange, trackWidth }) {
-  const tw    = trackWidth || (width - 80);
-  const toX   = (v) => ((v - min) / (max - min)) * tw;
-  const toVal = (x) => Math.round(min + (Math.max(0, Math.min(tw, x)) / tw) * (max - min));
+function PriceSlider({ min, max, values, onChange, trackWidth, accent = P.terra }) {
+  const tw      = trackWidth || (width - 80);
+  const toX     = (v) => ((v - min) / (max - min)) * tw;
+  const toVal   = (x) => Math.round(min + (Math.max(0, Math.min(tw, x)) / tw) * (max - min));
 
-  const leftX  = useRef(new Animated.Value(toX(values[0]))).current;
-  const rightX = useRef(new Animated.Value(toX(values[1]))).current;
+  const leftX   = useRef(new Animated.Value(toX(values[0]))).current;
+  const rightX  = useRef(new Animated.Value(toX(values[1]))).current;
+
+  const leftRef  = useRef(values[0]);
+  const rightRef = useRef(values[1]);
+
   const [left,  setLeft]  = useState(values[0]);
   const [right, setRight] = useState(values[1]);
 
-  const makePan = (isLeft) => PanResponder.create({
+  const leftStartX  = useRef(toX(values[0]));
+  const rightStartX = useRef(toX(values[1]));
+
+  const panLeft = useRef(PanResponder.create({
     onStartShouldSetPanResponder: () => true,
+    onPanResponderGrant: () => {
+      leftStartX.current = toX(leftRef.current);
+    },
     onPanResponderMove: (_, g) => {
-      const base = isLeft ? toX(left) : toX(right);
-      const nx   = base + g.dx;
-      const nv   = toVal(nx);
-      if (isLeft) {
-        if (nv >= min && nv < right - 1000) {
-          leftX.setValue(Math.max(0, Math.min(toX(right) - 24, nx)));
-          setLeft(nv);
-        }
-      } else {
-        if (nv <= max && nv > left + 1000) {
-          rightX.setValue(Math.max(toX(left) + 24, Math.min(tw, nx)));
-          setRight(nv);
-        }
+      const nx = leftStartX.current + g.dx;
+      const nv = toVal(nx);
+      if (nv >= min && nv < rightRef.current - 1000) {
+        leftX.setValue(Math.max(0, Math.min(toX(rightRef.current) - 24, nx)));
+        leftRef.current = nv;
+        setLeft(nv);
       }
     },
-    onPanResponderRelease: () => onChange([left, right]),
-  });
+    onPanResponderRelease: () => onChange([leftRef.current, rightRef.current]),
+  })).current;
 
-  const panLeft  = useRef(makePan(true)).current;
-  const panRight = useRef(makePan(false)).current;
+  const panRight = useRef(PanResponder.create({
+    onStartShouldSetPanResponder: () => true,
+    onPanResponderGrant: () => {
+      rightStartX.current = toX(rightRef.current);
+    },
+    onPanResponderMove: (_, g) => {
+      const nx = rightStartX.current + g.dx;
+      const nv = toVal(nx);
+      if (nv <= max && nv > leftRef.current + 1000) {
+        rightX.setValue(Math.max(toX(leftRef.current) + 24, Math.min(tw, nx)));
+        rightRef.current = nv;
+        setRight(nv);
+      }
+    },
+    onPanResponderRelease: () => onChange([leftRef.current, rightRef.current]),
+  })).current;
+
+  const fillLeft  = leftX;
+  const fillWidth = Animated.subtract(rightX, leftX);
+
+  useEffect(() => {
+    const nextLeft  = values?.[0] ?? min;
+    const nextRight = values?.[1] ?? max;
+    leftRef.current  = nextLeft;
+    rightRef.current = nextRight;
+    setLeft(nextLeft);
+    setRight(nextRight);
+    leftX.setValue(toX(nextLeft));
+    rightX.setValue(toX(nextRight));
+  }, [values, min, max]);
 
   return (
     <View style={{ width: tw, height: 40, justifyContent: 'center' }}>
       <View style={sl.track} />
-      <Animated.View style={[sl.trackFill, { left: leftX, width: Animated.subtract(rightX, leftX) }]} />
-      <Animated.View style={[sl.thumb, { left: Animated.subtract(leftX, 11) }]} {...panLeft.panHandlers}>
-        <View style={sl.thumbInner} />
+      <Animated.View style={[sl.trackFill, { left: fillLeft, width: fillWidth, backgroundColor: accent }]} />
+      <Animated.View
+        style={[sl.thumb, { left: Animated.subtract(leftX, 11), borderColor: accent, shadowColor: accent }]}
+        {...panLeft.panHandlers}
+      >
+        <View style={[sl.thumbInner, { backgroundColor: accent }]} />
       </Animated.View>
-      <Animated.View style={[sl.thumb, { left: Animated.subtract(rightX, 11) }]} {...panRight.panHandlers}>
-        <View style={sl.thumbInner} />
+      <Animated.View
+        style={[sl.thumb, { left: Animated.subtract(rightX, 11), borderColor: accent, shadowColor: accent }]}
+        {...panRight.panHandlers}
+      >
+        <View style={[sl.thumbInner, { backgroundColor: accent }]} />
       </Animated.View>
     </View>
   );
@@ -84,106 +145,152 @@ const sl = StyleSheet.create({
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// MODAL FILTRE PRIX
+// MODAL FILTRE PRIX PriceFilterModal
 // ─────────────────────────────────────────────────────────────────────────────
-function PriceFilterModal({ visible, onClose, priceRange, onApply, maxPrice }) {
-  const insets    = useSafeAreaInsets();
+function PriceFilterModal({ visible, onClose, priceRange, onApply, maxPrice, accent = P.terra, accentDark = P.orange700, accentSoft = P.peachSoft }) {
+  const insets = useSafeAreaInsets();
   const [range, setRange] = useState(priceRange);
-  const slideAnim = useRef(new Animated.Value(300)).current;
+  const [mounted, setMounted] = useState(false);
+  const slideAnim = useRef(new Animated.Value(SCREEN_HEIGHT)).current;
 
   useEffect(() => {
     if (visible) {
+      setMounted(true);
       setRange(priceRange);
+      slideAnim.setValue(SCREEN_HEIGHT);
       Animated.spring(slideAnim, { toValue: 0, tension: 80, friction: 12, useNativeDriver: true }).start();
     } else {
-      Animated.timing(slideAnim, { toValue: 300, duration: 200, useNativeDriver: true }).start();
+      Animated.timing(slideAnim, { toValue: SCREEN_HEIGHT, duration: 220, useNativeDriver: true }).start(() => {
+        setMounted(false);
+      });
     }
   }, [visible]);
 
+  if (!mounted) return null;
+
   return (
-    <Modal visible={visible} transparent animationType="none" onRequestClose={onClose}>
-      <View style={fm.root}>
-        <TouchableOpacity style={fm.backdrop} activeOpacity={1} onPress={onClose} />
-        <Animated.View style={[fm.sheet, { transform: [{ translateY: slideAnim }], paddingBottom: Math.max(insets.bottom, 16) }]}>
-          <View style={fm.handle} />
-          <View style={fm.head}>
-            <Text style={fm.title}>Filtre par prix</Text>
-            <TouchableOpacity onPress={onClose} style={fm.closeBtn}>
-              <Text style={fm.closeTxt}>✕</Text>
-            </TouchableOpacity>
-          </View>
+    <View style={StyleSheet.absoluteFillObject} pointerEvents={visible ? 'auto' : 'none'}>
+      <TouchableOpacity
+        style={[StyleSheet.absoluteFillObject, { backgroundColor: 'rgba(0,0,0,0.55)' }]}
+        activeOpacity={1}
+        onPress={onClose}
+      />
+      <Animated.View style={{
+        position: 'absolute',
+        bottom: 0,
+        left: 0,
+        right: 0,
+        backgroundColor: P.white,
+        borderTopLeftRadius: 28,
+        borderTopRightRadius: 28,
+        paddingBottom: insets.bottom > 0 ? insets.bottom : 16,
+        transform: [{ translateY: slideAnim }],
+      }}>
+        <View style={fm.handle} />
+        <View style={fm.head}>
+          <Text style={fm.title}>Filtre par prix</Text>
+          <TouchableOpacity onPress={onClose} style={fm.closeBtn}>
+            <Text style={fm.closeTxt}>✕</Text>
+          </TouchableOpacity>
+        </View>
 
-          <View style={fm.valRow}>
-            <View style={fm.valBox}>
-              <Text style={fm.valLabel}>MIN</Text>
-              <Text style={fm.valNum}>{range[0].toLocaleString()}</Text>
-              <Text style={fm.valUnit}>FCFA</Text>
-            </View>
-            <View style={fm.valSep} />
-            <View style={fm.valBox}>
-              <Text style={fm.valLabel}>MAX</Text>
-              <Text style={fm.valNum}>{range[1].toLocaleString()}</Text>
-              <Text style={fm.valUnit}>FCFA</Text>
-            </View>
+        <View style={fm.valRow}>
+          <View style={fm.valBox}>
+            <Text style={fm.valLabel}>MIN</Text>
+            <Text style={[fm.valNum, { color: accent }]}>{range[0].toLocaleString()}</Text>
+            <Text style={fm.valUnit}>FCFA</Text>
           </View>
-
-          <View style={{ paddingHorizontal: 20, marginTop: 8, marginBottom: 24 }}>
-            <PriceSlider min={0} max={maxPrice} values={range} onChange={setRange} trackWidth={width - 80} />
+          <View style={fm.valSep} />
+          <View style={fm.valBox}>
+            <Text style={fm.valLabel}>MAX</Text>
+            <Text style={[fm.valNum, { color: accent }]}>{range[1].toLocaleString()}</Text>
+            <Text style={fm.valUnit}>FCFA</Text>
           </View>
+        </View>
 
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={fm.chips}>
-            {[
-              { label: 'Tout',       v: [0, maxPrice] },
-              { label: '< 5 000',    v: [0, 5000] },
-              { label: '5k – 50k',   v: [5000, 50000] },
-              { label: '50k – 200k', v: [50000, 200000] },
-              { label: '> 200k',     v: [200000, maxPrice] },
-            ].map((chip, i) => {
-              const active = range[0] === chip.v[0] && range[1] === chip.v[1];
-              return (
-                <TouchableOpacity key={i} style={[fm.chip, active && fm.chipActive]} onPress={() => setRange(chip.v)} activeOpacity={0.8}>
-                  <Text style={[fm.chipTxt, active && fm.chipTxtActive]}>{chip.label}</Text>
-                </TouchableOpacity>
-              );
-            })}
-          </ScrollView>
+        <Text style={fm.sliderHint}>Glissez le point gauche pour MIN et le point droit pour MAX.</Text>
 
-          <View style={{ paddingHorizontal: 20, marginTop: 16 }}>
-            <TouchableOpacity style={fm.applyBtn} onPress={() => { onApply(range); onClose(); }} activeOpacity={0.88}>
-              <LinearGradient colors={[P.orange500, P.orange700]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={fm.applyGrad}>
-                <Text style={fm.applyTxt}>Appliquer le filtre</Text>
-              </LinearGradient>
-            </TouchableOpacity>
-          </View>
-        </Animated.View>
-      </View>
-    </Modal>
+        <View style={{ paddingHorizontal: 20, marginTop: 8, marginBottom: 24 }}>
+          <PriceSlider
+            min={0}
+            max={maxPrice}
+            values={range}
+            onChange={setRange}
+            trackWidth={width - 80}
+            accent={accent}
+          />
+        </View>
+
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={fm.chips}>
+          {[
+            { label: 'Tout',       v: [0, maxPrice] },
+            { label: '< 5 000',    v: [0, 5000] },
+            { label: '5k – 50k',   v: [5000, 50000] },
+            { label: '50k – 200k', v: [50000, 200000] },
+            { label: '> 200k',     v: [200000, maxPrice] },
+          ].map((chip, i) => {
+            const active = range[0] === chip.v[0] && range[1] === chip.v[1];
+            return (
+              <TouchableOpacity
+                key={i}
+                style={[fm.chip, active && { backgroundColor: accentSoft, borderColor: accent }]}
+                onPress={() => setRange(chip.v)}
+                activeOpacity={0.8}
+              >
+                <Text style={[fm.chipTxt, active && { color: accent, fontWeight: '800' }]}>{chip.label}</Text>
+              </TouchableOpacity>
+            );
+          })}
+        </ScrollView>
+
+        <View style={{ paddingHorizontal: 20, marginTop: 8 }}>
+          <TouchableOpacity
+            style={[fm.applyBtn, { shadowColor: accent }]}
+            onPress={() => { onApply(range); onClose(); }}
+            activeOpacity={0.88}
+          >
+            <LinearGradient colors={[accent, accentDark]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={fm.applyGrad}>
+              <Text style={fm.applyTxt}>Appliquer le filtre</Text>
+            </LinearGradient>
+          </TouchableOpacity>
+        </View>
+      </Animated.View>
+    </View>
   );
 }
 
 const fm = StyleSheet.create({
-  root:          { flex: 1, justifyContent: 'flex-end' },
-  backdrop:      { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: P.shadow, opacity: 0.5 },
-  sheet:         { backgroundColor: P.white, borderTopLeftRadius: 28, borderTopRightRadius: 28 },
-  handle:        { width: 36, height: 4, borderRadius: 2, backgroundColor: P.dim, alignSelf: 'center', marginTop: 12, marginBottom: 4 },
-  head:          { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 22, paddingVertical: 16, borderBottomWidth: 1, borderBottomColor: P.dim },
-  title:         { fontSize: 18, fontWeight: '900', color: P.charcoal },
-  closeBtn:      { width: 30, height: 30, borderRadius: 15, backgroundColor: P.surface, alignItems: 'center', justifyContent: 'center' },
-  closeTxt:      { fontSize: 13, color: P.muted, fontWeight: '700' },
-  valRow:        { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 16 },
-  valBox:        { flex: 1, alignItems: 'center' },
-  valLabel:      { fontSize: 10, fontWeight: '700', color: P.muted, letterSpacing: 1, marginBottom: 4 },
-  valNum:        { fontSize: 22, fontWeight: '900', color: P.terra },
-  valUnit:       { fontSize: 10, color: P.muted, fontWeight: '600' },
-  valSep:        { width: 1, height: 40, backgroundColor: P.dim, marginHorizontal: 16 },
-  chips:         { paddingHorizontal: 20, gap: 8 },
-  chip:          { paddingHorizontal: 16, paddingVertical: 9, borderRadius: 20, backgroundColor: P.surface, borderWidth: 1.5, borderColor: P.dim },
-  chipActive:    { backgroundColor: P.peachSoft, borderColor: P.terra },
-  chipTxt:       { fontSize: 13, fontWeight: '600', color: P.muted },
-  chipTxtActive: { color: P.terra, fontWeight: '800' },
-  applyBtn:      { borderRadius: 14, overflow: 'hidden', shadowColor: P.terra, shadowOpacity: 0.3, shadowOffset: { width: 0, height: 4 }, shadowRadius: 10, elevation: 6 },
-  applyGrad:     { paddingVertical: 16, alignItems: 'center' },
-  applyTxt:      { fontSize: 16, fontWeight: '800', color: P.white },
+  root:        { flex: 1, justifyContent: 'flex-end' },
+  backdrop:    { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: P.shadow, opacity: 0.78 },
+ sheet: { 
+  position: 'absolute',   // ← collé directement à l'écran
+  bottom: 0, 
+  left: 0, 
+  right: 0, 
+  backgroundColor: P.white, 
+  borderTopLeftRadius: 28, 
+  borderTopRightRadius: 28 
+},
+handle:      { width: 36, height: 4, borderRadius: 2, backgroundColor: P.dim, alignSelf: 'center', marginTop: 12, marginBottom: 4 },
+  head:        { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 22, paddingVertical: 16, borderBottomWidth: 1, borderBottomColor: P.dim },
+  title:       { fontSize: 18, fontWeight: '900', color: P.charcoal },
+  closeBtn:    { width: 30, height: 30, borderRadius: 15, backgroundColor: P.surface, alignItems: 'center', justifyContent: 'center' },
+  closeTxt:    { fontSize: 13, color: P.muted, fontWeight: '700' },
+  valRow:      { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 16 },
+  valBox:      { flex: 1, alignItems: 'center' },
+  valLabel:    { fontSize: 10, fontWeight: '700', color: P.muted, letterSpacing: 1, marginBottom: 4 },
+  valNum:      { fontSize: 22, fontWeight: '900', color: P.terra },
+  valUnit:     { fontSize: 10, color: P.muted, fontWeight: '600' },
+  valSep:      { width: 1, height: 40, backgroundColor: P.dim, marginHorizontal: 16 },
+  sliderHint:  { fontSize: 11, color: P.muted, fontWeight: '600', paddingHorizontal: 20, marginTop: 2 },
+  chips:       { paddingHorizontal: 20, gap: 8 },
+  chip:        { paddingHorizontal: 16, paddingVertical: 9, borderRadius: 20, backgroundColor: P.surface, borderWidth: 1.5, borderColor: P.dim },
+  chipActive:  { backgroundColor: P.peachSoft, borderColor: P.terra },
+  chipTxt:     { fontSize: 13, fontWeight: '600', color: P.muted },
+  chipTxtActive:{ color: P.terra, fontWeight: '800' },
+  applyBtn:    { borderRadius: 14, overflow: 'hidden', shadowColor: P.terra, shadowOpacity: 0.3, shadowOffset: { width: 0, height: 4 }, shadowRadius: 10, elevation: 6 },
+  applyGrad:   { paddingVertical: 16, alignItems: 'center' },
+  applyTxt:    { fontSize: 16, fontWeight: '800', color: P.white },
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -192,7 +299,7 @@ const fm = StyleSheet.create({
 function HeroCard({ item, onPress, isFav, onFavToggle, fadeAnim }) {
   const sc = useRef(new Animated.Value(1)).current;
   if (!item) return null;
-  const isService = item.type === 'service';
+  const isService = String(item?.type || '').toLowerCase() === 'service';
   return (
     <Animated.View style={{ opacity: fadeAnim, transform: [{ scale: sc }] }}>
       <TouchableOpacity
@@ -208,7 +315,7 @@ function HeroCard({ item, onPress, isFav, onFavToggle, fadeAnim }) {
             resizeMode="cover"
           />
           <LinearGradient colors={['transparent', P.charcoal]} style={StyleSheet.absoluteFill} />
-          <View style={[h.badge, { backgroundColor: isService ? P.terra : P.gold }]}>
+          <View style={[h.badge, { backgroundColor: isService ? '#2563EB' : P.terra }]}>
             <Text style={h.badgeTxt}>{isService ? '🛠 Service' : '📦 Produit'}</Text>
           </View>
           <TouchableOpacity style={h.favBtn} onPress={onFavToggle} activeOpacity={0.8}>
@@ -221,7 +328,7 @@ function HeroCard({ item, onPress, isFav, onFavToggle, fadeAnim }) {
             <Text style={h.title} numberOfLines={2}>{item.title}</Text>
             <View style={h.row}>
               <Text style={h.loc}>📍 {getCityName(item.location)}</Text>
-              <Text style={h.price}>{fmtPrice(item.price)}</Text>
+              <Text style={[h.price, { color: isService ? P.blue100 : P.amber }]}>{fmtPrice(item.price)}</Text>
             </View>
           </View>
         </View>
@@ -253,7 +360,10 @@ function ProductCard({ item, onPress, isFav, onFavToggle, index }) {
   const sc        = useRef(new Animated.Value(1)).current;
   const itemFade  = useRef(new Animated.Value(0)).current;
   const itemSlide = useRef(new Animated.Value(20)).current;
-  const isService = item.type === 'service';
+  const isService = String(item?.type || '').toLowerCase() === 'service';
+  const accent = isService ? '#2563EB' : P.terra;
+  const posted = getPostedLabel(item.createdAt || item.updatedAt);
+  const distance = getDistanceKm(item._id || item.id);
 
   useEffect(() => {
     Animated.parallel([
@@ -277,18 +387,30 @@ function ProductCard({ item, onPress, isFav, onFavToggle, index }) {
               style={cd.img}
               resizeMode="cover"
             />
-            <TouchableOpacity style={cd.favBtn} onPress={onFavToggle} activeOpacity={0.8}>
-              <Text style={cd.favIcon}>{isFav ? '❤️' : '🤍'}</Text>
-            </TouchableOpacity>
-            <View style={[cd.badge, { backgroundColor: isService ? P.terra : P.gold }]}>
-              <Text style={cd.badgeTxt}>{isService ? '🛠' : '📦'}</Text>
+            <View style={cd.timeBadge}>
+              <Feather name="clock" size={10} color={P.charcoal} />
+              <Text style={cd.timeTxt}>Il y a {posted}</Text>
             </View>
+            <TouchableOpacity style={[cd.favBtn, { borderColor: isService ? 'rgba(37,99,235,0.2)' : 'rgba(236,90,19,0.2)' }]} onPress={onFavToggle} activeOpacity={0.8}>
+              <Feather name={isFav ? 'heart' : 'heart'} size={14} color={accent} />
+            </TouchableOpacity>
           </View>
           <View style={cd.body}>
-            <Text style={cd.title} numberOfLines={2}>{item.title}</Text>
-            <Text style={cd.loc} numberOfLines={1}>📍 {getCityName(item.location)}</Text>
-            <View style={cd.footer}>
-              <Text style={cd.price}>{fmtPrice(item.price)}</Text>
+            <View style={cd.titleRow}>
+              <View style={cd.typeIconWrap}>
+                <Text style={cd.typeIcon}>{isService ? '🛠️' : '📦'}</Text>
+              </View>
+              <Text style={cd.title} numberOfLines={1}>{item.title}</Text>
+            </View>
+            <View style={cd.metaRow}>
+              <Feather name="map-pin" size={10} color={accent} />
+              <Text style={cd.loc} numberOfLines={1}>{getCityName(item.location)}</Text>
+              <Text style={cd.metaDot}>•</Text>
+              <Text style={cd.metaTail}>{distance.toFixed(1)} km</Text>
+            </View>
+            <View style={cd.priceRow}>
+              <View style={cd.priceSpacer} />
+              <Text style={[cd.price, { color: accent }]}>{fmtPrice(item.price)}</Text>
             </View>
           </View>
         </View>
@@ -301,15 +423,21 @@ const cd = StyleSheet.create({
   card:     { width: CARD_WIDTH, backgroundColor: P.white, borderRadius: 18, overflow: 'hidden', marginBottom: 12, shadowColor: P.charcoal, shadowOpacity: 0.08, shadowOffset: { width: 0, height: 4 }, shadowRadius: 10, elevation: 4, borderWidth: 1, borderColor: P.dim },
   imgWrap:  { height: 130, backgroundColor: P.sand, position: 'relative' },
   img:      { width: '100%', height: '100%' },
-  favBtn:   { position: 'absolute', top: 8, right: 8, width: 30, height: 30, borderRadius: 15, backgroundColor: P.glassWhite25, justifyContent: 'center', alignItems: 'center' },
-  favIcon:  { fontSize: 14 },
-  badge:    { position: 'absolute', bottom: 8, left: 8, width: 24, height: 24, borderRadius: 12, justifyContent: 'center', alignItems: 'center' },
-  badgeTxt: { fontSize: 11 },
-  body:     { padding: 10 },
-  title:    { fontSize: 13, fontWeight: '700', color: P.charcoal, lineHeight: 18, marginBottom: 4, minHeight: 36 },
-  loc:      { fontSize: 10, color: P.muted, marginBottom: 8 },
-  footer:   { borderTopWidth: 1, borderTopColor: P.dim, paddingTop: 8 },
-  price:    { fontSize: 13, fontWeight: '900', color: P.terra },
+  timeBadge: { position: 'absolute', top: 8, left: 8, flexDirection: 'row', alignItems: 'center', gap: 3, backgroundColor: 'rgba(255,255,255,0.92)', borderRadius: 8, paddingHorizontal: 7, paddingVertical: 4 },
+  timeTxt: { fontSize: 9, color: P.charcoal, fontWeight: '700' },
+  favBtn:   { position: 'absolute', top: 8, right: 10, width: 32, height: 32, borderRadius: 16, backgroundColor: 'rgba(255,255,255,0.92)', justifyContent: 'center', alignItems: 'center', zIndex: 6, elevation: 6, borderWidth: 1, borderColor: 'rgba(236,90,19,0.2)' },
+  body:     { paddingHorizontal: 10, paddingVertical: 9, gap: 6 },
+  titleRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  typeIconWrap: { width: 18, minWidth: 18, alignItems: 'center', justifyContent: 'center' },
+  typeIcon: { fontSize: 14 },
+  title:    { flex: 1, fontSize: 12, fontWeight: '700', color: P.charcoal },
+  metaRow: { flexDirection: 'row', alignItems: 'center', gap: 3 },
+  loc:      { flexShrink: 1, fontSize: 10, color: P.muted, maxWidth: CARD_WIDTH * 0.32 },
+  metaDot: { fontSize: 11, color: P.muted },
+  metaTail:{ fontSize: 9, color: P.muted, fontWeight: '600' },
+  priceRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: 5 },
+  priceSpacer: { width: 14 },
+  price:    { fontSize: 12, fontWeight: '900', color: P.terra },
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -363,6 +491,10 @@ export default function CategoryProductsScreen({ route, navigation }) {
 
   const category     = CATEGORIES.find(c => c.slug === categorySlug);
   const categoryEmoji = category?.emoji || '📦';
+  const isServiceFilter = filterType === 'service';
+  const modalAccent = isServiceFilter ? '#2563EB' : P.terra;
+  const modalAccentDark = isServiceFilter ? '#1D4ED8' : P.orange700;
+  const modalAccentSoft = isServiceFilter ? P.blue100 : P.peachSoft;
 
   // ── Header shrink ──────────────────────────────────────────────────────────
   const headerHeight = scrollY.interpolate({
@@ -441,8 +573,9 @@ export default function CategoryProductsScreen({ route, navigation }) {
   const processed = [...products]
     .filter(i => {
       const p = parseInt(i.price || 0);
-      if (filterType === 'product') return i.type !== 'service';
-      if (filterType === 'service') return i.type === 'service';
+      const itemType = String(i?.type || '').toLowerCase();
+      if (filterType === 'product') return itemType !== 'service';
+      if (filterType === 'service') return itemType === 'service';
       return true;
     })
     .filter(i => {
@@ -567,7 +700,7 @@ export default function CategoryProductsScreen({ route, navigation }) {
         )}
         scrollEventThrottle={16}
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[P.terra]} tintColor={P.terra} />
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[modalAccent]} tintColor={modalAccent} />
         }
         ListHeaderComponent={
           <>
@@ -626,6 +759,9 @@ export default function CategoryProductsScreen({ route, navigation }) {
         onClose={() => setShowFilter(false)}
         priceRange={priceRange}
         maxPrice={maxPrice}
+        accent={modalAccent}
+        accentDark={modalAccentDark}
+        accentSoft={modalAccentSoft}
         onApply={(range) => {
           setPriceRange(range);
           setFilterActive(range[0] > 0 || range[1] < maxPrice);

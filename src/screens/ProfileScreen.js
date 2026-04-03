@@ -17,9 +17,17 @@ import AlertModal from '../components/AlertModal';
 import { updateProfile } from '../api/auth';
 
 const NIGER_CITIES = [
-  'Niamey','Zinder','Maradi','Agadez','Tahoua',
-  'Dosso','Tillabéri','Diffa','Arlit',"Birni N'Konni",
   'Gaya','Tessaoua',
+];
+
+const COUNTRIES = [
+  { code: 'NE', name: 'Niger',         dialCode: '+227', flag: '🇳🇪' },
+  { code: 'SN', name: 'Sénégal',       dialCode: '+221', flag: '🇸🇳' },
+  { code: 'CI', name: "Côte d'Ivoire", dialCode: '+225', flag: '🇨🇮' },
+  { code: 'BF', name: 'Burkina Faso',  dialCode: '+226', flag: '🇧🇫' },
+  { code: 'ML', name: 'Mali',          dialCode: '+223', flag: '🇲🇱' },
+  { code: 'TG', name: 'Togo',          dialCode: '+228', flag: '🇹🇬' },
+  { code: 'BJ', name: 'Bénin',         dialCode: '+229', flag: '🇧🇯' },
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -35,11 +43,26 @@ export default function ProfileScreen({ navigation }) {
   });
   const [loggingOut, setLoggingOut] = useState(false);
   const [editModalVisible, setEditModalVisible] = useState(false);
+  const [securityModalVisible, setSecurityModalVisible] = useState(false);
   const [editName, setEditName] = useState(user?.name || '');
   const [editCity, setEditCity] = useState(user?.city || '');
   const [editAvatarUri, setEditAvatarUri] = useState(user?.avatar || null);
+  const [editEmail, setEditEmail] = useState(user?.email || '');
+  const [editWhatsapp, setEditWhatsapp] = useState(user?.contactInfo?.whatsapp || '');
+  const [editDescription, setEditDescription] = useState(user?.description || '');
+  const [editBusinessType, setEditBusinessType] = useState(user?.businessType || 'individual');
+  const [editBusinessName, setEditBusinessName] = useState(user?.businessName || '');
+
+  // Password change state
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [changingPassword, setChangingPassword] = useState(false);
+
   const [savingProfile, setSavingProfile] = useState(false);
   const [showCityModal, setShowCityModal] = useState(false);
+  const [whatsappCountry, setWhatsappCountry] = useState(COUNTRIES[0]);
+  const [showWhatsappPicker, setShowWhatsappPicker] = useState(false);
 
   const headerAnim = useRef(new Animated.Value(0)).current;
 
@@ -52,10 +75,31 @@ export default function ProfileScreen({ navigation }) {
   }, []);
 
   useEffect(() => {
-    setEditName(user?.name || '');
-    setEditCity(user?.city || user?.location || '');
-    setEditAvatarUri(user?.avatar || null);
-  }, [user]);
+    if (editModalVisible || user) {
+      setEditName(user?.name || '');
+      setEditCity(user?.city || user?.location || '');
+      setEditAvatarUri(user?.avatar || null);
+      setEditEmail(user?.email || '');
+      
+      const fullWhatsapp = user?.contactInfo?.whatsapp || '';
+      if (fullWhatsapp) {
+        const matchedCountry = COUNTRIES.find(c => fullWhatsapp.startsWith(c.dialCode));
+        if (matchedCountry) {
+          setWhatsappCountry(matchedCountry);
+          setEditWhatsapp(fullWhatsapp.replace(matchedCountry.dialCode, '').trim());
+        } else {
+          setEditWhatsapp(fullWhatsapp);
+        }
+      } else {
+        setEditWhatsapp('');
+        setWhatsappCountry(COUNTRIES[0]);
+      }
+      
+      setEditDescription(user?.description || '');
+      setEditBusinessType(user?.businessType || 'individual');
+      setEditBusinessName(user?.businessName || '');
+    }
+  }, [user, editModalVisible]);
 
   if (!isAuthenticated) {
     return (
@@ -153,20 +197,29 @@ export default function ProfileScreen({ navigation }) {
 
     setSavingProfile(true);
     try {
-      const result = await updateProfile({
+      const fullWhatsapp = editWhatsapp.trim() 
+        ? `${whatsappCountry.dialCode} ${editWhatsapp.trim()}`
+        : undefined;
+
+      const profileData = {
         name: editName.trim(),
         city: editCity.trim(),
         avatar: editAvatarUri || null,
-      });
+        email: editEmail.trim() || undefined,
+        description: editDescription.trim() || undefined,
+        businessType: editBusinessType,
+        whatsapp: fullWhatsapp
+      };
+
+      if (editBusinessType === 'professional') {
+        profileData.businessName = editBusinessName.trim() || undefined;
+      }
+
+      const result = await updateProfile(profileData);
 
       if (result.success) {
         const updatedUser = result?.data?.user || {};
-        await updateUserProfile({
-          name: updatedUser.name || editName.trim(),
-          city: updatedUser.city || editCity.trim(),
-          location: updatedUser.location || editCity.trim(),
-          avatar: updatedUser.avatar || editAvatarUri || null,
-        });
+        await updateUserProfile(updatedUser);
 
         setEditModalVisible(false);
         setAlert({
@@ -187,6 +240,41 @@ export default function ProfileScreen({ navigation }) {
       });
     } finally {
       setSavingProfile(false);
+    }
+  };
+
+  const handleChangePassword = async () => {
+    if (!newPassword || newPassword.length < 6) {
+      setAlert({ visible: true, type: 'error', title: 'Erreur', message: 'Le mot de passe doit contenir au moins 6 caractères', buttons: [{ text: 'OK', onPress: () => {} }]});
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      setAlert({ visible: true, type: 'error', title: 'Erreur', message: 'Les mots de passe ne correspondent pas', buttons: [{ text: 'OK', onPress: () => {} }]});
+      return;
+    }
+    if (!user.needsPasswordChange && !currentPassword) {
+      setAlert({ visible: true, type: 'error', title: 'Erreur', message: 'Veuillez entrer votre mot de passe actuel', buttons: [{ text: 'OK', onPress: () => {} }]});
+      return;
+    }
+
+    setChangingPassword(true);
+    try {
+      const { changePassword } = require('../api/auth');
+      const res = await changePassword({ currentPassword, newPassword });
+      
+      if (res.success) {
+        setCurrentPassword('');
+        setNewPassword('');
+        setConfirmPassword('');
+        await updateUserProfile({ needsPasswordChange: false });
+        setAlert({ visible: true, type: 'success', title: 'Succès', message: 'Mot de passe mis à jour avec succès', buttons: [{ text: 'OK', onPress: () => {} }]});
+      } else {
+        throw new Error(res.message);
+      }
+    } catch (error) {
+      setAlert({ visible: true, type: 'error', title: 'Erreur', message: error.message || 'Impossible de changer le mot de passe', buttons: [{ text: 'OK', onPress: () => {} }]});
+    } finally {
+      setChangingPassword(false);
     }
   };
 
@@ -292,6 +380,18 @@ export default function ProfileScreen({ navigation }) {
     <View style={s.container}>
       <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
 
+      {/* ── BANNIERE CHANGEMENT MOT DE PASSE ─────────────────────────────── */}
+      {user?.needsPasswordChange && (
+        <View style={s.passwordWarningBanner}>
+          <Text style={s.passwordWarningText}>
+            🔒 Veuillez personnaliser votre mot de passe pour sécuriser votre compte.
+          </Text>
+          <TouchableOpacity onPress={() => setSecurityModalVisible(true)} style={s.passwordWarningBtn}>
+            <Text style={s.passwordWarningBtnTxt}>Mettre à jour</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
       {/* ── HEADER gradient premium ───────────────────────────────────────── */}
       <LinearGradient
         colors={[P.brown, P.charcoal]}
@@ -394,6 +494,18 @@ export default function ProfileScreen({ navigation }) {
         <View style={s.menuSection}>
           <TouchableOpacity
             style={s.menuItem}
+            onPress={() => setSecurityModalVisible(true)}
+            activeOpacity={0.7}
+          >
+            <Text style={s.menuIcon}>🔐</Text>
+            <View style={s.menuContent}>
+              <Text style={s.menuLabel}>Sécurité et Connexion</Text>
+            </View>
+            <Text style={s.menuArrow}>›</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={s.menuItem}
             onPress={() => navigation.navigate('MyListings')}
             activeOpacity={0.7}
           >
@@ -478,21 +590,16 @@ export default function ProfileScreen({ navigation }) {
           style={s.editModalContainer}
           behavior={Platform.OS === 'ios' ? 'padding' : 'padding'}
         >
-          <View style={[s.editModalContent, { paddingTop: (insets.top || 0) + 12, paddingBottom: Math.max(insets.bottom, 12) + 20 }]}>
-            {/* Header */}
+          <View style={[s.editModalContent, { paddingBottom: Math.max(insets.bottom, 12) }]}>
+            <View style={s.cityModalHandle} />
             <View style={s.editModalHeader}>
-              <TouchableOpacity onPress={() => setEditModalVisible(false)}>
-                <Text style={s.editModalButtons}>✕ Fermer</Text>
-              </TouchableOpacity>
               <Text style={s.editModalTitle}>Éditer le profil</Text>
-              <TouchableOpacity onPress={handleSaveProfile} disabled={savingProfile}>
-                <Text style={[s.editModalButtons, { color: savingProfile ? P.muted : P.terra }]}>
-                  {savingProfile ? '⏳' : '✓'} Sauver
-                </Text>
+              <TouchableOpacity onPress={() => setEditModalVisible(false)} style={s.cityModalClose}>
+                <Text style={s.cityModalCloseTxt}>✕</Text>
               </TouchableOpacity>
             </View>
 
-            <ScrollView style={s.editModalScroll} showsVerticalScrollIndicator={false}>
+            <ScrollView style={s.editModalScroll} showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 20 }}>
               {/* Avatar section */}
               <View style={s.editFieldGroup}>
                 <Text style={s.editFieldLabel}>Photo de profil</Text>
@@ -541,6 +648,207 @@ export default function ProfileScreen({ navigation }) {
                     {editCity || 'Sélectionner une ville'}
                   </Text>
                   <Text style={s.editCityArrow}>›</Text>
+                </TouchableOpacity>
+              </View>
+
+              {/* Email */}
+              <View style={s.editFieldGroup}>
+                <Text style={s.editFieldLabel}>Adresse Email</Text>
+                <TextInput
+                  style={s.editFieldInput}
+                  placeholder="Votre adresse email"
+                  placeholderTextColor={P.muted}
+                  value={editEmail}
+                  onChangeText={setEditEmail}
+                  keyboardType="email-address"
+                  autoCapitalize="none"
+                  editable={!savingProfile}
+                />
+              </View>
+
+              {/* WhatsApp */}
+              <View style={s.editFieldGroup}>
+                <Text style={s.editFieldLabel}>Numéro WhatsApp</Text>
+                <View style={s.phoneWrap}>
+                  <TouchableOpacity
+                    style={s.dialBadge}
+                    onPress={() => setShowWhatsappPicker(true)}
+                    activeOpacity={0.85}
+                    disabled={savingProfile}
+                  >
+                    <Text style={s.dialFlag}>{whatsappCountry.flag}</Text>
+                    <Text style={s.dialCode}>{whatsappCountry.dialCode}</Text>
+                    <Text style={s.dialArrow}>▾</Text>
+                  </TouchableOpacity>
+                  <TextInput
+                    style={s.phoneInput}
+                    placeholder="12 34 56 78"
+                    placeholderTextColor={P.muted}
+                    value={editWhatsapp}
+                    onChangeText={setEditWhatsapp}
+                    keyboardType="phone-pad"
+                    editable={!savingProfile}
+                  />
+                </View>
+              </View>
+
+              {/* Type de compte */}
+              <View style={s.editFieldGroup}>
+                <Text style={s.editFieldLabel}>Type de compte</Text>
+                <View style={s.accountTypeRow}>
+                  <TouchableOpacity
+                    style={[s.accountTypeBtn, editBusinessType === 'individual' && s.accountTypeBtnActive]}
+                    onPress={() => setEditBusinessType('individual')}
+                  >
+                    <Text style={[s.accountTypeTxt, editBusinessType === 'individual' && s.accountTypeTxtActive]}>Particulier</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[s.accountTypeBtn, editBusinessType === 'professional' && s.accountTypeBtnActive]}
+                    onPress={() => setEditBusinessType('professional')}
+                  >
+                    <Text style={[s.accountTypeTxt, editBusinessType === 'professional' && s.accountTypeTxtActive]}>Professionnel</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+
+              {/* Nom entreprise (si professionnel) */}
+              {editBusinessType === 'professional' && (
+                <View style={s.editFieldGroup}>
+                  <Text style={s.editFieldLabel}>Nom de l'entreprise *</Text>
+                  <TextInput
+                    style={s.editFieldInput}
+                    placeholder="Nom de votre boutique/entreprise"
+                    placeholderTextColor={P.muted}
+                    value={editBusinessName}
+                    onChangeText={setEditBusinessName}
+                    editable={!savingProfile}
+                  />
+                </View>
+              )}
+
+              {/* Description */}
+              <View style={s.editFieldGroup}>
+                <Text style={s.editFieldLabel}>Description / Bio</Text>
+                <TextInput
+                  style={[s.editFieldInput, { minHeight: 80, textAlignVertical: 'top' }]}
+                  placeholder="Parlez-nous de vous..."
+                  placeholderTextColor={P.muted}
+                  value={editDescription}
+                  onChangeText={setEditDescription}
+                  multiline
+                  numberOfLines={3}
+                  editable={!savingProfile}
+                />
+              </View>
+            </ScrollView>
+
+            <View style={s.editModalFooter}>
+              <TouchableOpacity
+                style={s.saveProfileBtn}
+                onPress={handleSaveProfile}
+                disabled={savingProfile}
+                activeOpacity={0.88}
+              >
+                <LinearGradient
+                  colors={[P.orange500, P.orange700]}
+                  start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
+                  style={s.saveProfileBtnGrad}
+                >
+                  {savingProfile ? (
+                    <ActivityIndicator color={P.white} />
+                  ) : (
+                    <Text style={s.saveProfileBtnTxt}>Enregistrer les modifications</Text>
+                  )}
+                </LinearGradient>
+              </TouchableOpacity>
+            </View>
+
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
+
+      {/* ── SECURITY MODAL ─────────────────────────────────────────────────── */}
+      <Modal
+        visible={securityModalVisible}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setSecurityModalVisible(false)}
+      >
+        <KeyboardAvoidingView
+          style={s.editModalContainer}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'padding'}
+        >
+          <View style={[s.editModalContent, { paddingBottom: Math.max(insets.bottom, 12) }]}>
+            <View style={s.cityModalHandle} />
+            <View style={s.editModalHeader}>
+              <Text style={s.editModalTitle}>Sécurité</Text>
+              <TouchableOpacity onPress={() => { setSecurityModalVisible(false); setCurrentPassword(''); setNewPassword(''); setConfirmPassword(''); }} style={s.cityModalClose}>
+                <Text style={s.cityModalCloseTxt}>✕</Text>
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView style={s.editModalScroll} showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 20 }}>
+              <View style={[s.passwordSection, { marginTop: 0, borderTopWidth: 0, paddingTop: 0 }]}>
+                <Text style={s.editFieldLabel}>Changer le mot de passe</Text>
+                
+                {!user?.needsPasswordChange && (
+                  <View style={s.editFieldGroup}>
+                    <Text style={s.editFieldLabel}>Mot de passe actuel</Text>
+                    <TextInput
+                      style={s.editFieldInput}
+                      placeholder="Ancien mot de passe"
+                      placeholderTextColor={P.muted}
+                      value={currentPassword}
+                      onChangeText={setCurrentPassword}
+                      secureTextEntry
+                    />
+                  </View>
+                )}
+
+                <View style={s.editFieldGroup}>
+                  <Text style={s.editFieldLabel}>Nouveau mot de passe</Text>
+                  <TextInput
+                    style={s.editFieldInput}
+                    placeholder="Nouveau mot de passe (min 6 caractères)"
+                    placeholderTextColor={P.muted}
+                    value={newPassword}
+                    onChangeText={setNewPassword}
+                    secureTextEntry
+                  />
+                </View>
+
+                <View style={s.editFieldGroup}>
+                  <Text style={s.editFieldLabel}>Confirmer le nouveau mot de passe</Text>
+                  <TextInput
+                    style={s.editFieldInput}
+                    placeholder="Répétez le nouveau mot de passe"
+                    placeholderTextColor={P.muted}
+                    value={confirmPassword}
+                    onChangeText={setConfirmPassword}
+                    secureTextEntry
+                  />
+                </View>
+
+                <TouchableOpacity
+                  style={[s.saveProfileBtn, { marginTop: 24 }]}
+                  onPress={async () => {
+                    await handleChangePassword();
+                    if (!changingPassword) setSecurityModalVisible(false);
+                  }}
+                  disabled={changingPassword || !newPassword || !confirmPassword}
+                  activeOpacity={0.88}
+                >
+                  <LinearGradient
+                    colors={[P.orange500, P.orange700]}
+                    start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
+                    style={s.saveProfileBtnGrad}
+                  >
+                    {changingPassword ? (
+                      <ActivityIndicator color={P.white} />
+                    ) : (
+                      <Text style={s.saveProfileBtnTxt}>Mettre à jour le mot de passe</Text>
+                    )}
+                  </LinearGradient>
                 </TouchableOpacity>
               </View>
             </ScrollView>
@@ -592,6 +900,47 @@ export default function ProfileScreen({ navigation }) {
           </View>
         </View>
       </Modal>
+      {/* ── WHATSAPP COUNTRY PICKER MODAL ──────────────────────────────────── */}
+      <Modal
+        visible={showWhatsappPicker}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowWhatsappPicker(false)}
+      >
+        <View style={s.modalRoot}>
+          <TouchableOpacity
+            style={s.modalBackdrop}
+            activeOpacity={1}
+            onPress={() => setShowWhatsappPicker(false)}
+          />
+          <View style={[s.modal, { paddingBottom: Math.max(insets.bottom, 8) }]}>
+            <View style={s.cityModalHandle} />
+            <View style={s.modalHead}>
+              <Text style={s.modalTitle}>Choisir un pays</Text>
+              <TouchableOpacity onPress={() => setShowWhatsappPicker(false)} style={s.modalClose}>
+                <Text style={s.modalCloseTxt}>✕</Text>
+              </TouchableOpacity>
+            </View>
+            <ScrollView showsVerticalScrollIndicator={false}>
+              {COUNTRIES.map(c => (
+                <TouchableOpacity
+                  key={c.code}
+                  style={[s.countryRow, whatsappCountry.code === c.code && s.countryRowActive]}
+                  onPress={() => { setWhatsappCountry(c); setShowWhatsappPicker(false); }}
+                  activeOpacity={0.8}
+                >
+                  <Text style={s.countryRowFlag}>{c.flag}</Text>
+                  <Text style={[s.countryRowName, whatsappCountry.code === c.code && { color: P.terra }]}>
+                    {c.name}
+                  </Text>
+                  <Text style={s.countryRowDial}>{c.dialCode}</Text>
+                  {whatsappCountry.code === c.code && <Text style={{ color: P.terra, fontWeight: '900' }}>✓</Text>}
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -631,6 +980,35 @@ const s = StyleSheet.create({
     fontSize: 13,
     color: P.muted,
     fontStyle: 'italic',
+  },
+  passwordWarningBanner: {
+    backgroundColor: P.orange100,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: P.orange300,
+    paddingTop: Platform.OS === 'ios' ? 44 : 34, 
+  },
+  passwordWarningText: {
+    flex: 1,
+    fontSize: 13,
+    color: P.orange700,
+    fontWeight: '600',
+    marginRight: 10,
+  },
+  passwordWarningBtn: {
+    backgroundColor: P.orange600,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 8,
+  },
+  passwordWarningBtnTxt: {
+    color: P.white,
+    fontSize: 12,
+    fontWeight: '700',
   },
 
   // ── Content scrollable ──
@@ -958,10 +1336,10 @@ const s = StyleSheet.create({
   editModalContent: {
     flex: 1,
     backgroundColor: P.white,
-    marginTop: 40,
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    paddingHorizontal: 18,
+    marginTop: 60,
+    borderTopLeftRadius: 32,
+    borderTopRightRadius: 32,
+    paddingHorizontal: 20,
   },
   editModalHeader: {
     flexDirection: 'row',
@@ -992,13 +1370,85 @@ const s = StyleSheet.create({
   },
   editFieldInput: {
     borderWidth: 1,
-    borderColor: P.sand,
-    borderRadius: 12,
-    paddingVertical: 12,
-    paddingHorizontal: 14,
-    fontSize: 14,
+    borderColor: 'rgba(0,0,0,0.04)',
+    borderRadius: 16,
+    paddingVertical: 16,
+    paddingHorizontal: 16,
+    fontSize: 15,
     color: P.charcoal,
+    backgroundColor: '#F7F9FC',
+  },
+  accountTypeRow: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  accountTypeBtn: {
+    flex: 1,
+    paddingVertical: 14,
+    borderWidth: 1,
+    borderColor: P.sand,
+    borderRadius: 16,
+    alignItems: 'center',
     backgroundColor: P.surface,
+  },
+  accountTypeBtnActive: {
+    borderColor: P.terra,
+    backgroundColor: P.peachSoft,
+  },
+  accountTypeTxt: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: P.muted,
+  },
+  accountTypeTxtActive: {
+    color: P.terra,
+  },
+  editModalFooter: {
+    paddingTop: 16,
+  },
+  saveProfileBtn: {
+    borderRadius: 100,
+    overflow: 'hidden',
+    shadowColor: P.orange700,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  saveProfileBtnGrad: {
+    paddingVertical: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  saveProfileBtnTxt: {
+    color: P.white,
+    fontSize: 16,
+    fontWeight: '800',
+  },
+  passwordSection: {
+    marginTop: 20,
+    paddingTop: 20,
+    borderTopWidth: 1,
+    borderTopColor: P.sand,
+  },
+  passwordSectionTitle: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: P.charcoal,
+    marginBottom: 16,
+  },
+  changePasswordBtn: {
+    backgroundColor: P.charcoal,
+    paddingVertical: 16,
+    borderRadius: 16,
+    alignItems: 'center',
+    marginTop: 8,
+    marginBottom: 20,
+  },
+  changePasswordBtnTxt: {
+    color: P.white,
+    fontWeight: '800',
+    fontSize: 15,
   },
 
   // ── EDIT AVATAR ──
@@ -1043,11 +1493,11 @@ const s = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: P.sand,
-    borderRadius: 12,
-    paddingVertical: 12,
-    paddingHorizontal: 14,
-    backgroundColor: P.surface,
+    borderColor: 'rgba(0,0,0,0.04)',
+    borderRadius: 16,
+    paddingVertical: 16,
+    paddingHorizontal: 16,
+    backgroundColor: '#F7F9FC',
     gap: 10,
   },
   editCityIcon: { fontSize: 18 },
@@ -1129,4 +1579,36 @@ const s = StyleSheet.create({
     color: P.charcoal,
     fontWeight: '500',
   },
+
+  // ── PHONE INPUT ──
+  phoneWrap:  { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  dialBadge:  {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    backgroundColor: '#F7F9FC', borderRadius: 16,
+    paddingHorizontal: 12, paddingVertical: 14,
+    borderWidth: 1, borderColor: 'rgba(0,0,0,0.04)',
+  },
+  dialFlag:   { fontSize: 18 },
+  dialCode:   { fontSize: 14, fontWeight: '700', color: P.charcoal },
+  dialArrow:  { fontSize: 11, color: P.muted },
+  phoneInput: {
+    flex: 1, fontSize: 15, fontWeight: '600', color: P.charcoal,
+    backgroundColor: '#F7F9FC', borderRadius: 16,
+    paddingVertical: 16, paddingHorizontal: 16,
+    borderWidth: 1, borderColor: 'rgba(0,0,0,0.04)',
+  },
+
+  // ── COUNTRY PICKER MODAL ──
+  modalRoot:     { flex: 1, justifyContent: 'flex-end' },
+  modalBackdrop: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.5)' },
+  modal:         { backgroundColor: P.white, borderTopLeftRadius: 32, borderTopRightRadius: 32, maxHeight: '75%' },
+  modalHead:     { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 22, paddingVertical: 18, borderBottomWidth: 1, borderBottomColor: P.sand },
+  modalTitle:    { fontSize: 18, fontWeight: '900', color: P.charcoal },
+  modalClose:    { width: 36, height: 36, borderRadius: 18, backgroundColor: P.sand, alignItems: 'center', justifyContent: 'center' },
+  modalCloseTxt: { fontSize: 16, color: P.charcoal, fontWeight: '700' },
+  countryRow:       { flexDirection: 'row', alignItems: 'center', gap: 14, paddingHorizontal: 22, paddingVertical: 16, borderBottomWidth: 1, borderBottomColor: P.sand },
+  countryRowActive: { backgroundColor: P.orange50 },
+  countryRowFlag:   { fontSize: 26 },
+  countryRowName:   { flex: 1, fontSize: 15, fontWeight: '600', color: P.charcoal },
+  countryRowDial:   { fontSize: 13, color: P.muted, marginRight: 8 },
 });

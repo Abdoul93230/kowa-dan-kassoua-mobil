@@ -10,6 +10,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
+import { Feather } from '@expo/vector-icons';
 import { apiClient } from '../api/auth';
 import { useAuth } from '../contexts/AuthContext';
 import { getFavoriteIds, toggleFavorite } from '../api/favorites';
@@ -17,6 +18,7 @@ import AlertModal from '../components/AlertModal';
 import { MOBILE_COLORS as P } from '../theme/colors';
 
 const { width } = Dimensions.get('window');
+const SCREEN_HEIGHT = Dimensions.get('window').height;
 const CARD_WIDTH = (width - 48) / 2;
 const HERO_HEIGHT = 220;
 const HEADER_MAX = 110;
@@ -26,66 +28,114 @@ const HEADER_MIN = 56;
 const getCityName = (loc) => (loc ? loc.split(',')[0].trim() : 'Niger');
 const fmtPrice    = (p)   => p ? `${parseInt(p).toLocaleString()} FCFA` : 'À discuter';
 const getProductId = (item) => item?._id || item?.id;
+const getPostedLabel = (dateValue) => {
+  if (!dateValue) return 'Récent';
+  const date = new Date(dateValue);
+  if (Number.isNaN(date.getTime())) return 'Récent';
+  const diffMs = Date.now() - date.getTime();
+  const mins = Math.max(1, Math.floor(diffMs / 60000));
+  if (mins < 60) return `${mins} min`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours} h`;
+  const days = Math.floor(hours / 24);
+  if (days < 7) return `${days} j`;
+  return `${Math.floor(days / 7)} sem`;
+};
+const getDistanceKm = (itemId) => {
+  const distances = [0.5, 1.2, 2.3, 3.5, 4.8, 5.1, 6.7, 8.2, 10.5];
+  if (typeof itemId === 'string') {
+    const hash = itemId.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+    return distances[hash % distances.length];
+  }
+  const n = Number(itemId) || 0;
+  return distances[Math.abs(n) % distances.length];
+};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // SLIDER DE PRIX (custom, sans lib externe)
 // ─────────────────────────────────────────────────────────────────────────────
-function PriceSlider({ min, max, values, onChange, trackWidth }) {
-  const tw     = trackWidth || (width - 80);
-  const toX    = (v) => ((v - min) / (max - min)) * tw;
-  const toVal  = (x) => Math.round(min + (Math.max(0, Math.min(tw, x)) / tw) * (max - min));
+function PriceSlider({ min, max, values, onChange, trackWidth, accent = P.terra }) {
+  const tw      = trackWidth || (width - 80);
+  const toX     = (v) => ((v - min) / (max - min)) * tw;
+  const toVal   = (x) => Math.round(min + (Math.max(0, Math.min(tw, x)) / tw) * (max - min));
 
-  const leftX  = useRef(new Animated.Value(toX(values[0]))).current;
-  const rightX = useRef(new Animated.Value(toX(values[1]))).current;
+  const leftX   = useRef(new Animated.Value(toX(values[0]))).current;
+  const rightX  = useRef(new Animated.Value(toX(values[1]))).current;
+
+  // ✅ Utiliser des refs pour avoir toujours la valeur courante dans les PanResponders
+  const leftRef  = useRef(values[0]);
+  const rightRef = useRef(values[1]);
+
   const [left,  setLeft]  = useState(values[0]);
   const [right, setRight] = useState(values[1]);
 
-  const makePan = (isLeft) => PanResponder.create({
+  const leftStartX  = useRef(toX(values[0]));
+  const rightStartX = useRef(toX(values[1]));
+
+  const panLeft = useRef(PanResponder.create({
     onStartShouldSetPanResponder: () => true,
+    onPanResponderGrant: () => {
+      leftStartX.current = toX(leftRef.current);
+    },
     onPanResponderMove: (_, g) => {
-      const base = isLeft ? toX(left) : toX(right);
-      const nx   = base + g.dx;
-      const nv   = toVal(nx);
-      if (isLeft) {
-        if (nv >= min && nv < right - 1000) {
-          (leftX  ).setValue(Math.max(0, Math.min(toX(right) - 24, nx)));
-          setLeft(nv);
-        }
-      } else {
-        if (nv <= max && nv > left + 1000) {
-          (rightX ).setValue(Math.max(toX(left) + 24, Math.min(tw, nx)));
-          setRight(nv);
-        }
+      const nx = leftStartX.current + g.dx;
+      const nv = toVal(nx);
+      if (nv >= min && nv < rightRef.current - 1000) {
+        leftX.setValue(Math.max(0, Math.min(toX(rightRef.current) - 24, nx)));
+        leftRef.current = nv;
+        setLeft(nv);
       }
     },
-    onPanResponderRelease: () => onChange([left, right]),
-  });
+    onPanResponderRelease: () => onChange([leftRef.current, rightRef.current]),
+  })).current;
 
-  const panLeft  = useRef(makePan(true)).current;
-  const panRight = useRef(makePan(false)).current;
+  const panRight = useRef(PanResponder.create({
+    onStartShouldSetPanResponder: () => true,
+    onPanResponderGrant: () => {
+      rightStartX.current = toX(rightRef.current);
+    },
+    onPanResponderMove: (_, g) => {
+      const nx = rightStartX.current + g.dx;
+      const nv = toVal(nx);
+      if (nv <= max && nv > leftRef.current + 1000) {
+        rightX.setValue(Math.max(toX(leftRef.current) + 24, Math.min(tw, nx)));
+        rightRef.current = nv;
+        setRight(nv);
+      }
+    },
+    onPanResponderRelease: () => onChange([leftRef.current, rightRef.current]),
+  })).current;
 
   const fillLeft  = leftX;
   const fillWidth = Animated.subtract(rightX, leftX);
 
+  // ✅ Sync depuis l'extérieur (chips, reset)
+  useEffect(() => {
+    const nextLeft  = values?.[0] ?? min;
+    const nextRight = values?.[1] ?? max;
+    leftRef.current  = nextLeft;
+    rightRef.current = nextRight;
+    setLeft(nextLeft);
+    setRight(nextRight);
+    leftX.setValue(toX(nextLeft));
+    rightX.setValue(toX(nextRight));
+  }, [values, min, max]);
+
   return (
     <View style={{ width: tw, height: 40, justifyContent: 'center' }}>
-      {/* Track fond */}
       <View style={sl.track} />
-      {/* Track actif */}
-      <Animated.View style={[sl.trackFill, { left: fillLeft, width: fillWidth }]} />
-      {/* Thumb gauche */}
+      <Animated.View style={[sl.trackFill, { left: fillLeft, width: fillWidth, backgroundColor: accent }]} />
       <Animated.View
-        style={[sl.thumb, { left: Animated.subtract(leftX, 11) }]}
+        style={[sl.thumb, { left: Animated.subtract(leftX, 11), borderColor: accent, shadowColor: accent }]}
         {...panLeft.panHandlers}
       >
-        <View style={sl.thumbInner} />
+        <View style={[sl.thumbInner, { backgroundColor: accent }]} />
       </Animated.View>
-      {/* Thumb droit */}
       <Animated.View
-        style={[sl.thumb, { left: Animated.subtract(rightX, 11) }]}
+        style={[sl.thumb, { left: Animated.subtract(rightX, 11), borderColor: accent, shadowColor: accent }]}
         {...panRight.panHandlers}
       >
-        <View style={sl.thumbInner} />
+        <View style={[sl.thumbInner, { backgroundColor: accent }]} />
       </Animated.View>
     </View>
   );
@@ -104,7 +154,7 @@ const sl = StyleSheet.create({
 function HeroCard({ item, onPress, isFav, onFavToggle, fadeAnim }) {
   const sc = useRef(new Animated.Value(1)).current;
   if (!item) return null;
-  const isService = item.type === 'service';
+  const isService = String(item?.type || '').toLowerCase() === 'service';
   return (
     <Animated.View style={{ opacity: fadeAnim, transform: [{ scale: sc }] }}>
       <TouchableOpacity
@@ -126,22 +176,22 @@ function HeroCard({ item, onPress, isFav, onFavToggle, fadeAnim }) {
             style={StyleSheet.absoluteFill}
           />
           {/* Badge type */}
-          <View style={[h.badge, { backgroundColor: isService ? P.terra : P.gold }]}>
+          <View style={[h.badge, { backgroundColor: isService ? '#2563EB' : P.terra }]}>
             <Text style={h.badgeTxt}>{isService ? '🛠 Service' : '📦 Produit'}</Text>
           </View>
           {/* Favori */}
-          <TouchableOpacity style={h.favBtn} onPress={onFavToggle} activeOpacity={0.8}>
-            <Text style={h.favIcon}>{isFav ? '❤️' : '🤍'}</Text>
+          <TouchableOpacity style={[h.favBtn, { borderColor: isService ? 'rgba(37,99,235,0.2)' : 'rgba(236,90,19,0.2)' }]} onPress={onFavToggle} activeOpacity={0.8}>
+            <Text style={[h.favIcon, { color: isService ? '#2563EB' : P.terra }]}>{isFav ? '❤️' : '🤍'}</Text>
           </TouchableOpacity>
           {/* Infos bas */}
           <View style={h.info}>
-            <View style={h.tagHero}>
-              <Text style={h.tagTxt}>⭐ À la une</Text>
+            <View style={[h.tagHero, { backgroundColor: isService ? '#2563EB' : P.terra }]}>
+              <Text style={h.tagTxt}>{isService ? '⭐ Service à la une' : '⭐ Produit à la une'}</Text>
             </View>
             <Text style={h.title} numberOfLines={2}>{item.title}</Text>
             <View style={h.row}>
-              <Text style={h.loc}>📍 {getCityName(item.location)}</Text>
-              <Text style={h.price}>{fmtPrice(item.price)}</Text>
+              <Text style={[h.loc, { color: isService ? P.blue100 : P.orange200 }]}>📍 {getCityName(item.location)}</Text>
+              <Text style={[h.price, { color: isService ? P.blue100 : P.amber }]}>{fmtPrice(item.price)}</Text>
             </View>
           </View>
         </View>
@@ -155,7 +205,7 @@ const h = StyleSheet.create({
   img:     { width: '100%', height: '100%', position: 'absolute' },
   badge:   { position: 'absolute', top: 14, left: 14, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 8 },
   badgeTxt:{ fontSize: 10, fontWeight: '800', color: P.white },
-  favBtn:  { position: 'absolute', top: 10, right: 14, width: 36, height: 36, borderRadius: 18, backgroundColor: P.glassWhite25, justifyContent: 'center', alignItems: 'center' },
+  favBtn:  { position: 'absolute', top: 10, right: 14, width: 36, height: 36, borderRadius: 18, backgroundColor: P.glassWhite25, justifyContent: 'center', alignItems: 'center', borderWidth: 1 },
   favIcon: { fontSize: 18 },
   info:    { position: 'absolute', bottom: 0, left: 0, right: 0, padding: 16 },
   tagHero: { alignSelf: 'flex-start', backgroundColor: P.terra, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6, marginBottom: 6 },
@@ -173,7 +223,10 @@ function ProductCard({ item, onPress, isFav, onFavToggle, index, listFade }) {
   const sc        = useRef(new Animated.Value(1)).current;
   const itemFade  = useRef(new Animated.Value(0)).current;
   const itemSlide = useRef(new Animated.Value(20)).current;
-  const isService = item.type === 'service';
+  const isService = String(item?.type || '').toLowerCase() === 'service';
+  const accent = isService ? '#2563EB' : P.terra;
+  const posted = getPostedLabel(item.createdAt || item.updatedAt);
+  const distance = getDistanceKm(item._id || item.id);
 
   useEffect(() => {
     Animated.parallel([
@@ -198,21 +251,32 @@ function ProductCard({ item, onPress, isFav, onFavToggle, index, listFade }) {
               style={c.img}
               resizeMode="cover"
             />
-            {/* Favori */}
-            <TouchableOpacity style={c.favBtn} onPress={onFavToggle} activeOpacity={0.8}>
-              <Text style={c.favIcon}>{isFav ? '❤️' : '🤍'}</Text>
-            </TouchableOpacity>
-            {/* Badge type */}
-            <View style={[c.badge, { backgroundColor: isService ? P.terra : P.gold }]}>
-              <Text style={c.badgeTxt}>{isService ? '🛠' : '📦'}</Text>
+            <View style={c.timeBadge}>
+              <Feather name="clock" size={10} color={P.charcoal} />
+              <Text style={c.timeTxt}>Il y a {posted}</Text>
             </View>
+            {/* Favori */}
+            <TouchableOpacity style={[c.favBtn, { borderColor: isService ? 'rgba(37,99,235,0.2)' : 'rgba(236,90,19,0.2)' }]} onPress={onFavToggle} activeOpacity={0.8}>
+              <Feather name={isFav ? 'heart' : 'heart'} size={14} color={accent} />
+            </TouchableOpacity>
           </View>
           {/* Body */}
           <View style={c.body}>
-            <Text style={c.title} numberOfLines={2}>{item.title}</Text>
-            <Text style={c.loc} numberOfLines={1}>📍 {getCityName(item.location)}</Text>
-            <View style={c.footer}>
-              <Text style={c.price}>{fmtPrice(item.price)}</Text>
+            <View style={c.titleRow}>
+              <View style={c.typeIconWrap}>
+                <Text style={c.typeIcon}>{isService ? '🛠️' : '📦'}</Text>
+              </View>
+              <Text style={c.title} numberOfLines={1}>{item.title}</Text>
+            </View>
+            <View style={c.metaRow}>
+              <Feather name="map-pin" size={10} color={accent} />
+              <Text style={c.loc} numberOfLines={1}>{getCityName(item.location)}</Text>
+              <Text style={c.metaDot}>•</Text>
+              <Text style={c.metaTail}>{distance.toFixed(1)} km</Text>
+            </View>
+            <View style={c.priceRow}>
+              <View style={c.priceSpacer} />
+              <Text style={[c.price, { color: isService ? '#2563EB' : P.terra }]}>{fmtPrice(item.price)}</Text>
             </View>
           </View>
         </View>
@@ -225,121 +289,154 @@ const c = StyleSheet.create({
   card:    { width: CARD_WIDTH, backgroundColor: P.white, borderRadius: 18, overflow: 'hidden', marginBottom: 12, shadowColor: P.charcoal, shadowOpacity: 0.08, shadowOffset: { width: 0, height: 4 }, shadowRadius: 10, elevation: 4, borderWidth: 1, borderColor: P.dim },
   imgWrap: { height: 130, backgroundColor: P.sand, position: 'relative' },
   img:     { width: '100%', height: '100%' },
-  favBtn:  { position: 'absolute', top: 8, right: 8, width: 30, height: 30, borderRadius: 15, backgroundColor: P.glassWhite25, justifyContent: 'center', alignItems: 'center' },
-  favIcon: { fontSize: 14 },
-  badge:   { position: 'absolute', bottom: 8, left: 8, width: 24, height: 24, borderRadius: 12, justifyContent: 'center', alignItems: 'center' },
-  badgeTxt:{ fontSize: 11 },
-  body:    { padding: 10 },
-  title:   { fontSize: 13, fontWeight: '700', color: P.charcoal, lineHeight: 18, marginBottom: 4, minHeight: 36 },
-  loc:     { fontSize: 10, color: P.muted, marginBottom: 8 },
-  footer:  { borderTopWidth: 1, borderTopColor: P.dim, paddingTop: 8 },
-  price:   { fontSize: 13, fontWeight: '900', color: P.terra },
+  timeBadge: { position: 'absolute', top: 8, left: 8, flexDirection: 'row', alignItems: 'center', gap: 3, backgroundColor: 'rgba(255,255,255,0.92)', borderRadius: 8, paddingHorizontal: 7, paddingVertical: 4 },
+  timeTxt: { fontSize: 9, color: P.charcoal, fontWeight: '700' },
+  favBtn:  { position: 'absolute', top: 8, right: 10, width: 32, height: 32, borderRadius: 16, backgroundColor: 'rgba(255,255,255,0.92)', justifyContent: 'center', alignItems: 'center', zIndex: 6, elevation: 6, borderWidth: 1, borderColor: 'rgba(236,90,19,0.2)' },
+  body:    { paddingHorizontal: 10, paddingVertical: 9, gap: 6 },
+  titleRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  typeIconWrap: { width: 18, minWidth: 18, alignItems: 'center', justifyContent: 'center' },
+  typeIcon: { fontSize: 14 },
+  title:   { flex: 1, fontSize: 12, fontWeight: '700', color: P.charcoal },
+  metaRow: { flexDirection: 'row', alignItems: 'center', gap: 3 },
+  loc:     { flexShrink: 1, fontSize: 10, color: P.muted, maxWidth: CARD_WIDTH * 0.32 },
+  metaDot: { fontSize: 11, color: P.muted },
+  metaTail:{ fontSize: 9, color: P.muted, fontWeight: '600' },
+  priceRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: 5 },
+  priceSpacer: { width: 14 },
+  price:   { fontSize: 12, fontWeight: '900', color: P.terra },
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// MODAL FILTRE PRIX
+// MODAL FILTRE PRIX PriceFilterModal
 // ─────────────────────────────────────────────────────────────────────────────
-function PriceFilterModal({ visible, onClose, priceRange, onApply, maxPrice }) {
+function PriceFilterSheet({ visible, onClose, priceRange, onApply, maxPrice, accent = P.terra, accentDark = P.orange700, accentSoft = P.peachSoft }) {
   const insets = useSafeAreaInsets();
   const [range, setRange] = useState(priceRange);
-  const slideAnim = useRef(new Animated.Value(300)).current;
+  const [mounted, setMounted] = useState(false); // ← contrôle l'affichage
+  const slideAnim = useRef(new Animated.Value(SCREEN_HEIGHT)).current;
 
   useEffect(() => {
     if (visible) {
+      setMounted(true); // ← monter d'abord
       setRange(priceRange);
+      slideAnim.setValue(SCREEN_HEIGHT);
       Animated.spring(slideAnim, { toValue: 0, tension: 80, friction: 12, useNativeDriver: true }).start();
     } else {
-      Animated.timing(slideAnim, { toValue: 300, duration: 200, useNativeDriver: true }).start();
+      // ← animer PUIS démonter
+      Animated.timing(slideAnim, { toValue: SCREEN_HEIGHT, duration: 220, useNativeDriver: true }).start(() => {
+        setMounted(false);
+      });
     }
   }, [visible]);
 
+  if (!mounted) return null; // ← seulement quand animation terminée
+
   return (
-    <Modal visible={visible} transparent animationType="none" onRequestClose={onClose}>
-      <View style={fm.root}>
-        {/* Backdrop */}
-        <TouchableOpacity style={fm.backdrop} activeOpacity={1} onPress={onClose} />
-        {/* Sheet */}
-        <Animated.View style={[fm.sheet, { transform: [{ translateY: slideAnim }], paddingBottom: Math.max(insets.bottom, 16) }]}>
-          <View style={fm.handle} />
-          <View style={fm.head}>
-            <Text style={fm.title}>Filtre par prix</Text>
-            <TouchableOpacity onPress={onClose} style={fm.closeBtn}>
-              <Text style={fm.closeTxt}>✕</Text>
-            </TouchableOpacity>
-          </View>
+    <View style={StyleSheet.absoluteFillObject} pointerEvents={visible ? 'auto' : 'none'}>
+      {/* Backdrop */}
+      <TouchableOpacity
+        style={[StyleSheet.absoluteFillObject, { backgroundColor: 'rgba(0,0,0,0.55)' }]}
+        activeOpacity={1}
+        onPress={onClose}
+      />
+      {/* Sheet */}
+      <Animated.View style={{
+        position: 'absolute',
+        bottom: 0,
+        left: 0,
+        right: 0,
+        backgroundColor: P.white,
+        borderTopLeftRadius: 28,
+        borderTopRightRadius: 28,
+        paddingBottom: insets.bottom > 0 ? insets.bottom : 16,
+        transform: [{ translateY: slideAnim }],
+      }}>
+        <View style={fm.handle} />
+        <View style={fm.head}>
+          <Text style={fm.title}>Filtre par prix</Text>
+          <TouchableOpacity onPress={onClose} style={fm.closeBtn}>
+            <Text style={fm.closeTxt}>✕</Text>
+          </TouchableOpacity>
+        </View>
 
-          {/* Valeurs */}
-          <View style={fm.valRow}>
-            <View style={fm.valBox}>
-              <Text style={fm.valLabel}>MIN</Text>
-              <Text style={fm.valNum}>{range[0].toLocaleString()}</Text>
-              <Text style={fm.valUnit}>FCFA</Text>
-            </View>
-            <View style={fm.valSep} />
-            <View style={fm.valBox}>
-              <Text style={fm.valLabel}>MAX</Text>
-              <Text style={fm.valNum}>{range[1].toLocaleString()}</Text>
-              <Text style={fm.valUnit}>FCFA</Text>
-            </View>
+        <View style={fm.valRow}>
+          <View style={fm.valBox}>
+            <Text style={fm.valLabel}>MIN</Text>
+            <Text style={[fm.valNum, { color: accent }]}>{range[0].toLocaleString()}</Text>
+            <Text style={fm.valUnit}>FCFA</Text>
           </View>
-
-          {/* Slider */}
-          <View style={{ paddingHorizontal: 20, marginTop: 8, marginBottom: 24 }}>
-            <PriceSlider
-              min={0}
-              max={maxPrice}
-              values={range}
-              onChange={setRange}
-              trackWidth={width - 80}
-            />
+          <View style={fm.valSep} />
+          <View style={fm.valBox}>
+            <Text style={fm.valLabel}>MAX</Text>
+            <Text style={[fm.valNum, { color: accent }]}>{range[1].toLocaleString()}</Text>
+            <Text style={fm.valUnit}>FCFA</Text>
           </View>
+        </View>
 
-          {/* Boutons rapides */}
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={fm.chips}>
-            {[
-              { label: 'Tout',          v: [0, maxPrice] },
-              { label: '< 5 000',       v: [0, 5000] },
-              { label: '5k – 50k',      v: [5000, 50000] },
-              { label: '50k – 200k',    v: [50000, 200000] },
-              { label: '> 200k',        v: [200000, maxPrice] },
-            ].map((chip, i) => {
-              const active = range[0] === chip.v[0] && range[1] === chip.v[1];
-              return (
-                <TouchableOpacity
-                  key={i}
-                  style={[fm.chip, active && fm.chipActive]}
-                  onPress={() => setRange(chip.v)}
-                  activeOpacity={0.8}
-                >
-                  <Text style={[fm.chipTxt, active && fm.chipTxtActive]}>{chip.label}</Text>
-                </TouchableOpacity>
-              );
-            })}
-          </ScrollView>
+        <Text style={fm.sliderHint}>Glissez le point gauche pour MIN et le point droit pour MAX.</Text>
 
-          {/* Appliquer */}
-          <View style={{ paddingHorizontal: 20, marginTop: 8 }}>
-            <TouchableOpacity
-              style={fm.applyBtn}
-              onPress={() => { onApply(range); onClose(); }}
-              activeOpacity={0.88}
-            >
-              <LinearGradient colors={[P.orange500, P.orange700]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={fm.applyGrad}>
-                <Text style={fm.applyTxt}>Appliquer le filtre</Text>
-              </LinearGradient>
-            </TouchableOpacity>
-          </View>
-        </Animated.View>
-      </View>
-    </Modal>
+        <View style={{ paddingHorizontal: 20, marginTop: 8, marginBottom: 24 }}>
+          <PriceSlider
+            min={0}
+            max={maxPrice}
+            values={range}
+            onChange={setRange}
+            trackWidth={width - 80}
+            accent={accent}
+          />
+        </View>
+
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={fm.chips}>
+          {[
+            { label: 'Tout',       v: [0, maxPrice] },
+            { label: '< 5 000',    v: [0, 5000] },
+            { label: '5k – 50k',   v: [5000, 50000] },
+            { label: '50k – 200k', v: [50000, 200000] },
+            { label: '> 200k',     v: [200000, maxPrice] },
+          ].map((chip, i) => {
+            const active = range[0] === chip.v[0] && range[1] === chip.v[1];
+            return (
+              <TouchableOpacity
+                key={i}
+                style={[fm.chip, active && { backgroundColor: accentSoft, borderColor: accent }]}
+                onPress={() => setRange(chip.v)}
+                activeOpacity={0.8}
+              >
+                <Text style={[fm.chipTxt, active && { color: accent, fontWeight: '800' }]}>{chip.label}</Text>
+              </TouchableOpacity>
+            );
+          })}
+        </ScrollView>
+
+        <View style={{ paddingHorizontal: 20, marginTop: 8 }}>
+          <TouchableOpacity
+            style={[fm.applyBtn, { shadowColor: accent }]}
+            onPress={() => { onApply(range); onClose(); }}
+            activeOpacity={0.88}
+          >
+            <LinearGradient colors={[accent, accentDark]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={fm.applyGrad}>
+              <Text style={fm.applyTxt}>Appliquer le filtre</Text>
+            </LinearGradient>
+          </TouchableOpacity>
+        </View>
+      </Animated.View>
+    </View>
   );
 }
 
 const fm = StyleSheet.create({
   root:        { flex: 1, justifyContent: 'flex-end' },
-  backdrop:    { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: P.shadow, opacity: 0.5 },
-  sheet:       { backgroundColor: P.white, borderTopLeftRadius: 28, borderTopRightRadius: 28 },
-  handle:      { width: 36, height: 4, borderRadius: 2, backgroundColor: P.dim, alignSelf: 'center', marginTop: 12, marginBottom: 4 },
+  backdrop:    { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: P.shadow, opacity: 0.78 },
+ sheet: { 
+  position: 'absolute',   // ← collé directement à l'écran
+  bottom: 0, 
+  left: 0, 
+  right: 0, 
+  backgroundColor: P.white, 
+  borderTopLeftRadius: 28, 
+  borderTopRightRadius: 28 
+},
+handle:      { width: 36, height: 4, borderRadius: 2, backgroundColor: P.dim, alignSelf: 'center', marginTop: 12, marginBottom: 4 },
   head:        { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 22, paddingVertical: 16, borderBottomWidth: 1, borderBottomColor: P.dim },
   title:       { fontSize: 18, fontWeight: '900', color: P.charcoal },
   closeBtn:    { width: 30, height: 30, borderRadius: 15, backgroundColor: P.surface, alignItems: 'center', justifyContent: 'center' },
@@ -350,6 +447,7 @@ const fm = StyleSheet.create({
   valNum:      { fontSize: 22, fontWeight: '900', color: P.terra },
   valUnit:     { fontSize: 10, color: P.muted, fontWeight: '600' },
   valSep:      { width: 1, height: 40, backgroundColor: P.dim, marginHorizontal: 16 },
+  sliderHint:  { fontSize: 11, color: P.muted, fontWeight: '600', paddingHorizontal: 20, marginTop: 2 },
   chips:       { paddingHorizontal: 20, gap: 8 },
   chip:        { paddingHorizontal: 16, paddingVertical: 9, borderRadius: 20, backgroundColor: P.surface, borderWidth: 1.5, borderColor: P.dim },
   chipActive:  { backgroundColor: P.peachSoft, borderColor: P.terra },
@@ -365,7 +463,9 @@ const fm = StyleSheet.create({
 // ─────────────────────────────────────────────────────────────────────────────
 export default function AllProductsScreen({ route, navigation }) {
   const insets = useSafeAreaInsets();
-  const { type } = route.params;
+  const typeParam = route?.params?.type || 'all';
+  const queryParam = route?.params?.q || '';
+  const locationParam = route?.params?.location || '';
   const { isAuthenticated } = useAuth();
 
   const [products,      setProducts]      = useState([]);
@@ -376,6 +476,7 @@ export default function AllProductsScreen({ route, navigation }) {
   const [showFilter,    setShowFilter]    = useState(false);
   const [favorites,     setFavorites]     = useState(new Set());
   const [filterActive,  setFilterActive]  = useState(false);
+  const [searchQuery,   setSearchQuery]   = useState(String(queryParam || '').trim());
   const [alert,         setAlert]         = useState({
     visible: false,
     type: 'info',
@@ -389,8 +490,33 @@ export default function AllProductsScreen({ route, navigation }) {
   const heroFade    = useRef(new Animated.Value(0)).current;
   const headerFade  = useRef(new Animated.Value(0)).current;
 
-  const title = type === 'service' ? 'Services' : 'Produits';
-  const emoji = type === 'service' ? '🛠️' : '📦';
+  const normalizedType = String(typeParam || 'all').toLowerCase();
+  const isServicePage = normalizedType === 'service';
+  const isAllPage = normalizedType === 'all';
+  const displayQuery = searchQuery.trim();
+  const displayLocation = String(locationParam || '').trim();
+  const theme = {
+    accent: isServicePage ? '#2563EB' : P.terra,
+    accentDark: isServicePage ? '#1D4ED8' : P.orange700,
+    accentSoft: isServicePage ? P.blue100 : P.peachSoft,
+    headerColors: [P.brown, P.charcoal],
+    headerGlow: isServicePage ? ['#1E40AF', '#60A5FA', '#1E40AF'] : [P.charcoal, P.terra, P.charcoal],
+    loadLogoColors: isServicePage ? ['#DBEAFE', '#2563EB'] : [P.gold, P.amber],
+    applyColors: isServicePage ? ['#2563EB', '#1D4ED8'] : [P.orange500, P.orange700],
+  };
+
+  const title = displayQuery || displayLocation
+    ? 'Résultats'
+    : isAllPage
+      ? 'Toutes les annonces'
+      : isServicePage
+        ? 'Services'
+        : 'Produits';
+  const emoji = displayQuery || displayLocation ? '🔎' : isAllPage ? '🛍️' : isServicePage ? '🛠️' : '📦';
+  const headerContext = [
+    displayQuery ? `"${displayQuery}"` : null,
+    displayLocation ? `📍 ${displayLocation}` : null,
+  ].filter(Boolean).join(' • ');
 
   // Header qui se compresse
   const headerHeight = scrollY.interpolate({
@@ -416,6 +542,10 @@ export default function AllProductsScreen({ route, navigation }) {
       Animated.timing(headerFade, { toValue: 1, duration: 400, useNativeDriver: true }),
     ]).start();
   }, []);
+
+  useEffect(() => {
+    setSearchQuery(String(queryParam || '').trim());
+  }, [queryParam]);
 
   useEffect(() => {
     loadFavorites();
@@ -485,14 +615,33 @@ export default function AllProductsScreen({ route, navigation }) {
   // ── Données ────────────────────────────────────────────────────────────────
   const fetchProducts = async () => {
     try {
-      const res  = await apiClient.get('/products');
-      const all  = res.data.data || res.data;
-      const filt = type === 'service'
-        ? all.filter(i => i.type === 'service')
-        : all.filter(i => i.type !== 'service');
-      setProducts(filt);
+      const params = {
+        ...(isAllPage ? {} : { type: isServicePage ? 'service' : 'product' }),
+        ...(searchQuery ? { search: searchQuery } : {}),
+      };
+
+      const res = await apiClient.get('/products', { params });
+      const all = res.data.data || res.data;
+      const normalizedLocation = String(locationParam || '').trim().toLowerCase();
+      const filteredByLocation = normalizedLocation
+        ? all.filter((item) => {
+            const itemLocation = String(item?.location || '').toLowerCase();
+            const sellerLocation = String(item?.seller?.location || '').toLowerCase();
+            const cityLocation = itemLocation.split(',')[0].trim();
+            const sellerCity = sellerLocation.split(',')[0].trim();
+
+            return (
+              itemLocation.includes(normalizedLocation) ||
+              cityLocation.includes(normalizedLocation) ||
+              sellerLocation.includes(normalizedLocation) ||
+              sellerCity.includes(normalizedLocation)
+            );
+          })
+        : all;
+
+      setProducts(filteredByLocation);
       // Init range prix
-      const prices = filt.map(i => parseInt(i.price || 0));
+      const prices = filteredByLocation.map(i => parseInt(i.price || 0));
       const maxP   = Math.max(...prices, 1000000);
       setPriceRange([0, maxP]);
     } catch (e) {
@@ -503,8 +652,8 @@ export default function AllProductsScreen({ route, navigation }) {
     }
   };
 
-  useEffect(() => { fetchProducts(); }, [type]);
-  const onRefresh = useCallback(() => { setRefreshing(true); fetchProducts(); }, [type]);
+  useEffect(() => { fetchProducts(); }, [normalizedType, isServicePage, isAllPage, searchQuery, locationParam]);
+  const onRefresh = useCallback(() => { setRefreshing(true); fetchProducts(); }, [normalizedType, isServicePage, isAllPage, searchQuery, locationParam]);
 
   // ── Tri + filtre ───────────────────────────────────────────────────────────
   const maxPrice = Math.max(...products.map(i => parseInt(i.price || 0)), 1000000);
@@ -529,11 +678,11 @@ export default function AllProductsScreen({ route, navigation }) {
     return (
       <View style={s.loadScreen}>
         <LinearGradient colors={[P.charcoal, P.brown]} style={s.loadInner}>
-          <LinearGradient colors={[P.gold, P.amber]} style={s.loadLogoBox}>
+          <LinearGradient colors={theme.loadLogoColors} style={s.loadLogoBox}>
             <Text style={s.loadLogoTxt}>M</Text>
           </LinearGradient>
           <Text style={s.loadBrand}>MarketHub</Text>
-          <ActivityIndicator size="large" color={P.amber} style={{ marginTop: 24 }} />
+          <ActivityIndicator size="large" color={theme.accent} style={{ marginTop: 24 }} />
         </LinearGradient>
       </View>
     );
@@ -546,8 +695,8 @@ export default function AllProductsScreen({ route, navigation }) {
 
       {/* ══ HEADER SHRINKABLE ═══════════════════════════════════════════════ */}
       <Animated.View style={[s.header, { height: Animated.add(headerHeight, insets.top || 0) }]}>
-        <LinearGradient colors={[P.brown, P.charcoal]} style={StyleSheet.absoluteFill} />
-        <View style={s.headerAccent} />
+        <LinearGradient colors={theme.headerColors} style={StyleSheet.absoluteFill} />
+        <View style={[s.headerAccent, { backgroundColor: theme.accent }]} />
 
         <Animated.View style={[s.headerInner, { paddingTop: (insets.top || 0) + 6, opacity: headerFade }]}>
           {/* Ligne principale */}
@@ -560,7 +709,10 @@ export default function AllProductsScreen({ route, navigation }) {
               <Animated.Text style={[s.headerTitle, { fontSize: titleSize }]}>
                 {emoji} {title}
               </Animated.Text>
-              <Text style={s.headerCount}>{processed.length} annonce{processed.length > 1 ? 's' : ''}</Text>
+              {!!headerContext && (
+                <Text style={s.headerQuery} numberOfLines={1}>{headerContext}</Text>
+              )}
+              <Text style={[s.headerCount, { color: theme.accentSoft }]}>{processed.length} annonce{processed.length > 1 ? 's' : ''}</Text>
             </Animated.View>
 
             <View style={s.headerActions}>
@@ -576,12 +728,12 @@ export default function AllProductsScreen({ route, navigation }) {
               </TouchableOpacity>
               {/* Filtre prix */}
               <TouchableOpacity
-                style={[s.actionBtn, filterActive && s.actionBtnActive]}
+                style={[s.actionBtn, filterActive && [s.actionBtnActive, { backgroundColor: theme.accent }]]}
                 activeOpacity={0.8}
                 onPress={() => setShowFilter(true)}
               >
                 <Text style={s.actionBtnTxt}>⚖️</Text>
-                {filterActive && <View style={s.actionDot} />}
+                {filterActive && <View style={[s.actionDot, { backgroundColor: theme.accentSoft, borderColor: theme.accent }]} />}
               </TouchableOpacity>
             </View>
           </View>
@@ -589,7 +741,7 @@ export default function AllProductsScreen({ route, navigation }) {
 
         {/* Glow ligne */}
         <LinearGradient
-          colors={[P.charcoal, P.terra, P.charcoal]}
+          colors={theme.headerGlow}
           start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
           style={s.headerGlow}
         />
@@ -612,7 +764,7 @@ export default function AllProductsScreen({ route, navigation }) {
         )}
         scrollEventThrottle={16}
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[P.terra]} tintColor={P.terra} />
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[theme.accent]} tintColor={theme.accent} />
         }
         ListHeaderComponent={
           <>
@@ -651,7 +803,11 @@ export default function AllProductsScreen({ route, navigation }) {
               <Text style={{ fontSize: 64 }}>📭</Text>
               <Text style={s.emptyTitle}>Aucune annonce</Text>
               <Text style={s.emptySub}>
-                Pas {type === 'service' ? 'de services' : 'de produits'} pour le moment.
+                {searchQuery
+                  ? `Aucun resultat pour "${searchQuery}".`
+                  : isAllPage
+                    ? 'Aucune annonce pour le moment.'
+                    : `Pas ${isServicePage ? 'de services' : 'de produits'} pour le moment.`}
               </Text>
               <TouchableOpacity
                 style={s.emptyBtn}
@@ -668,16 +824,19 @@ export default function AllProductsScreen({ route, navigation }) {
       />
 
       {/* ══ MODAL FILTRE PRIX ════════════════════════════════════════════════ */}
-      <PriceFilterModal
-        visible={showFilter}
-        onClose={() => setShowFilter(false)}
-        priceRange={priceRange}
-        maxPrice={maxPrice}
-        onApply={(range) => {
-          setPriceRange(range);
-          setFilterActive(range[0] > 0 || range[1] < maxPrice);
-        }}
-      />
+       <PriceFilterSheet
+      visible={showFilter}
+      onClose={() => setShowFilter(false)}
+      priceRange={priceRange}
+      maxPrice={maxPrice}
+      accent={theme.accent}
+      accentDark={theme.accentDark}
+      accentSoft={theme.accentSoft}
+      onApply={(range) => {
+        setPriceRange(range);
+        setFilterActive(range[0] > 0 || range[1] < maxPrice);
+      }}
+    />
 
       <AlertModal
         visible={alert.visible}
@@ -711,6 +870,7 @@ const s = StyleSheet.create({
   backBtnTxt:   { fontSize: 18, fontWeight: '700', color: P.white },
   headerCenter: { flex: 1, alignItems: 'center' },
   headerTitle:  { fontWeight: '900', color: P.white, letterSpacing: -0.5 },
+  headerQuery:  { fontSize: 11, color: 'rgba(255,255,255,0.75)', fontWeight: '600', marginTop: 1, maxWidth: '90%' },
   headerCount:  { fontSize: 11, color: P.amber, fontWeight: '600', marginTop: 2 },
   headerActions:{ flexDirection: 'row', gap: 8 },
   actionBtn:    { width: 38, height: 38, borderRadius: 19, backgroundColor: P.glassWhite25, justifyContent: 'center', alignItems: 'center', position: 'relative' },

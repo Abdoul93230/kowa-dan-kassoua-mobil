@@ -15,6 +15,7 @@ import LoginScreen from '../screens/LoginScreen';
 import RegisterScreen from '../screens/RegisterScreen';
 import RegisterStep2Screen from '../screens/RegisterStep2Screen';
 import VerifyOTPScreen from '../screens/VerifyOTPScreen';
+import QuickAuthScreen from '../screens/QuickAuthScreen';
 import ForgotPasswordScreen from '../screens/ForgotPasswordScreen';
 import ResetPasswordScreen from '../screens/ResetPasswordScreen';
 import ProductsListScreen from '../screens/ProductsListScreen';
@@ -22,6 +23,7 @@ import ProfileScreen from '../screens/ProfileScreen';
 import FavoritesScreen from '../screens/FavoritesScreen';
 import PublishScreen from '../screens/PublishScreen';
 import MyListingsScreen from '../screens/MyListingsScreen';
+import CategoriesScreen from '../screens/CategoriesScreen';
 import CategoryProductsScreen from '../screens/CategoryProductsScreen';
 import AllProductsScreen from '../screens/AllProductsScreen';
 import ProductDetailScreen from '../screens/ProductDetailScreen';
@@ -76,6 +78,7 @@ function MessagesNavigator() {
     <MessagesStack.Navigator
       screenOptions={{
         headerShown: false,
+        tabBarShowLabel: false,
         cardStyle: { backgroundColor: '#111827' },
       }}
     >
@@ -161,7 +164,7 @@ function PlaceholderScreen({ route, navigation }) {
 function MainTabs() {
   const { isAuthenticated, token, user } = useAuth();
   const insets = useSafeAreaInsets();
-  const TAB_HEIGHT = 64 + Math.max(insets.bottom, 8);
+  const TAB_HEIGHT = 54 + Math.max(insets.bottom, 6);
   const [unreadCount, setUnreadCount] = useState(0);
 
   const { isConnected, on, off } = useSocket({
@@ -227,6 +230,7 @@ function MainTabs() {
     <Tab.Navigator
       screenOptions={{
         headerShown: false,
+        tabBarShowLabel: false,
 
         // ── Couleurs ──────────────────────────────────────────────────────────
         tabBarActiveTintColor:   P.amber,
@@ -242,17 +246,12 @@ function MainTabs() {
         // ── Fond personnalisé (gradient + ligne orange) ───────────────────────
         tabBarBackground: () => <TabBarBackground />,
 
-        // ── Labels ────────────────────────────────────────────────────────────
-        tabBarLabelStyle: {
-          fontSize: 10,
-          fontWeight: '600',
-          letterSpacing: 0.2,
-          marginTop: -2,
-          marginBottom: Platform.OS === 'ios' ? 0 : 6,
-        },
         tabBarItemStyle: {
-          paddingTop: 6,
-          height: 60,
+          paddingTop: 2,
+          height: 50,
+        },
+        tabBarLabelStyle: {
+          display: 'none',
         },
       }}
     >
@@ -260,7 +259,6 @@ function MainTabs() {
         name="Home"
         component={ProductsListScreen}
         options={{
-          tabBarLabel: 'Accueil',
           tabBarIcon: ({ focused, color }) => (
             <TabBarIcon name="home" focused={focused} color={color} />
           ),
@@ -269,8 +267,18 @@ function MainTabs() {
       <Tab.Screen
         name="Favorites"
         component={FavoritesScreen}
+        listeners={({ navigation }) => ({
+          tabPress: (e) => {
+            if (!isAuthenticated) {
+              e.preventDefault();
+              navigation.navigate('QuickAuth', {
+                pendingAction: { type: 'favorites' },
+                returnScreen: 'Favorites',
+              });
+            }
+          },
+        })}
         options={{
-          tabBarLabel: 'Favoris',
           tabBarIcon: ({ focused, color }) => (
             <TabBarIcon name="favorites" focused={focused} color={color} badge={0} />
           ),
@@ -280,7 +288,6 @@ function MainTabs() {
         name="Publish"
         component={PublishScreen}
         options={{
-          tabBarLabel: '',
           tabBarIcon: ({ focused }) => (
             <TabBarIcon name="publish" focused={focused} />
           ),
@@ -289,12 +296,22 @@ function MainTabs() {
       <Tab.Screen
         name="Messages"
         component={MessagesNavigator}
+        listeners={({ navigation }) => ({
+          tabPress: (e) => {
+            if (!isAuthenticated) {
+              e.preventDefault();
+              navigation.navigate('QuickAuth', {
+                pendingAction: { type: 'messages_list' },
+                returnScreen: 'Messages',
+              });
+            }
+          },
+        })}
         options={({ route }) => {
           const routeName = getFocusedRouteNameFromRoute(route) || 'MessagesList';
           const hideTabBar = routeName === 'Conversation';
 
           return {
-            tabBarLabel: 'Messages',
             tabBarStyle: hideTabBar
               ? { display: 'none' }
               : {
@@ -316,7 +333,6 @@ function MainTabs() {
         name="Profile"
         component={ProfileScreen}
         options={{
-          tabBarLabel: 'Profil',
           tabBarIcon: ({ focused, color }) => (
             <TabBarIcon name="profile" focused={focused} color={color} />
           ),
@@ -349,6 +365,7 @@ export default function AppNavigator() {
       <NavigationContainer>
         <Stack.Navigator screenOptions={{ headerShown: false }}>
           <Stack.Screen name="MainTabs" component={MainTabs} />
+          <Stack.Screen name="Categories" component={CategoriesScreen} options={{ headerShown: false }} />
           <Stack.Screen name="CategoryProducts" component={CategoryProductsScreen} options={{ headerShown: false }} />
           <Stack.Screen name="AllProducts" component={AllProductsScreen} options={{ headerShown: false }} />
           <Stack.Screen name="ProductDetail" component={ProductDetailScreen} options={{ headerShown: false }} />
@@ -358,6 +375,7 @@ export default function AppNavigator() {
           <Stack.Screen name="Register" component={RegisterScreen} options={{ presentation: Platform.OS === 'ios' ? 'modal' : 'card', headerShown: false }} />
           <Stack.Screen name="RegisterStep2" component={RegisterStep2Screen} options={{ presentation: Platform.OS === 'ios' ? 'modal' : 'card', headerShown: false }} />
           <Stack.Screen name="VerifyOTP" component={VerifyOTPScreen} options={{ presentation: Platform.OS === 'ios' ? 'modal' : 'card', headerShown: false }} />
+          <Stack.Screen name="QuickAuth" component={QuickAuthScreen} options={{ presentation: 'modal', headerShown: false }} />
           <Stack.Screen name="ForgotPassword" component={ForgotPasswordScreen} options={{ presentation: Platform.OS === 'ios' ? 'modal' : 'card', headerShown: false }} />
           <Stack.Screen name="ResetPassword" component={ResetPasswordScreen} options={{ presentation: Platform.OS === 'ios' ? 'modal' : 'card', headerShown: false }} />
         </Stack.Navigator>

@@ -9,12 +9,24 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
+import { Feather } from '@expo/vector-icons';
 import { useAuth } from '../contexts/AuthContext';
 import { getMyProducts, getMyStats, deleteProduct, toggleProductStatus } from '../api/products';
 import AlertModal from '../components/AlertModal';
 import { MOBILE_COLORS as P } from '../theme/colors';
 
 const { width } = Dimensions.get('window');
+
+const getCityName = (loc) => (loc ? loc.split(',')[0].trim() : 'Niger');
+const getDistanceKm = (itemId) => {
+  const distances = [0.5, 1.2, 2.3, 3.5, 4.8, 5.1, 6.7, 8.2, 10.5];
+  if (typeof itemId === 'string') {
+    const hash = itemId.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+    return distances[hash % distances.length];
+  }
+  const n = Number(itemId) || 0;
+  return distances[Math.abs(n) % distances.length];
+};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // STAT CARD
@@ -60,13 +72,14 @@ function ListingCard({ item, onView, onEdit, onToggle, onDelete, toggling }) {
   }, []);
 
   const statusConfig = {
-    active:  { label: 'Active',     bg: 'rgba(34,197,94,0.9)',   dot: P.green },
-    sold:    { label: 'Vendu',      bg: 'rgba(59,130,246,0.9)',  dot: P.blue },
-    expired: { label: 'Expiré',     bg: 'rgba(107,114,128,0.9)', dot: P.muted },
-    pending: { label: 'En attente', bg: 'rgba(245,158,11,0.9)',  dot: P.yellow },
+    active: { label: 'Active', bg: 'rgba(34,197,94,0.9)', dot: P.green },
+    sold: { label: 'Vendu', bg: 'rgba(59,130,246,0.9)', dot: P.blue },
+    expired: { label: 'Expiré', bg: 'rgba(107,114,128,0.9)', dot: P.muted },
+    pending: { label: 'En attente', bg: 'rgba(245,158,11,0.9)', dot: P.yellow },
   };
   const st = statusConfig[item.status] || statusConfig.expired;
   const isService = item.type === 'service';
+  const distance = getDistanceKm(item.id || item._id);
 
   return (
     <Animated.View style={[s.card, { opacity: fadeAnim, transform: [{ scale: sc }] }]}>
@@ -90,11 +103,6 @@ function ListingCard({ item, onView, onEdit, onToggle, onDelete, toggling }) {
           <Text style={s.statusBadgeTxt}>{st.label}</Text>
         </View>
 
-        {/* Badge type — top right */}
-        <View style={[s.typeBadge, { backgroundColor: isService ? 'rgba(59,130,246,0.85)' : 'rgba(245,158,11,0.85)' }]}>
-          <Text style={s.typeBadgeTxt}>{isService ? '🛠 Service' : '📦 Produit'}</Text>
-        </View>
-
         {/* Prix en bas */}
         <View style={s.cardPriceTag}>
           <Text style={s.cardPriceTagTxt}>
@@ -105,13 +113,22 @@ function ListingCard({ item, onView, onEdit, onToggle, onDelete, toggling }) {
 
       {/* Contenu */}
       <View style={s.cardBody}>
-        <Text style={s.cardTitle} numberOfLines={2}>{item.title}</Text>
+        <View style={s.cardTitleRow}>
+          <View style={s.typeIconWrap}>
+            <Text style={s.typeIcon}>{isService ? '🛠️' : '📦'}</Text>
+          </View>
+          <Text style={s.cardTitle} numberOfLines={1}>{item.title}</Text>
+        </View>
 
         {/* Méta */}
         <View style={s.cardMeta}>
           <View style={s.cardMetaItem}>
-            <Text style={s.cardMetaDot}>●</Text>
-            <Text style={s.cardMetaTxt}>{item.location?.split(',')[0] || 'Niger'}</Text>
+            <Feather name="map-pin" size={11} color={P.terra} />
+            <Text style={s.cardMetaTxt} numberOfLines={1}>{getCityName(item.location)}</Text>
+          </View>
+          <View style={s.cardMetaItem}>
+            <Text style={s.cardMetaSep}>•</Text>
+            <Text style={s.cardMetaKm}>{distance.toFixed(1)} km</Text>
           </View>
           <View style={s.cardMetaItem}>
             <Text style={s.cardMetaIcon}>👁</Text>
@@ -170,24 +187,24 @@ export default function MyListingsScreen({ navigation }) {
   const { user } = useAuth();
   const insets = useSafeAreaInsets();
 
-  const [listings,           setListings]           = useState([]);
-  const [stats,              setStats]              = useState({ totalActive: 0, totalSold: 0, totalViews: 0, totalFavorites: 0 });
-  const [loading,            setLoading]            = useState(true);
-  const [refreshing,         setRefreshing]         = useState(false);
-  const [searchQuery,        setSearchQuery]        = useState('');
-  const [filterStatus,       setFilterStatus]       = useState('all');
-  const [filterType,         setFilterType]         = useState('all');
-  const [showFilterModal,    setShowFilterModal]    = useState(false);
+  const [listings, setListings] = useState([]);
+  const [stats, setStats] = useState({ totalActive: 0, totalSold: 0, totalViews: 0, totalFavorites: 0 });
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [filterStatus, setFilterStatus] = useState('all');
+  const [filterType, setFilterType] = useState('all');
+  const [showFilterModal, setShowFilterModal] = useState(false);
   const [deleteModalVisible, setDeleteModalVisible] = useState(false);
-  const [itemToDelete,       setItemToDelete]       = useState(null);
-  const [deleting,           setDeleting]           = useState(false);
-  const [togglingStatus,     setTogglingStatus]     = useState(null);
-  const [alert,              setAlert]              = useState({
+  const [itemToDelete, setItemToDelete] = useState(null);
+  const [deleting, setDeleting] = useState(false);
+  const [togglingStatus, setTogglingStatus] = useState(null);
+  const [alert, setAlert] = useState({
     visible: false,
     type: 'info',
     title: '',
     message: '',
-    buttons: [{ text: 'OK', onPress: () => {} }],
+    buttons: [{ text: 'OK', onPress: () => { } }],
   });
 
   const headerAnim = useRef(new Animated.Value(0)).current;
@@ -212,7 +229,7 @@ export default function MyListingsScreen({ navigation }) {
         type: 'error',
         title: 'Erreur',
         message: 'Impossible de charger vos annonces',
-        buttons: [{ text: 'OK', onPress: () => {} }],
+        buttons: [{ text: 'OK', onPress: () => { } }],
       });
     } finally {
       setLoading(false);
@@ -233,8 +250,9 @@ export default function MyListingsScreen({ navigation }) {
     return matchesSearch && matchesType;
   });
 
-  const handleView       = (item) => navigation.navigate('ProductDetail', { productId: item.id });
-  const handleEdit       = (item) => navigation.navigate('Publish', { editItem: item });
+  const goToPublish = (params) => navigation.navigate('MainTabs', { screen: 'Publish', params });
+  const handleView = (item) => navigation.navigate('ProductDetail', { productId: item.id });
+  const handleEdit = (item) => goToPublish({ editItem: item });
   const handleDeletePress = (item) => { setItemToDelete(item); setDeleteModalVisible(true); };
 
   const handleToggleStatus = async (item) => {
@@ -248,7 +266,7 @@ export default function MyListingsScreen({ navigation }) {
         type: 'error',
         title: 'Erreur',
         message: "Impossible de changer le statut",
-        buttons: [{ text: 'OK', onPress: () => {} }],
+        buttons: [{ text: 'OK', onPress: () => { } }],
       });
     } finally {
       setTogglingStatus(null);
@@ -269,7 +287,7 @@ export default function MyListingsScreen({ navigation }) {
         type: 'error',
         title: 'Erreur',
         message: "Impossible de supprimer l'annonce",
-        buttons: [{ text: 'OK', onPress: () => {} }],
+        buttons: [{ text: 'OK', onPress: () => { } }],
       });
     } finally {
       setDeleting(false);
@@ -320,7 +338,7 @@ export default function MyListingsScreen({ navigation }) {
             </View>
             <TouchableOpacity
               style={s.publishBtn}
-              onPress={() => navigation.navigate('Publish')}
+              onPress={() => goToPublish()}
               activeOpacity={0.85}
             >
               <LinearGradient colors={[P.orange500, P.orange700]} style={s.publishBtnGrad}>
@@ -331,10 +349,9 @@ export default function MyListingsScreen({ navigation }) {
 
           {/* Stats cards */}
           <View style={s.statsRow}>
-            <StatCard icon="📦" value={stats.totalActive}    label="Actives"  accent index={0} />
-            <StatCard icon="✓"  value={stats.totalSold}      label="Vendues"  index={1} />
-            <StatCard icon="👁" value={stats.totalViews}     label="Vues"     index={2} />
-            <StatCard icon="♥"  value={stats.totalFavorites} label="Favoris"  index={3} />
+            <StatCard icon="📦" value={stats.totalActive} label="Actives" accent index={0} />
+            <StatCard icon="👁" value={stats.totalViews} label="Vues" index={1} />
+            <StatCard icon="♥" value={stats.totalFavorites} label="Favoris" index={2} />
           </View>
 
           {/* Bottom glow line */}
@@ -398,7 +415,7 @@ export default function MyListingsScreen({ navigation }) {
                 ? 'Essayez de modifier vos critères de recherche'
                 : 'Publiez votre première annonce gratuitement'}
             </Text>
-            <TouchableOpacity onPress={() => navigation.navigate('Publish')} activeOpacity={0.85}>
+            <TouchableOpacity onPress={() => goToPublish()} activeOpacity={0.85}>
               <LinearGradient colors={[P.orange500, P.orange700]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={s.emptyBtn}>
                 <Text style={s.emptyBtnTxt}>Publier une annonce →</Text>
               </LinearGradient>
@@ -447,8 +464,8 @@ export default function MyListingsScreen({ navigation }) {
             <Text style={s.filterGroupLabel}>Statut</Text>
             <View style={s.filterChips}>
               {[
-                { value: 'all',     label: 'Tous' },
-                { value: 'active',  label: 'Actives' },
+                { value: 'all', label: 'Tous' },
+                { value: 'active', label: 'Actives' },
                 { value: 'expired', label: 'Expirées' },
               ].map(opt => (
                 <TouchableOpacity
@@ -468,7 +485,7 @@ export default function MyListingsScreen({ navigation }) {
             <Text style={s.filterGroupLabel}>Type</Text>
             <View style={s.filterChips}>
               {[
-                { value: 'all',     label: 'Tous' },
+                { value: 'all', label: 'Tous' },
                 { value: 'product', label: 'Produits' },
                 { value: 'service', label: 'Services' },
               ].map(opt => (
@@ -553,53 +570,53 @@ const s = StyleSheet.create({
   container: { flex: 1, backgroundColor: P.surface },
 
   // ── Header ──────────────────────────────────────────────────────────────────
-  header:          { paddingHorizontal: 20, paddingBottom: 18, overflow: 'hidden', position: 'relative' },
-  headerAccentLine:{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, backgroundColor: P.terra },
-  headerTop:       { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 },
-  headerEyebrow:   { fontSize: 10, fontWeight: '700', color: P.amber, letterSpacing: 2, textTransform: 'uppercase', marginBottom: 3 },
-  headerTitle:     { fontSize: 26, fontWeight: '900', color: P.white, letterSpacing: -0.5 },
-  headerGlowLine:  { height: 1.5, marginTop: 16 },
+  header: { paddingHorizontal: 20, paddingBottom: 18, overflow: 'hidden', position: 'relative' },
+  headerAccentLine: { position: 'absolute', top: 0, left: 0, right: 0, height: 3, backgroundColor: P.terra },
+  headerTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 },
+  headerEyebrow: { fontSize: 10, fontWeight: '700', color: P.amber, letterSpacing: 2, textTransform: 'uppercase', marginBottom: 3 },
+  headerTitle: { fontSize: 26, fontWeight: '900', color: P.white, letterSpacing: -0.5 },
+  headerGlowLine: { height: 1.5, marginTop: 16 },
 
-  publishBtn:    { borderRadius: 12, overflow: 'hidden', shadowColor: P.terra, shadowOpacity: 0.35, shadowOffset: { width: 0, height: 4 }, shadowRadius: 10, elevation: 6 },
-  publishBtnGrad:{ paddingHorizontal: 16, paddingVertical: 11 },
+  publishBtn: { borderRadius: 12, overflow: 'hidden', shadowColor: P.terra, shadowOpacity: 0.35, shadowOffset: { width: 0, height: 4 }, shadowRadius: 10, elevation: 6 },
+  publishBtnGrad: { paddingHorizontal: 16, paddingVertical: 11 },
   publishBtnTxt: { fontSize: 13, fontWeight: '800', color: P.white },
 
   // Stats
-  statsRow:      { flexDirection: 'row', gap: 8 },
-  statCard:      { flex: 1, borderRadius: 14, overflow: 'hidden' },
-  statCardGrad:  { padding: 12, alignItems: 'center', position: 'relative', borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)', borderRadius: 14, gap: 3 },
-  statCardAccent:{ position: 'absolute', top: 0, left: 0, right: 0, height: 2, backgroundColor: P.terra },
-  statIcon:      { fontSize: 18, marginBottom: 2 },
-  statValue:     { fontSize: 18, fontWeight: '900', color: P.white },
-  statLabel:     { fontSize: 10, color: 'rgba(255,255,255,0.5)', fontWeight: '600' },
+  statsRow: { flexDirection: 'row', gap: 8 },
+  statCard: { flex: 1, borderRadius: 14, overflow: 'hidden' },
+  statCardGrad: { padding: 12, alignItems: 'center', position: 'relative', borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)', borderRadius: 14, gap: 3 },
+  statCardAccent: { position: 'absolute', top: 0, left: 0, right: 0, height: 2, backgroundColor: P.terra },
+  statIcon: { fontSize: 18, marginBottom: 2 },
+  statValue: { fontSize: 18, fontWeight: '900', color: P.white },
+  statLabel: { fontSize: 10, color: 'rgba(255,255,255,0.5)', fontWeight: '600' },
 
   // ── Recherche ────────────────────────────────────────────────────────────────
   searchSection: { flexDirection: 'row', padding: 14, gap: 10 },
-  searchBar:     { flex: 1, flexDirection: 'row', alignItems: 'center', backgroundColor: P.white, borderRadius: 12, paddingHorizontal: 12, borderWidth: 1, borderColor: P.dim, gap: 8 },
-  searchIcon:    { fontSize: 16 },
-  searchInput:   { flex: 1, fontSize: 14, color: P.charcoal, paddingVertical: 12 },
-  searchClear:   { padding: 4 },
-  searchClearTxt:{ fontSize: 13, color: P.muted, fontWeight: '700' },
-  filterBtn:     { backgroundColor: P.white, paddingHorizontal: 14, borderRadius: 12, justifyContent: 'center', borderWidth: 1, borderColor: P.dim },
-  filterBtnActive:{ backgroundColor: P.peachSoft, borderColor: 'rgba(236,90,19,0.35)' },
-  filterBtnTxt:  { fontSize: 13, fontWeight: '600', color: P.muted },
-  filterBtnTxtActive:{ color: P.terra },
+  searchBar: { flex: 1, flexDirection: 'row', alignItems: 'center', backgroundColor: P.white, borderRadius: 12, paddingHorizontal: 12, borderWidth: 1, borderColor: P.dim, gap: 8 },
+  searchIcon: { fontSize: 16 },
+  searchInput: { flex: 1, fontSize: 14, color: P.charcoal, paddingVertical: 12 },
+  searchClear: { padding: 4 },
+  searchClearTxt: { fontSize: 13, color: P.muted, fontWeight: '700' },
+  filterBtn: { backgroundColor: P.white, paddingHorizontal: 14, borderRadius: 12, justifyContent: 'center', borderWidth: 1, borderColor: P.dim },
+  filterBtnActive: { backgroundColor: P.peachSoft, borderColor: 'rgba(236,90,19,0.35)' },
+  filterBtnTxt: { fontSize: 13, fontWeight: '600', color: P.muted },
+  filterBtnTxtActive: { color: P.terra },
 
   // ── Liste ────────────────────────────────────────────────────────────────────
-  listContent:   { padding: 14, paddingTop: 0 },
-  resultsCount:  { fontSize: 12, color: P.muted, fontWeight: '600', marginBottom: 12, marginTop: 4 },
+  listContent: { padding: 14, paddingTop: 0 },
+  resultsCount: { fontSize: 12, color: P.muted, fontWeight: '600', marginBottom: 12, marginTop: 4 },
 
   // ── Loading / Empty ──────────────────────────────────────────────────────────
-  loadingContainer:{ flex: 1, justifyContent: 'center', alignItems: 'center', gap: 12 },
-  loadingText:     { fontSize: 14, color: P.muted },
-  emptyContainer:  { alignItems: 'center', paddingVertical: 56, paddingHorizontal: 32 },
-  emptyIconWrap:   { marginBottom: 20, borderRadius: 40, overflow: 'hidden', shadowColor: P.terra, shadowOpacity: 0.2, shadowOffset: { width: 0, height: 6 }, shadowRadius: 16, elevation: 8 },
-  emptyIconBg:     { width: 80, height: 80, borderRadius: 40, justifyContent: 'center', alignItems: 'center' },
-  emptyEmoji:      { fontSize: 36 },
-  emptyTitle:      { fontSize: 20, fontWeight: '800', color: P.charcoal, marginBottom: 8, textAlign: 'center' },
-  emptyDesc:       { fontSize: 14, color: P.muted, textAlign: 'center', lineHeight: 21, marginBottom: 24 },
-  emptyBtn:        { paddingVertical: 14, paddingHorizontal: 28, borderRadius: 12, shadowColor: P.terra, shadowOpacity: 0.3, shadowOffset: { width: 0, height: 4 }, shadowRadius: 10, elevation: 6 },
-  emptyBtnTxt:     { fontSize: 15, fontWeight: '800', color: P.white },
+  loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 12 },
+  loadingText: { fontSize: 14, color: P.muted },
+  emptyContainer: { alignItems: 'center', paddingVertical: 56, paddingHorizontal: 32 },
+  emptyIconWrap: { marginBottom: 20, borderRadius: 40, overflow: 'hidden', shadowColor: P.terra, shadowOpacity: 0.2, shadowOffset: { width: 0, height: 6 }, shadowRadius: 16, elevation: 8 },
+  emptyIconBg: { width: 80, height: 80, borderRadius: 40, justifyContent: 'center', alignItems: 'center' },
+  emptyEmoji: { fontSize: 36 },
+  emptyTitle: { fontSize: 20, fontWeight: '800', color: P.charcoal, marginBottom: 8, textAlign: 'center' },
+  emptyDesc: { fontSize: 14, color: P.muted, textAlign: 'center', lineHeight: 21, marginBottom: 24 },
+  emptyBtn: { paddingVertical: 14, paddingHorizontal: 28, borderRadius: 12, shadowColor: P.terra, shadowOpacity: 0.3, shadowOffset: { width: 0, height: 4 }, shadowRadius: 10, elevation: 6 },
+  emptyBtnTxt: { fontSize: 15, fontWeight: '800', color: P.white },
 
   // ── Carte annonce ────────────────────────────────────────────────────────────
   card: {
@@ -614,70 +631,71 @@ const s = StyleSheet.create({
     elevation: 5,
   },
   cardImgWrap: { height: 170, backgroundColor: P.sand, position: 'relative' },
-  cardImg:     { width: '100%', height: '100%' },
+  cardImg: { width: '100%', height: '100%' },
 
-  statusBadge:    { position: 'absolute', top: 10, left: 10, flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 9, paddingVertical: 4, borderRadius: 8 },
-  statusDot:      { width: 6, height: 6, borderRadius: 3 },
+  statusBadge: { position: 'absolute', top: 10, left: 10, flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 9, paddingVertical: 4, borderRadius: 8 },
+  statusDot: { width: 6, height: 6, borderRadius: 3 },
   statusBadgeTxt: { fontSize: 11, fontWeight: '800', color: P.white },
 
-  typeBadge:    { position: 'absolute', top: 10, right: 10, paddingHorizontal: 9, paddingVertical: 4, borderRadius: 8 },
-  typeBadgeTxt: { fontSize: 10, fontWeight: '800', color: P.white },
-
-  cardPriceTag:    { position: 'absolute', bottom: 10, left: 10, backgroundColor: 'rgba(17,24,39,0.8)', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8 },
+  cardPriceTag: { position: 'absolute', bottom: 10, left: 10, backgroundColor: 'rgba(17,24,39,0.8)', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8 },
   cardPriceTagTxt: { fontSize: 12, fontWeight: '900', color: P.white },
 
-  cardBody:  { padding: 14 },
-  cardTitle: { fontSize: 15, fontWeight: '800', color: P.charcoal, lineHeight: 21, marginBottom: 10 },
+  cardBody: { paddingHorizontal: 14, paddingVertical: 12, gap: 8 },
+  cardTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  typeIconWrap: { width: 18, minWidth: 18, alignItems: 'center', justifyContent: 'center' },
+  typeIcon: { fontSize: 14 },
+  cardTitle: { flex: 1, fontSize: 15, fontWeight: '800', color: P.charcoal, lineHeight: 20 },
 
-  cardMeta:     { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 12 },
+  cardMeta: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 12 },
   cardMetaItem: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  cardMetaDot:  { fontSize: 6, color: P.terra },
+  cardMetaSep: { fontSize: 11, color: P.muted },
+  cardMetaKm: { fontSize: 11, color: P.muted, fontWeight: '600' },
   cardMetaIcon: { fontSize: 12 },
-  cardMetaTxt:  { fontSize: 12, color: P.muted, fontWeight: '500' },
+  cardMetaTxt: { fontSize: 12, color: P.muted, fontWeight: '500' },
 
   // Actions
   actionsRow: { flexDirection: 'row', gap: 8, alignItems: 'center' },
 
-  actionGhost:   { flex: 1, paddingVertical: 9, borderRadius: 10, alignItems: 'center', borderWidth: 1.5, borderColor: P.dim, backgroundColor: P.surface },
-  actionGhostTxt:{ fontSize: 12, fontWeight: '700', color: P.muted },
+  actionGhost: { flex: 1, paddingVertical: 9, borderRadius: 10, alignItems: 'center', borderWidth: 1.5, borderColor: P.dim, backgroundColor: P.surface },
+  actionGhostTxt: { fontSize: 12, fontWeight: '700', color: P.muted },
 
-  actionOutline:   { flex: 1.4, paddingVertical: 9, borderRadius: 10, alignItems: 'center', borderWidth: 1.5, borderColor: 'rgba(236,90,19,0.35)', backgroundColor: P.peachSoft },
-  actionOutlineTxt:{ fontSize: 12, fontWeight: '700', color: P.terra },
+  actionOutline: { flex: 1.4, paddingVertical: 9, borderRadius: 10, alignItems: 'center', borderWidth: 1.5, borderColor: 'rgba(236,90,19,0.35)', backgroundColor: P.peachSoft },
+  actionOutlineTxt: { fontSize: 12, fontWeight: '700', color: P.terra },
 
-  actionToggle:    { flex: 1.4, paddingVertical: 9, borderRadius: 10, alignItems: 'center' },
+  actionToggle: { flex: 1.4, paddingVertical: 9, borderRadius: 10, alignItems: 'center' },
   actionToggleOff: { backgroundColor: P.yellowSoft, borderWidth: 1.5, borderColor: 'rgba(245,158,11,0.3)' },
-  actionToggleOn:  { backgroundColor: P.successSoft, borderWidth: 1.5, borderColor: 'rgba(34,197,94,0.3)' },
+  actionToggleOn: { backgroundColor: P.successSoft, borderWidth: 1.5, borderColor: 'rgba(34,197,94,0.3)' },
   actionToggleTxt: { fontSize: 11, fontWeight: '700', color: P.charcoal },
 
-  actionDanger:    { width: 38, height: 38, borderRadius: 10, alignItems: 'center', justifyContent: 'center', backgroundColor: P.errorSoft, borderWidth: 1.5, borderColor: P.errorBorder },
+  actionDanger: { width: 38, height: 38, borderRadius: 10, alignItems: 'center', justifyContent: 'center', backgroundColor: P.errorSoft, borderWidth: 1.5, borderColor: P.errorBorder },
   actionDangerTxt: { fontSize: 14 },
 
   // ── Modal filtres ────────────────────────────────────────────────────────────
-  modalOverlay:   { flex: 1, backgroundColor: 'rgba(17,24,39,0.55)', justifyContent: 'flex-end' },
-  filterModal:    { backgroundColor: P.white, borderTopLeftRadius: 28, borderTopRightRadius: 28, padding: 20, paddingBottom: 36 },
-  filterModalHandle:{ width: 36, height: 4, borderRadius: 2, backgroundColor: P.dim, alignSelf: 'center', marginBottom: 16 },
-  filterModalHead:  { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(17,24,39,0.55)', justifyContent: 'flex-end' },
+  filterModal: { backgroundColor: P.white, borderTopLeftRadius: 28, borderTopRightRadius: 28, padding: 20, paddingBottom: 36 },
+  filterModalHandle: { width: 36, height: 4, borderRadius: 2, backgroundColor: P.dim, alignSelf: 'center', marginBottom: 16 },
+  filterModalHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
   filterModalTitle: { fontSize: 20, fontWeight: '900', color: P.charcoal },
   filterModalClose: { width: 32, height: 32, borderRadius: 16, backgroundColor: P.surface, alignItems: 'center', justifyContent: 'center' },
-  filterModalCloseTxt:{ fontSize: 14, color: P.muted, fontWeight: '700' },
+  filterModalCloseTxt: { fontSize: 14, color: P.muted, fontWeight: '700' },
   filterGroupLabel: { fontSize: 13, fontWeight: '700', color: P.brown, marginBottom: 10, marginTop: 16 },
-  filterChips:      { flexDirection: 'row', gap: 8 },
-  filterChip:       { flex: 1, paddingVertical: 11, borderRadius: 10, alignItems: 'center', backgroundColor: P.surface, borderWidth: 1.5, borderColor: P.dim },
+  filterChips: { flexDirection: 'row', gap: 8 },
+  filterChip: { flex: 1, paddingVertical: 11, borderRadius: 10, alignItems: 'center', backgroundColor: P.surface, borderWidth: 1.5, borderColor: P.dim },
   filterChipActive: { backgroundColor: P.peachSoft, borderColor: 'rgba(236,90,19,0.4)' },
-  filterChipTxt:    { fontSize: 13, fontWeight: '600', color: P.muted },
-  filterChipTxtActive:{ color: P.terra },
-  applyBtn:         { borderRadius: 14, marginTop: 24, overflow: 'hidden', shadowColor: P.terra, shadowOpacity: 0.3, shadowOffset: { width: 0, height: 4 }, shadowRadius: 10, elevation: 6 },
-  applyBtnTxt:      { fontSize: 15, fontWeight: '800', color: P.white, textAlign: 'center', paddingVertical: 15 },
+  filterChipTxt: { fontSize: 13, fontWeight: '600', color: P.muted },
+  filterChipTxtActive: { color: P.terra },
+  applyBtn: { borderRadius: 14, marginTop: 24, overflow: 'hidden', shadowColor: P.terra, shadowOpacity: 0.3, shadowOffset: { width: 0, height: 4 }, shadowRadius: 10, elevation: 6 },
+  applyBtnTxt: { fontSize: 15, fontWeight: '800', color: P.white, textAlign: 'center', paddingVertical: 15 },
 
   // ── Modal suppression ────────────────────────────────────────────────────────
-  deleteModal:        { backgroundColor: P.white, borderRadius: 24, padding: 28, marginHorizontal: 24, alignItems: 'center', shadowColor: P.charcoal, shadowOpacity: 0.2, shadowOffset: { width: 0, height: 10 }, shadowRadius: 30, elevation: 20 },
-  deleteModalIconWrap:{ width: 64, height: 64, borderRadius: 20, backgroundColor: P.errorSoft, alignItems: 'center', justifyContent: 'center', marginBottom: 16, borderWidth: 1.5, borderColor: P.errorBorder },
-  deleteModalIcon:    { fontSize: 28 },
-  deleteModalTitle:   { fontSize: 18, fontWeight: '900', color: P.charcoal, marginBottom: 8, textAlign: 'center' },
-  deleteModalSub:     { fontSize: 14, color: P.muted, textAlign: 'center', lineHeight: 21, marginBottom: 24 },
-  deleteModalBtns:    { flexDirection: 'row', gap: 12, width: '100%' },
-  deleteCancelBtn:    { flex: 1, paddingVertical: 14, borderRadius: 12, alignItems: 'center', backgroundColor: P.surface, borderWidth: 1.5, borderColor: P.dim },
+  deleteModal: { backgroundColor: P.white, borderRadius: 24, padding: 28, marginHorizontal: 24, alignItems: 'center', shadowColor: P.charcoal, shadowOpacity: 0.2, shadowOffset: { width: 0, height: 10 }, shadowRadius: 30, elevation: 20 },
+  deleteModalIconWrap: { width: 64, height: 64, borderRadius: 20, backgroundColor: P.errorSoft, alignItems: 'center', justifyContent: 'center', marginBottom: 16, borderWidth: 1.5, borderColor: P.errorBorder },
+  deleteModalIcon: { fontSize: 28 },
+  deleteModalTitle: { fontSize: 18, fontWeight: '900', color: P.charcoal, marginBottom: 8, textAlign: 'center' },
+  deleteModalSub: { fontSize: 14, color: P.muted, textAlign: 'center', lineHeight: 21, marginBottom: 24 },
+  deleteModalBtns: { flexDirection: 'row', gap: 12, width: '100%' },
+  deleteCancelBtn: { flex: 1, paddingVertical: 14, borderRadius: 12, alignItems: 'center', backgroundColor: P.surface, borderWidth: 1.5, borderColor: P.dim },
   deleteCancelBtnTxt: { fontSize: 15, fontWeight: '700', color: P.charcoal },
-  deleteConfirmBtn:   { flex: 1, paddingVertical: 14, borderRadius: 12, alignItems: 'center', backgroundColor: P.error, shadowColor: P.error, shadowOpacity: 0.3, shadowOffset: { width: 0, height: 4 }, shadowRadius: 10, elevation: 5 },
-  deleteConfirmBtnTxt:{ fontSize: 15, fontWeight: '800', color: P.white },
+  deleteConfirmBtn: { flex: 1, paddingVertical: 14, borderRadius: 12, alignItems: 'center', backgroundColor: P.error, shadowColor: P.error, shadowOpacity: 0.3, shadowOffset: { width: 0, height: 4 }, shadowRadius: 10, elevation: 5 },
+  deleteConfirmBtnTxt: { fontSize: 15, fontWeight: '800', color: P.white },
 });

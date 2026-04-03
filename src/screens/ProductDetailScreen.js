@@ -1,16 +1,18 @@
-﻿// ─── ProductDetailScreen v3 PREMIUM ─ MarketHub Niger ────────────────────────
+// ─── ProductDetailScreen v3 PREMIUM ─ MarketHub Niger ────────────────────────
 // Design irrésistible — sombre, impactant, cohérent avec l'app
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, Image, TouchableOpacity,
   Dimensions, StatusBar, Animated, Share, Linking, ActivityIndicator,
+  TextInput,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from 'expo-blur';
 import { apiClient } from '../api/auth';
 import { checkFavorite, toggleFavorite } from '../api/favorites';
+import { createReview, getProductReviews, markReviewHelpful } from '../api/reviews';
 import { useAuth } from '../contexts/AuthContext';
 import AlertModal from '../components/AlertModal';
 import { MOBILE_COLORS as P } from '../theme/colors';
@@ -25,6 +27,49 @@ const getInitials = (name) => {
   const p = name.trim().split(' ');
   return p.length >= 2 ? (p[0][0] + p[1][0]).toUpperCase() : name.substring(0, 2).toUpperCase();
 };
+
+const formatRelativeDate = (dateString) => {
+  if (!dateString) return 'Récemment';
+  const date = new Date(dateString);
+  const now = new Date();
+  const diffMs = now - date;
+  const minutes = Math.floor(diffMs / 60000);
+  const hours = Math.floor(diffMs / 3600000);
+  const days = Math.floor(diffMs / 86400000);
+
+  if (minutes < 1) return 'À l\'instant';
+  if (minutes < 60) return `Il y a ${minutes} min`;
+  if (hours < 24) return `Il y a ${hours}h`;
+  if (days < 7) return `Il y a ${days}j`;
+  return date.toLocaleDateString('fr-FR');
+};
+
+
+
+// Theme Config dynamique — bleu service identique au web (blue-600 = #2563EB)
+const getThemeConfig = (isService) => ({
+  typeBadge: { backgroundColor: 'rgba(37,99,235,0.9)' },
+  secBar: ['#2563EB', '#60A5FA'],
+  sellerAvatarGrad: ['#2563EB', '#1E40AF'],
+  sellerArrow: { backgroundColor: '#DBEAFE', borderColor: 'rgba(37,99,235,0.2)' },
+  sellerArrowTxt: { color: '#2563EB' },
+  meetupInner: { backgroundColor: '#DBEAFE', borderColor: 'rgba(37,99,235,0.18)' },
+  meetupAccent: { backgroundColor: '#2563EB' },
+  cBtnGrad: ['#2563EB', '#1E40AF'],
+  cBtnMain: { shadowColor: '#2563EB', shadowOpacity: 0.42, elevation: 10 },
+  priceAccentColors: ['transparent', '#2563EB', 'transparent'],
+  heroLocRow: { backgroundColor: '#EFF6FF', borderWidth: 1, borderColor: 'rgba(37,99,235,0.14)' },
+  heroLocRowProduct: { backgroundColor: 'rgba(236,90,19,0.08)', borderWidth: 1, borderColor: 'rgba(236,90,19,0.14)' },
+  heroLocDot: { color: '#2563EB' },
+  heroLocDotProduct: { color: P.terra },
+  heroLocTxt: { color: '#1E40AF' },
+  heroLocTxtProduct: { color: P.terra },
+  priceAmount: { color: '#2563EB' },
+  loadLogoBox: { shadowColor: '#2563EB' },
+  loadRing: { borderColor: 'rgba(37,99,235,0.28)' },
+  notFoundBtn: { shadowColor: '#2563EB' },
+  headerBg: { borderBottomColor: 'rgba(37,99,235,0.2)' },
+});
 
 // ─── SPRING PRESS HOOK ────────────────────────────────────────────────────────
 function useSpringPress() {
@@ -104,11 +149,12 @@ function ImageCarousel({ images }) {
 // ─────────────────────────────────────────────────────────────────────────────
 // SECTION avec accent orange latéral
 // ─────────────────────────────────────────────────────────────────────────────
-function Section({ title, children, dark }) {
+function Section({ title, children, dark, isService }) {
+  const d = getThemeConfig(isService);
   return (
     <View style={[s.section, dark && s.sectionDark]}>
       <View style={s.secHeadRow}>
-        <LinearGradient colors={[P.orange500, P.orange300]} style={s.secBar} />
+        <LinearGradient colors={isService ? d.secBar : [P.orange500, P.orange300]} style={s.secBar} />
         <Text style={[s.secTitle, dark && s.secTitleDark]}>{title}</Text>
       </View>
       {children}
@@ -138,7 +184,8 @@ function SpecTable({ rows, dark }) {
 // ─────────────────────────────────────────────────────────────────────────────
 // VENDEUR CARD — premium dark
 // ─────────────────────────────────────────────────────────────────────────────
-function SellerCard({ seller, onPress }) {
+function SellerCard({ seller, onPress, isService }) {
+  const d = getThemeConfig(isService);
   const { scale, onPressIn, onPressOut } = useSpringPress();
 
   return (
@@ -150,7 +197,7 @@ function SellerCard({ seller, onPress }) {
           {seller.avatar
             ? <Image source={{ uri: seller.avatar }} style={s.sellerAvatar} />
             : (
-              <LinearGradient colors={[P.orange500, P.orange700]} style={s.sellerAvatar}>
+              <LinearGradient colors={isService ? d.sellerAvatarGrad : [P.orange500, P.orange700]} style={s.sellerAvatar}>
                 <Text style={s.sellerInitials}>{getInitials(seller.name)}</Text>
               </LinearGradient>
             )
@@ -175,8 +222,8 @@ function SellerCard({ seller, onPress }) {
         </View>
 
         {/* Flèche */}
-        <View style={s.sellerArrow}>
-          <Text style={s.sellerArrowTxt}>→</Text>
+        <View style={[s.sellerArrow, isService && d.sellerArrow]}>
+          <Text style={[s.sellerArrowTxt, isService && d.sellerArrowTxt]}>→</Text>
         </View>
 
       </Animated.View>
@@ -187,7 +234,8 @@ function SellerCard({ seller, onPress }) {
 // ─────────────────────────────────────────────────────────────────────────────
 // BOUTON CONTACT
 // ─────────────────────────────────────────────────────────────────────────────
-function ContactBtn({ icon, label, onPress, variant = 'ghost' }) {
+function ContactBtn({ icon, label, onPress, variant = 'ghost', isService }) {
+  const d = getThemeConfig(isService);
   const { scale, onPressIn, onPressOut } = useSpringPress();
   const isMain     = variant === 'main';
   const isWA       = variant === 'whatsapp';
@@ -195,9 +243,9 @@ function ContactBtn({ icon, label, onPress, variant = 'ghost' }) {
 
   return (
     <TouchableOpacity activeOpacity={1} onPress={onPress} onPressIn={onPressIn} onPressOut={onPressOut}>
-      <Animated.View style={[s.cBtn, isMain && s.cBtnMain, isWA && s.cBtnWA, isCall && s.cBtnCall, { transform: [{ scale }] }]}>
+      <Animated.View style={[s.cBtn, isMain && s.cBtnMain, isMain && isService && d.cBtnMain, isWA && s.cBtnWA, isCall && s.cBtnCall, { transform: [{ scale }] }]}>
         {isMain ? (
-          <LinearGradient colors={[P.orange500, P.orange700]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={s.cBtnGrad}>
+          <LinearGradient colors={isService ? d.sellerAvatarGrad : [P.orange500, P.orange700]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={s.cBtnGrad}>
             <Text style={s.cBtnIconMain}>{icon}</Text>
             <Text style={s.cBtnLabelMain}>{label}</Text>
           </LinearGradient>
@@ -217,8 +265,9 @@ function ContactBtn({ icon, label, onPress, variant = 'ghost' }) {
 // ─────────────────────────────────────────────────────────────────────────────
 export default function ProductDetailScreen({ route, navigation }) {
   const insets = useSafeAreaInsets();
-  const { user } = useAuth();
-  const { productId } = route.params;
+  const { user, isAuthenticated } = useAuth();
+  const productId = String(route?.params?.productId || '').trim();
+  const isValidProductId = /^[a-fA-F0-9]{24}$/.test(productId);
 
   const [product,    setProduct]    = useState(null);
   const [loading,    setLoading]    = useState(true);
@@ -231,6 +280,9 @@ export default function ProductDetailScreen({ route, navigation }) {
     buttons: [{ text: 'OK', onPress: () => {} }],
   });
 
+  const isService = product?.type === 'service';
+  const d = getThemeConfig(isService);
+
   // Scroll → header opacity
   const scrollY = useRef(new Animated.Value(0)).current;
   const headerOpacity = scrollY.interpolate({
@@ -240,7 +292,12 @@ export default function ProductDetailScreen({ route, navigation }) {
   });
 
   // Animations d'entrée staggerées
-  const enters = useRef(Array.from({ length: 7 }, () => new Animated.Value(0))).current;
+  const enters = useRef(Array.from({ length: 8 }, () => new Animated.Value(0))).current;
+  const [reviews, setReviews] = useState([]);
+  const [loadingReviews, setLoadingReviews] = useState(false);
+  const [submittingReview, setSubmittingReview] = useState(false);
+  const [reviewRating, setReviewRating] = useState(0);
+  const [reviewComment, setReviewComment] = useState('');
 
   const runEntrance = useCallback(() => {
     Animated.stagger(70,
@@ -249,21 +306,161 @@ export default function ProductDetailScreen({ route, navigation }) {
   }, []);
 
   const fetchProduct = async () => {
+    if (!isValidProductId) {
+      setLoading(false);
+      setProduct(null);
+      return;
+    }
+
     try {
       const res = await apiClient.get(`/products/${productId}`);
       setProduct(res.data.data || res.data);
-      const isFav = await checkFavorite(productId);
-      setIsFavorite(isFav);
-    } catch (e) { console.error(e); }
+      if (isAuthenticated) {
+        try {
+          const isFav = await checkFavorite(productId);
+          setIsFavorite(isFav);
+        } catch (err) {
+          console.error('Erreur checkFavorite:', err.message);
+        }
+      }
+    } catch (e) {
+      console.error(e);
+    }
     finally {
       setLoading(false);
       setTimeout(runEntrance, 80);
     }
   };
 
-  useEffect(() => { fetchProduct(); }, [productId]);
+  const fetchReviews = async () => {
+    if (!isValidProductId) {
+      setReviews([]);
+      return;
+    }
+
+    try {
+      setLoadingReviews(true);
+      const response = await getProductReviews(productId, 1, 5);
+      setReviews(response?.data || []);
+    } catch (error) {
+      console.error('❌ Erreur chargement avis:', error?.message || error);
+      setReviews([]);
+    } finally {
+      setLoadingReviews(false);
+    }
+  };
+
+  useEffect(() => { fetchProduct(); }, [productId, isValidProductId]);
+  useEffect(() => { fetchReviews(); }, [productId, isValidProductId]);
+
+  const handleMarkHelpful = async (reviewId) => {
+    try {
+      await markReviewHelpful(reviewId);
+      await fetchReviews();
+    } catch (error) {
+      console.error('❌ Erreur avis utile:', error?.message || error);
+    }
+  };
+
+  const handleSubmitReview = async () => {
+    if (!isValidProductId) {
+      setAlert({
+        visible: true,
+        type: 'error',
+        title: 'Annonce indisponible',
+        message: 'Identifiant produit invalide. Veuillez rouvrir cette annonce.',
+        buttons: [{ text: 'Fermer', onPress: () => {} }],
+      });
+      return;
+    }
+
+    if (!isAuthenticated) {
+      navigation.navigate('QuickAuth', {
+        pendingAction: { type: 'review', productId },
+        returnScreen: 'ProductDetail',
+        returnParams: { productId },
+      });
+      return;
+    }
+
+    const sellerId = String(product?.seller?.id || product?.seller?._id || '');
+    const currentUserId = String(user?.id || '');
+    if (sellerId && currentUserId && sellerId === currentUserId) {
+      setAlert({
+        visible: true,
+        type: 'warning',
+        title: 'Action impossible',
+        message: 'Vous ne pouvez pas évaluer votre propre annonce.',
+        buttons: [{ text: 'Fermer', onPress: () => {} }],
+      });
+      return;
+    }
+
+    if (!reviewRating || !reviewComment.trim()) {
+      setAlert({
+        visible: true,
+        type: 'warning',
+        title: 'Avis incomplet',
+        message: 'Choisissez une note et écrivez un commentaire.',
+        buttons: [{ text: 'Fermer', onPress: () => {} }],
+      });
+      return;
+    }
+
+    if (reviewComment.trim().length > 1000) {
+      setAlert({
+        visible: true,
+        type: 'warning',
+        title: 'Commentaire trop long',
+        message: 'Le commentaire ne peut pas dépasser 1000 caractères.',
+        buttons: [{ text: 'Fermer', onPress: () => {} }],
+      });
+      return;
+    }
+
+    try {
+      setSubmittingReview(true);
+      await createReview({
+        productId,
+        rating: reviewRating,
+        comment: reviewComment.trim(),
+      });
+
+      setReviewRating(0);
+      setReviewComment('');
+      await Promise.all([fetchReviews(), fetchProduct()]);
+
+      setAlert({
+        visible: true,
+        type: 'success',
+        title: 'Merci',
+        message: 'Votre avis a été publié avec succès.',
+        buttons: [{ text: 'OK', onPress: () => {} }],
+      });
+    } catch (error) {
+      setAlert({
+        visible: true,
+        type: 'error',
+        title: 'Erreur',
+        message: error?.message || 'Impossible de publier votre avis.',
+        buttons: [{ text: 'Fermer', onPress: () => {} }],
+      });
+    } finally {
+      setSubmittingReview(false);
+    }
+  };
 
   const handleToggleFavorite = async () => {
+    if (!isValidProductId) return;
+
+    if (!isAuthenticated) {
+      navigation.navigate('QuickAuth', {
+        pendingAction: { type: 'favorite', productId },
+        returnScreen: 'ProductDetail',
+        returnParams: { productId },
+      });
+      return;
+    }
     try {
       await toggleFavorite(productId, isFavorite);
       setIsFavorite(!isFavorite);
@@ -283,6 +480,16 @@ export default function ProductDetailScreen({ route, navigation }) {
     if (type === 'call' && (seller.contactInfo?.phone || seller.phone))
       Linking.openURL(`tel:${seller.contactInfo?.phone || seller.phone}`);
     if (type === 'message') {
+      if (!isValidProductId) return;
+
+      if (!isAuthenticated) {
+        navigation.navigate('QuickAuth', {
+          pendingAction: { type: 'message', sellerId: seller.id || seller._id, productId },
+          returnScreen: 'ProductDetail',
+          returnParams: { productId },
+        });
+        return;
+      }
       const sellerId = seller.id || seller._id;
       if (!sellerId) return;
 
@@ -319,14 +526,14 @@ export default function ProductDetailScreen({ route, navigation }) {
       <LinearGradient colors={[P.charcoal, '#0d1420']} style={s.loadScreen}>
         <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
         <View style={s.loadRingWrap}>
-          <LinearGradient colors={[P.orange500, P.orange700]} style={s.loadLogoBox}>
+          <LinearGradient colors={isService ? d.sellerAvatarGrad : [P.orange500, P.orange700]} style={[s.loadLogoBox, isService && d.loadLogoBox]}>
             <Text style={s.loadLogoTxt}>M</Text>
           </LinearGradient>
-          <View style={s.loadRing} />
+          <View style={[s.loadRing, isService && d.loadRing]} />
         </View>
         <Text style={s.loadBrand}>MarketHub</Text>
         <Text style={s.loadSub}>Chargement de l'annonce…</Text>
-        <ActivityIndicator size="large" color={P.amber} style={{ marginTop: 36 }} />
+        <ActivityIndicator size="large" color={isService ? P.blue100 : P.amber} style={{ marginTop: 36 }} />
       </LinearGradient>
     );
   }
@@ -340,7 +547,7 @@ export default function ProductDetailScreen({ route, navigation }) {
         <Text style={s.notFoundTitle}>Annonce introuvable</Text>
         <Text style={s.notFoundSub}>Cette annonce a peut-être été supprimée.</Text>
         <TouchableOpacity style={s.notFoundBtn} onPress={() => navigation.goBack()} activeOpacity={0.85}>
-          <LinearGradient colors={[P.orange500, P.orange700]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={s.notFoundBtnGrad}>
+          <LinearGradient colors={isService ? d.sellerAvatarGrad : [P.orange500, P.orange700]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={[s.notFoundBtnGrad, isService && d.notFoundBtn]}>
             <Text style={s.notFoundBtnTxt}>← Retourner</Text>
           </LinearGradient>
         </TouchableOpacity>
@@ -349,7 +556,6 @@ export default function ProductDetailScreen({ route, navigation }) {
   }
 
   // Préparer les données
-  const isService = product.type === 'service';
   const images = product.images?.filter(Boolean).length > 0
     ? product.images
     : [product.mainImage].filter(Boolean);
@@ -357,7 +563,7 @@ export default function ProductDetailScreen({ route, navigation }) {
 
   const specRows = [
     { label: 'Type',        value: isService ? 'Service' : 'Produit' },
-    product.condition && {
+    !isService && product.condition && {
       label: 'État',
       value: product.condition === 'new' ? '✨ Neuf' : product.condition === 'used' ? '🔄 Occasion' : '🔧 Reconditionné',
     },
@@ -378,7 +584,7 @@ export default function ProductDetailScreen({ route, navigation }) {
       {/* ══ HEADER FLOTTANT ══════════════════════════════════════════════ */}
       <View style={[s.header, { paddingTop: (insets.top || 0) + 8 }]} pointerEvents="box-none">
         {/* Fond qui apparaît au scroll */}
-        <Animated.View style={[StyleSheet.absoluteFill, s.headerBg, { opacity: headerOpacity }]} />
+        <Animated.View style={[StyleSheet.absoluteFill, s.headerBg, isService && d.headerBg, { opacity: headerOpacity }]} />
 
         {/* Bouton retour */}
         <TouchableOpacity style={s.hBtn} onPress={() => navigation.goBack()} activeOpacity={0.85}>
@@ -433,7 +639,7 @@ export default function ProductDetailScreen({ route, navigation }) {
           },
         ]}>
           {/* Badge type */}
-          <View style={[s.typeBadge, { backgroundColor: isService ? 'rgba(236,90,19,0.9)' : 'rgba(245,158,11,0.9)' }]}>
+          <View style={[s.typeBadge, { backgroundColor: isService ? 'rgba(59,130,246,0.9)' : 'rgba(236,90,19,0.9)' }]}>
             <Text style={s.typeBadgeTxt}>{isService ? '🛠 Service' : '📦 Produit'}</Text>
           </View>
 
@@ -441,9 +647,9 @@ export default function ProductDetailScreen({ route, navigation }) {
 
           {/* Localisation + date */}
           <View style={s.heroMeta}>
-            <View style={s.heroLocRow}>
-              <Text style={s.heroLocDot}>●</Text>
-              <Text style={s.heroLocTxt}>{getCityName(product.location)}</Text>
+            <View style={[s.heroLocRow, isService ? d.heroLocRow : d.heroLocRowProduct]}>
+              <Text style={[s.heroLocDot, isService ? d.heroLocDot : d.heroLocDotProduct]}>●</Text>
+              <Text style={[s.heroLocTxt, isService ? d.heroLocTxt : d.heroLocTxtProduct]}>{getCityName(product.location)}</Text>
             </View>
             <Text style={s.heroDate}>Publié le {postDate}</Text>
           </View>
@@ -462,7 +668,7 @@ export default function ProductDetailScreen({ route, navigation }) {
               <Text style={s.priceMeta}>Prix demandé</Text>
               {product.price ? (
                 <View style={s.priceAmountRow}>
-                  <Text style={s.priceAmount}>{parseInt(product.price).toLocaleString('fr-FR')}</Text>
+                  <Text style={[s.priceAmount, isService && d.priceAmount]}>{parseInt(product.price).toLocaleString('fr-FR')}</Text>
                   <Text style={s.priceCurrency}> FCFA</Text>
                 </View>
               ) : (
@@ -485,7 +691,7 @@ export default function ProductDetailScreen({ route, navigation }) {
 
           {/* Ligne accent */}
           <LinearGradient
-            colors={['transparent', P.terra, 'transparent']}
+            colors={isService ? d.priceAccentColors : ['transparent', P.terra, 'transparent']}
             start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
             style={s.priceAccentLine}
           />
@@ -497,10 +703,11 @@ export default function ProductDetailScreen({ route, navigation }) {
             opacity: enters[2],
             transform: [{ translateY: enters[2].interpolate({ inputRange: [0, 1], outputRange: [20, 0] }) }],
           }}>
-            <Section title="Annonceur">
+            <Section title="Annonceur" isService={isService}>
               <SellerCard
                 seller={product.seller}
                 onPress={() => navigation.navigate('SellerProfile', { sellerId: product.seller.id })}
+                isService={isService}
               />
             </Section>
           </Animated.View>
@@ -511,7 +718,7 @@ export default function ProductDetailScreen({ route, navigation }) {
           opacity: enters[3],
           transform: [{ translateY: enters[3].interpolate({ inputRange: [0, 1], outputRange: [20, 0] }) }],
         }}>
-          <Section title="Description">
+          <Section title="Description" isService={isService}>
             <View style={s.descCard}>
               <Text style={s.descText}>{product.description}</Text>
             </View>
@@ -523,7 +730,7 @@ export default function ProductDetailScreen({ route, navigation }) {
           opacity: enters[4],
           transform: [{ translateY: enters[4].interpolate({ inputRange: [0, 1], outputRange: [20, 0] }) }],
         }}>
-          <Section title="Détails">
+          <Section title="Détails" isService={isService}>
             <SpecTable rows={specRows} />
           </Section>
         </Animated.View>
@@ -534,7 +741,7 @@ export default function ProductDetailScreen({ route, navigation }) {
             opacity: enters[5],
             transform: [{ translateY: enters[5].interpolate({ inputRange: [0, 1], outputRange: [20, 0] }) }],
           }}>
-            <Section title="Caractéristiques">
+            <Section title="Caractéristiques" isService={isService}>
               <SpecTable rows={Object.entries(product.specifications).map(([k, v]) => ({ label: k, value: v }))} />
             </Section>
           </Animated.View>
@@ -546,7 +753,7 @@ export default function ProductDetailScreen({ route, navigation }) {
             opacity: enters[5],
             transform: [{ translateY: enters[5].interpolate({ inputRange: [0, 1], outputRange: [20, 0] }) }],
           }}>
-            <Section title="Disponibilité">
+            <Section title="Disponibilité" isService={isService}>
               <View style={s.availCard}>
                 {product.availability.days?.length > 0 && (
                   <View style={s.availRow}>
@@ -565,17 +772,125 @@ export default function ProductDetailScreen({ route, navigation }) {
           </Animated.View>
         )}
 
+        {/* ── AVIS / ÉVALUATIONS ───────────────────────────────────────── */}
+        <Animated.View style={{
+          opacity: enters[6],
+          transform: [{ translateY: enters[6].interpolate({ inputRange: [0, 1], outputRange: [20, 0] }) }],
+        }}>
+          <Section title="Avis & évaluations" isService={isService}>
+            <View style={s.reviewHeaderCard}>
+              <View style={s.reviewHeaderLeft}>
+                <Text style={s.reviewHeaderScore}>{(product.rating || 0).toFixed(1)}</Text>
+                <Text style={s.reviewHeaderCount}>{product.totalReviews || 0} avis</Text>
+              </View>
+              <View style={s.reviewHeaderRight}>
+                <Text style={s.reviewHeaderStars}>{'★'.repeat(Math.round(product.rating || 0)) || '☆☆☆☆☆'}</Text>
+                <Text style={s.reviewHeaderSub}>Ce que pensent les clients de cet annonceur</Text>
+              </View>
+            </View>
+
+            <View style={s.reviewFormCard}>
+              <Text style={s.reviewFormTitle}>Donnez votre note</Text>
+              <View style={s.reviewStarsRow}>
+                {[1, 2, 3, 4, 5].map((star) => (
+                  <TouchableOpacity
+                    key={star}
+                    onPress={() => setReviewRating(star)}
+                    disabled={submittingReview}
+                    style={s.reviewStarBtn}
+                  >
+                    <Text style={[s.reviewStar, star <= reviewRating && s.reviewStarActive]}>★</Text>
+                  </TouchableOpacity>
+                ))}
+                {reviewRating > 0 && <Text style={s.reviewStarLabel}>{reviewRating}/5</Text>}
+              </View>
+
+              <TextInput
+                value={reviewComment}
+                onChangeText={setReviewComment}
+                placeholder="Partagez votre expérience avec cet annonceur..."
+                placeholderTextColor={P.muted}
+                multiline
+                maxLength={1000}
+                editable={!submittingReview}
+                style={s.reviewInput}
+              />
+              <Text style={s.reviewCounter}>{reviewComment.length}/1000</Text>
+
+              <TouchableOpacity
+                activeOpacity={0.88}
+                onPress={handleSubmitReview}
+                disabled={submittingReview}
+                style={[s.reviewSubmitBtn, submittingReview && s.reviewSubmitBtnDisabled]}
+              >
+                <LinearGradient
+                  colors={isService ? d.sellerAvatarGrad : [P.orange500, P.orange700]}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 0 }}
+                  style={s.reviewSubmitBtnGrad}
+                >
+                  {submittingReview ? (
+                    <ActivityIndicator size="small" color={P.white} />
+                  ) : (
+                    <Text style={s.reviewSubmitBtnTxt}>Publier mon avis</Text>
+                  )}
+                </LinearGradient>
+              </TouchableOpacity>
+            </View>
+
+            {loadingReviews ? (
+              <View style={s.reviewLoadingWrap}>
+                <ActivityIndicator size="small" color={isService ? P.blue100 : P.terra} />
+                <Text style={s.reviewLoadingTxt}>Chargement des avis...</Text>
+              </View>
+            ) : reviews.length > 0 ? (
+              <View style={s.reviewListWrap}>
+                <Text style={s.reviewListTitle}>Avis récents</Text>
+                {reviews.slice(0, 5).map((review) => (
+                  <View key={review.id} style={s.reviewItemCard}>
+                    <View style={s.reviewItemHead}>
+                      <View style={s.reviewUserWrap}>
+                        {review.userAvatar ? (
+                          <Image source={{ uri: review.userAvatar }} style={s.reviewAvatarImg} />
+                        ) : (
+                          <View style={s.reviewAvatar}>
+                            <Text style={s.reviewAvatarTxt}>{getInitials(review.userName)}</Text>
+                          </View>
+                        )}
+                        <View style={{ flex: 1 }}>
+                          <Text style={s.reviewItemUser} numberOfLines={1}>{review.userName}</Text>
+                          <Text style={s.reviewItemDate}>{formatRelativeDate(review.date)}</Text>
+                        </View>
+                        <Text style={s.reviewItemStars}>{'★'.repeat(review.rating)}{'☆'.repeat(5 - review.rating)}</Text>
+                      </View>
+                    </View>
+                    <Text style={s.reviewItemComment} numberOfLines={2}>{review.comment}</Text>
+                    <TouchableOpacity onPress={() => handleMarkHelpful(review.id)} style={s.reviewHelpfulBtn}>
+                      <Text style={s.reviewHelpfulTxt}>👍 Utile{review.helpful > 0 ? ` (${review.helpful})` : ''}</Text>
+                    </TouchableOpacity>
+                  </View>
+                ))}
+              </View>
+            ) : (
+              <View style={s.reviewEmptyCard}>
+                <Text style={s.reviewEmptyTitle}>Aucun avis pour le moment</Text>
+                <Text style={s.reviewEmptyTxt}>Soyez le premier à évaluer cet annonceur.</Text>
+              </View>
+            )}
+          </Section>
+        </Animated.View>
+
         {/* ── NOTE MISE EN RELATION ────────────────────────────────────── */}
         <Animated.View style={[
           s.meetupNote,
           {
-            opacity: enters[6],
-            transform: [{ translateY: enters[6].interpolate({ inputRange: [0, 1], outputRange: [16, 0] }) }],
+            opacity: enters[7],
+            transform: [{ translateY: enters[7].interpolate({ inputRange: [0, 1], outputRange: [16, 0] }) }],
           },
         ]}>
-          <View style={s.meetupInner}>
+          <View style={[s.meetupInner, isService && d.meetupInner]}>
             {/* Accent bar gauche */}
-            <View style={s.meetupAccent} />
+            <View style={[s.meetupAccent, isService && d.meetupAccent]} />
             <Text style={s.meetupIcon}>🤝</Text>
             <View style={{ flex: 1 }}>
               <Text style={s.meetupTitle}>Mise en relation directe</Text>
@@ -595,7 +910,7 @@ export default function ProductDetailScreen({ route, navigation }) {
           pointerEvents="none"
         />
         <View style={s.footerContent}>
-          <ContactBtn icon="✉️" label="Envoyer un message" variant="main" onPress={() => handleContact('message')} />
+          <ContactBtn icon="✉️" label="Envoyer un message" variant="main" onPress={() => handleContact('message')} isService={isService} />
         </View>
       </View>
 
@@ -672,7 +987,7 @@ const s = StyleSheet.create({
   typeBadgeTxt: { fontSize: 11, fontWeight: '900', color: P.white },
   heroTitle:    { fontSize: 22, fontWeight: '900', color: P.charcoal, lineHeight: 30, marginBottom: 14, letterSpacing: -0.5 },
   heroMeta:     { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  heroLocRow:   { flexDirection: 'row', alignItems: 'center', gap: 5 },
+  heroLocRow:   { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 999 },
   heroLocDot:   { fontSize: 7, color: P.terra },
   heroLocTxt:   { fontSize: 13, fontWeight: '700', color: P.terra },
   heroDate:     { fontSize: 11, color: P.muted, fontWeight: '500' },
@@ -738,6 +1053,49 @@ const s = StyleSheet.create({
   availRow:  { flexDirection: 'row', alignItems: 'center', gap: 12 },
   availIcon: { fontSize: 18 },
   availTxt:  { fontSize: 14, fontWeight: '600', color: P.charcoal },
+
+  // ── Avis ─────────────────────────────────────────────────────────────────
+  reviewHeaderCard: { backgroundColor: P.surface, borderRadius: 16, borderWidth: 1, borderColor: P.dim, padding: 14, marginBottom: 12, flexDirection: 'row', alignItems: 'center', gap: 14 },
+  reviewHeaderLeft: { minWidth: 74, alignItems: 'center', justifyContent: 'center', paddingVertical: 6, borderRightWidth: 1, borderRightColor: P.dim, paddingRight: 14 },
+  reviewHeaderRight: { flex: 1 },
+  reviewHeaderScore: { fontSize: 30, fontWeight: '900', color: P.charcoal, lineHeight: 34 },
+  reviewHeaderStars: { fontSize: 17, color: P.gold, letterSpacing: 1 },
+  reviewHeaderCount: { fontSize: 12, color: P.muted, marginTop: 2, fontWeight: '700' },
+  reviewHeaderSub: { fontSize: 12, color: P.muted, marginTop: 4, lineHeight: 17 },
+
+  reviewFormCard: { backgroundColor: P.surface, borderRadius: 16, borderWidth: 1, borderColor: P.dim, padding: 14, marginBottom: 12 },
+  reviewFormTitle: { fontSize: 14, fontWeight: '800', color: P.charcoal, marginBottom: 10 },
+  reviewStarsRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 10 },
+  reviewStarBtn: { marginRight: 6 },
+  reviewStar: { fontSize: 30, color: '#d1d5db' },
+  reviewStarActive: { color: P.gold },
+  reviewStarLabel: { marginLeft: 4, fontSize: 12, fontWeight: '700', color: P.muted },
+  reviewInput: { minHeight: 98, textAlignVertical: 'top', borderWidth: 1, borderColor: P.dim, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10, fontSize: 14, color: P.charcoal, backgroundColor: P.white },
+  reviewCounter: { alignSelf: 'flex-end', marginTop: 6, fontSize: 11, color: P.muted },
+  reviewSubmitBtn: { borderRadius: 12, overflow: 'hidden', marginTop: 10 },
+  reviewSubmitBtnDisabled: { opacity: 0.7 },
+  reviewSubmitBtnGrad: { paddingVertical: 13, alignItems: 'center', justifyContent: 'center' },
+  reviewSubmitBtnTxt: { fontSize: 14, fontWeight: '800', color: P.white },
+
+  reviewLoadingWrap: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 8 },
+  reviewLoadingTxt: { fontSize: 12, color: P.muted },
+  reviewListWrap: { gap: 8 },
+  reviewListTitle: { fontSize: 13, fontWeight: '800', color: P.charcoal },
+  reviewItemCard: { width: '100%', backgroundColor: P.surface, borderWidth: 1, borderColor: P.dim, borderRadius: 12, padding: 10 },
+  reviewItemHead: { marginBottom: 4 },
+  reviewUserWrap: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  reviewAvatar: { width: 32, height: 32, borderRadius: 16, backgroundColor: P.peachSoft, alignItems: 'center', justifyContent: 'center' },
+  reviewAvatarImg: { width: 32, height: 32, borderRadius: 16, backgroundColor: '#e5e7eb' },
+  reviewAvatarTxt: { fontSize: 12, fontWeight: '900', color: P.terra },
+  reviewItemUser: { fontSize: 13, fontWeight: '800', color: P.charcoal },
+  reviewItemDate: { fontSize: 11, color: P.muted, marginTop: 1 },
+  reviewItemStars: { fontSize: 12, color: P.gold },
+  reviewItemComment: { fontSize: 12.5, color: P.charcoal, lineHeight: 18 },
+  reviewHelpfulBtn: { alignSelf: 'flex-end', marginTop: 6, paddingVertical: 2, paddingHorizontal: 8, borderRadius: 999, backgroundColor: P.white, borderWidth: 1, borderColor: P.dim },
+  reviewHelpfulTxt: { fontSize: 11, color: P.muted, fontWeight: '700' },
+  reviewEmptyCard: { backgroundColor: P.surface, borderWidth: 1, borderColor: P.dim, borderRadius: 12, padding: 14 },
+  reviewEmptyTitle: { fontSize: 13, fontWeight: '800', color: P.charcoal, marginBottom: 4 },
+  reviewEmptyTxt: { fontSize: 12, color: P.muted, lineHeight: 18 },
 
   // ── Note mise en relation ─────────────────────────────────────────────────
   meetupNote:   { marginHorizontal: 16, marginTop: 12, borderRadius: 18, overflow: 'hidden' },

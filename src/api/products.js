@@ -41,10 +41,16 @@ export const imagesToBase64 = async (uris) => {
  */
 export const createProduct = async (productData) => {
   try {
-    const response = await api.post('/products', productData);
+    const response = await api.post('/products', productData, { timeout: 180000 });
     return response.data;
   } catch (error) {
     console.error('❌ Erreur création produit:', error);
+    if (error.code === 'ECONNABORTED') {
+      throw new Error('Le serveur prend trop de temps a repondre. Verifiez votre connexion puis reessayez.');
+    }
+    if (!error.response) {
+      throw new Error('Erreur reseau. La requete a peut-etre abouti cote serveur. Verifiez Mes annonces avant de reessayer.');
+    }
     throw new Error(
       error.response?.data?.message || 
       'Erreur lors de la création de l\'annonce'
@@ -96,10 +102,16 @@ export const getProductById = async (id) => {
  */
 export const updateProduct = async (id, productData) => {
   try {
-    const response = await api.put(`/products/${id}`, productData);
+    const response = await api.put(`/products/${id}`, productData, { timeout: 180000 });
     return response.data;
   } catch (error) {
     console.error('❌ Erreur mise à jour produit:', error);
+    if (error.code === 'ECONNABORTED') {
+      throw new Error('Le serveur prend trop de temps a repondre. Verifiez votre connexion puis reessayez.');
+    }
+    if (!error.response) {
+      throw new Error('Erreur reseau. La requete a peut-etre abouti cote serveur. Verifiez Mes annonces avant de reessayer.');
+    }
     throw new Error(
       error.response?.data?.message || 
       'Erreur lors de la mise à jour du produit'

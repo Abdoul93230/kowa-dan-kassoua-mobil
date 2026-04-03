@@ -8,18 +8,61 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
+import { Feather } from '@expo/vector-icons';
 import { apiClient } from '../api/auth';
 import { MOBILE_COLORS as P } from '../theme/colors';
 
 const { width } = Dimensions.get('window');
 
-// ─── PALETTE ──────────────────────────────────────────────────────────────────
+// ─── THEME CONFIG ─────────────────────────────────────────────────────────────
+const getThemeConfig = (isService) => {
+  if (isService) {
+    return {
+      typeBadge: P.terra,
+      priceAccent: '#2563EB',
+      priceAccentGrad: ['#2563EB', '#60A5FA'],
+    };
+  }
+  return {
+    typeBadge: P.amber,
+    priceAccent: P.terra,
+    priceAccentGrad: [P.terra, P.terraDark],
+  };
+};
 
-
-// Extraire le nom de la ville
+// ─── HELPERS ──────────────────────────────────────────────────────────────────
 const getCityName = (location) => {
-  if (!location) return '';
+  if (!location) return 'Niger';
   return location.split(',')[0].trim();
+};
+
+const getPostedLabel = (dateValue) => {
+  if (!dateValue) return 'Récent';
+  const date = new Date(dateValue);
+  if (Number.isNaN(date.getTime())) return 'Récent';
+
+  const diffMs = Date.now() - date.getTime();
+  const mins = Math.max(1, Math.floor(diffMs / 60000));
+  if (mins < 60) return `${mins} min`;
+
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours} h`;
+
+  const days = Math.floor(hours / 24);
+  if (days < 7) return `${days} j`;
+
+  const weeks = Math.floor(days / 7);
+  return `${weeks} sem`;
+};
+
+const getDistanceKm = (itemId) => {
+  const distances = [0.5, 1.2, 2.3, 3.5, 4.8, 5.1, 6.7, 8.2, 10.5];
+  if (typeof itemId === 'string') {
+    const hash = itemId.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+    return distances[hash % distances.length];
+  }
+  const n = Number(itemId) || 0;
+  return distances[Math.abs(n) % distances.length];
 };
 
 // Initiales du vendeur
@@ -30,73 +73,73 @@ const getInitials = (name) => {
   return name.substring(0, 2).toUpperCase();
 };
 
-// ─────────────────────────────────────────────────────────────────────────────
-// STAT CARD
-// ─────────────────────────────────────────────────────────────────────────────
-function StatCard({ value, label }) {
-  return (
-    <View style={s.statCard}>
-      <Text style={s.statValue}>{value}</Text>
-      <Text style={s.statLabel}>{label}</Text>
-    </View>
-  );
-}
 
 // ─────────────────────────────────────────────────────────────────────────────
-// PRODUCT CARD MINI
+// PRODUCT CARD (Harmonized with AnnounceCard from ProductsListScreen)
 // ─────────────────────────────────────────────────────────────────────────────
-function ProductCardMini({ item, onPress }) {
-  const scaleAnim = useRef(new Animated.Value(1)).current;
-
-  const handlePressIn = () => {
-    Animated.spring(scaleAnim, { toValue: 0.97, useNativeDriver: true, speed: 40 }).start();
-  };
-
-  const handlePressOut = () => {
-    Animated.spring(scaleAnim, { toValue: 1, useNativeDriver: true, speed: 40 }).start();
-  };
-
+function ProductCard({ item, onPress }) {
+  const sc = useRef(new Animated.Value(1)).current;
   const isService = item.type === 'service';
+  const d = getThemeConfig(isService);
+  const posted = getPostedLabel(item.createdAt || item.updatedAt);
+  const distance = getDistanceKm(item._id || item.id);
 
   return (
     <TouchableOpacity
       activeOpacity={1}
       onPress={onPress}
-      onPressIn={handlePressIn}
-      onPressOut={handlePressOut}
+      onPressIn={() => Animated.spring(sc, { toValue: 0.96, useNativeDriver: true, speed: 30 }).start()}
+      onPressOut={() => Animated.spring(sc, { toValue: 1, useNativeDriver: true, speed: 30 }).start()}
     >
-      <Animated.View style={[s.productCard, { transform: [{ scale: scaleAnim }] }]}>
-        {/* Image avec gradient overlay */}
-        <View style={s.productImgWrap}>
+      <Animated.View style={[s.card, { transform: [{ scale: sc }] }]}>
+
+        {/* Image */}
+        <View style={s.cardImgWrap}>
           <Image
-            source={{ uri: item.mainImage || item.images?.[0] || 'https://via.placeholder.com/200/F5E6C8/C1440E?text=Image' }}
-            style={s.productImg}
+            source={{ uri: item.images?.[0] || item.mainImage || 'https://via.placeholder.com/200x150/FFE9DE/EC5A13?text=MH' }}
+            style={s.cardImg}
             resizeMode="cover"
           />
-          {/* Gradient subtle sur l'image */}
-          <LinearGradient
-            colors={['transparent', 'rgba(17,24,39,0.26)']}
-            style={s.productImgOverlay}
-          />
-          {/* Badge type */}
-          <View style={[s.productTypeBadge, { backgroundColor: isService ? P.terra : P.amber }]}>
-            <Text style={s.productTypeIcon}>{isService ? '🛠' : '📦'}</Text>
+
+          {/* Time Badge */}
+          <View style={s.cardTimeBadge}>
+            <Feather name="clock" size={11} color={P.charcoal} />
+            <Text style={s.cardTimeTxt}>Il y a {posted}</Text>
+          </View>
+
+          {/* Fav Ghost */}
+          <View style={s.cardFavGhost}>
+            <Feather name="heart" size={14} color={d.priceAccent} />
           </View>
         </View>
 
-        {/* Info */}
-        <View style={s.productInfo}>
-          <Text style={s.productTitle} numberOfLines={2}>{item.title}</Text>
-          <Text style={s.productPrice}>
-            {item.price ? `${parseInt(item.price).toLocaleString()} FCFA` : 'Prix à discuter'}
-          </Text>
-          <View style={s.productMeta}>
-            <Text style={s.productLoc} numberOfLines={1}>📍 {getCityName(item.location)}</Text>
-            {item.views > 0 && (
-              <Text style={s.productViews}>👁 {item.views}</Text>
-            )}
+        {/* Content */}
+        <View style={s.cardBody}>
+          {/* Title Row with Type Glyph */}
+          <View style={s.cardTitleRow}>
+            <View style={s.cardTypeGlyphWrap}>
+              <Text style={s.cardTypeGlyph}>{isService ? '🛠️' : '📦'}</Text>
+            </View>
+            <Text style={s.cardTitle} numberOfLines={1}>{item.title}</Text>
+          </View>
+
+          {/* Location + Distance Meta */}
+          <View style={s.cardMetaRow}>
+            <Feather name="map-pin" size={11} color={d.priceAccent} />
+            <Text style={s.cardLoc} numberOfLines={1}>{getCityName(item.location)}</Text>
+            <Text style={s.cardMetaDot}>•</Text>
+            <Text style={s.cardMetaTail}>{distance.toFixed(1)} km</Text>
+          </View>
+
+          {/* Price Row */}
+          <View style={s.cardPriceRow}>
+            <View style={s.cardPriceSpacer} />
+            <Text style={[s.cardPriceTxt, { color: d.priceAccent }]}>
+              {item.price ? `${parseInt(item.price).toLocaleString('fr-FR')} FCFA` : 'À discuter'}
+            </Text>
           </View>
         </View>
+
       </Animated.View>
     </TouchableOpacity>
   );
@@ -169,7 +212,7 @@ export default function SellerProfileScreen({ route, navigation }) {
   if (loading) {
     return (
       <View style={{ flex: 1 }}>
-        <LinearGradient colors={[P.terra, P.amber]} style={s.loadScreen}>
+        <LinearGradient colors={[P.charcoal, P.brown]} style={s.loadScreen}>
           <View style={s.loadLogoBox}><Text style={s.loadLogoTxt}>M</Text></View>
           <Text style={s.loadBrand}>MarketHub</Text>
           <ActivityIndicator size="large" color={P.cream} style={{ marginTop: 24 }} />
@@ -223,7 +266,7 @@ export default function SellerProfileScreen({ route, navigation }) {
         data={filteredProducts}
         extraData={filteredProducts.length}
         renderItem={({ item }) => (
-          <ProductCardMini
+          <ProductCard
             item={item}
             onPress={() => navigation.navigate('ProductDetail', { productId: item.id })}
           />
@@ -234,59 +277,103 @@ export default function SellerProfileScreen({ route, navigation }) {
         contentContainerStyle={{ paddingBottom: Math.max(insets.bottom, 16) + 20 }}
         ListHeaderComponent={() => (
           <>
-            {/* ══════════════ HEADER HERO ═══════════════════════════════════════ */}
-            <LinearGradient colors={[P.orange700, P.orange500]} style={[s.hero, { paddingTop: insets.top + 66 }]}>
-              <Animated.View style={[s.heroContent, { opacity: fadeAnim }]}>
-                {/* Avatar */}
-                <View style={s.avatarWrap}>
-                  {seller.avatar ? (
-                    <Image source={{ uri: seller.avatar }} style={s.avatarImg} />
-                  ) : (
-                    <View style={s.avatarPlaceholder}>
-                      <Text style={s.avatarInitials}>{getInitials(seller.name)}</Text>
-                    </View>
-                  )}
-                  {seller.verified && (
-                    <View style={s.verifiedBadge}>
-                      <Text style={s.verifiedIcon}>✓</Text>
-                    </View>
-                  )}
-                </View>
+            {/* ══════════════ HEADER HERO PREMIUM ═════════════════════════════ */}
+            <LinearGradient 
+              colors={['#2d3748', '#374151', '#3d4a5c']} 
+              start={{ x: 0, y: 0 }} 
+              end={{ x: 1, y: 1 }} 
+              style={[s.hero, { paddingTop: insets.top + 16 }]}
+            >
+              {/* Décos cercles ambiance */}
+              <View style={s.deco1} />
+              <View style={s.deco2} />
+              <View style={s.deco3} />
+              {/* Ligne accent top */}
+              <View style={s.heroTopLine} />
 
-                {/* Nom */}
-                <Text style={s.heroName}>{seller.name}</Text>
-                
-                {/* Localisation + Rating */}
-                <View style={s.heroMeta}>
-                  <View style={s.heroMetaItem}>
-                    <Text style={s.heroLocIcon}>📍</Text>
-                    <Text style={s.heroMetaText}>{getCityName(seller.location)}</Text>
+              <Animated.View style={[s.heroContent, { opacity: fadeAnim }]}>
+                {/* Seller Info Container */}
+                <View style={s.sellerInfoContainer}>
+                  {/* Avatar avec badge */}
+                  <View style={s.avatarContainer}>
+                    <View style={s.avatarWrap}>
+                      {seller.avatar ? (
+                        <Image source={{ uri: seller.avatar }} style={s.avatarImg} />
+                      ) : (
+                        <LinearGradient colors={['#ec5a13', '#d94f0f']} style={s.avatarPlaceholder}>
+                          <Text style={s.avatarInitials}>{getInitials(seller.name)}</Text>
+                        </LinearGradient>
+                      )}
+                      {seller.verified && (
+                        <View style={s.verifiedBadge}>
+                          <Text style={s.verifiedIcon}>✓</Text>
+                        </View>
+                      )}
+                    </View>
                   </View>
-                  <Text style={s.heroMetaSep}>•</Text>
-                  <View style={s.heroMetaItem}>
-                    <Text style={s.heroRatingStar}>⭐</Text>
-                    <Text style={s.heroMetaText}>
-                      {seller.sellerStats?.rating?.toFixed(1) || '0.0'}
-                    </Text>
+
+                  {/* Seller Details */}
+                  <View style={s.sellerDetailsSection}>
+                    <View style={s.nameRow}>
+                      <Text style={s.heroName}>{seller.name}</Text>
+                      {seller.sellerStats?.responseRate > 80 && (
+                        <View style={s.topSellerBadge}>
+                          <Text style={s.topSellerBadgeTxt}>⭐ TOP</Text>
+                        </View>
+                      )}
+                    </View>
+
+                    {/* Meta: Location + Rating */}
+                    <View style={s.heroMeta}>
+                      <View style={s.heroMetaItem}>
+                        <Text style={s.heroLocIcon}>📍</Text>
+                        <Text style={s.heroMetaText}>{getCityName(seller.location)}</Text>
+                      </View>
+                      <Text style={s.heroMetaSep}>•</Text>
+                      <View style={s.heroMetaItem}>
+                        <Text style={s.heroRatingStar}>⭐</Text>
+                        <Text style={s.heroMetaText}>
+                          {seller.sellerStats?.rating?.toFixed(1) || '0.0'}/5.0
+                        </Text>
+                      </View>
+                    </View>
+
+                    {/* Response Time Badge */}
+                    <View style={s.responseBadge}>
+                      <Text style={s.responseBadgeIcon}>⚡</Text>
+                      <Text style={s.responseBadgeText}>Répond généralement en quelques heures</Text>
+                    </View>
                   </View>
                 </View>
               </Animated.View>
             </LinearGradient>
 
-            {/* ══════════════ STATS ROW ═════════════════════════════════════════ */}
+            {/* ══════════════ STATS ROW ULTRA-COMPACT ════════════════════════════════════ */}
             <View style={s.statsRow}>
-              <StatCard value={totalCount} label="Annonces" />
-              <StatCard value={seller.sellerStats?.totalReviews || 0} label="Avis" />
-              <StatCard value={`${seller.sellerStats?.responseRate || 0}%`} label="Réponse" />
+              <View style={s.statChip}>
+                <Text style={s.statChipIcon}>📦</Text>
+                <Text style={s.statChipValue}>{totalCount}</Text>
+              </View>
+              <View style={s.statChipDivider} />
+              <View style={s.statChip}>
+                <Text style={s.statChipIcon}>💬</Text>
+                <Text style={s.statChipValue}>{seller.sellerStats?.totalReviews || 0}</Text>
+              </View>
+              <View style={s.statChipDivider} />
+              <View style={s.statChip}>
+                <Text style={s.statChipIcon}>⚡</Text>
+                <Text style={s.statChipValue}>{seller.sellerStats?.responseRate || 0}%</Text>
+              </View>
             </View>
 
-            {/* ══════════════ FILTRES ═══════════════════════════════════════════ */}
+            {/* ══════════════ FILTRES PREMIUM ═══════════════════════════════════════════ */}
             <View style={s.filtersRow}>
               <TouchableOpacity
                 style={[s.filterBtn, filterType === 'all' && s.filterBtnActive]}
                 onPress={() => setFilterType('all')}
                 activeOpacity={0.7}
               >
+                <Text style={[s.filterBtnIcon, filterType === 'all' && s.filterBtnIconActive]}>🎯</Text>
                 <Text style={[s.filterBtnText, filterType === 'all' && s.filterBtnTextActive]}>
                   Tout ({totalCount})
                 </Text>
@@ -296,8 +383,9 @@ export default function SellerProfileScreen({ route, navigation }) {
                 onPress={() => setFilterType('product')}
                 activeOpacity={0.7}
               >
+                <Text style={[s.filterBtnIcon, filterType === 'product' && s.filterBtnIconActive]}>📦</Text>
                 <Text style={[s.filterBtnText, filterType === 'product' && s.filterBtnTextActive]}>
-                  📦 Produits ({productCount})
+                  Produits ({productCount})
                 </Text>
               </TouchableOpacity>
               <TouchableOpacity
@@ -305,8 +393,9 @@ export default function SellerProfileScreen({ route, navigation }) {
                 onPress={() => setFilterType('service')}
                 activeOpacity={0.7}
               >
+                <Text style={[s.filterBtnIcon, filterType === 'service' && s.filterBtnIconActive]}>🛠</Text>
                 <Text style={[s.filterBtnText, filterType === 'service' && s.filterBtnTextActive]}>
-                  🛠 Services ({serviceCount})
+                  Services ({serviceCount})
                 </Text>
               </TouchableOpacity>
             </View>
@@ -350,37 +439,61 @@ const s = StyleSheet.create({
   backBtnTxt: { fontSize: 22, color: P.white, fontWeight: '700' },
 
   // Hero
-  hero: { paddingBottom: 20, paddingHorizontal: 20 },
-  heroContent: { alignItems: 'center' },
+  hero: { paddingBottom: 12, paddingHorizontal: 18, overflow: 'hidden', position: 'relative' },
+  heroContent: { alignItems: 'center', marginTop: 6 },
+  
+  // Decorative Elements
+  deco1: { position: 'absolute', width: 150, height: 150, borderRadius: 75, backgroundColor: 'rgba(236, 90, 19, 0.08)', top: -40, right: -40 },
+  deco2: { position: 'absolute', width: 100, height: 100, borderRadius: 50, backgroundColor: 'rgba(255, 168, 123, 0.06)', bottom: 60, left: -20 },
+  deco3: { position: 'absolute', width: 80, height: 80, borderRadius: 40, backgroundColor: 'rgba(236, 90, 19, 0.04)', top: 120, left: 40 },
+  heroTopLine: { position: 'absolute', top: 0, left: 0, right: 0, height: 2, backgroundColor: 'rgba(255, 255, 255, 0.1)' },
+
+  // Seller Info Container
+  sellerInfoContainer: { flexDirection: 'row', gap: 8, alignItems: 'flex-start' },
   
   // Avatar
-  avatarWrap: { position: 'relative', marginBottom: 12 },
-  avatarImg: { width: 80, height: 80, borderRadius: 40, borderWidth: 3, borderColor: P.white },
-  avatarPlaceholder: { width: 80, height: 80, borderRadius: 40, backgroundColor: P.gold, justifyContent: 'center', alignItems: 'center', borderWidth: 3, borderColor: P.white },
-  avatarInitials: { fontSize: 28, fontWeight: '900', color: P.white },
-  verifiedBadge: { position: 'absolute', bottom: -2, right: -2, width: 26, height: 26, borderRadius: 13, backgroundColor: P.green, justifyContent: 'center', alignItems: 'center', borderWidth: 2.5, borderColor: P.white },
-  verifiedIcon: { fontSize: 13, color: P.white, fontWeight: '900' },
+  avatarContainer: { marginBottom: 0, shadowColor: P.shadow, shadowOpacity: 0.2, shadowOffset: { width: 0, height: 3 }, shadowRadius: 6, elevation: 4 },
+  avatarWrap: { position: 'relative', alignItems: 'center' },
+  avatarImg: { width: 64, height: 64, borderRadius: 32, borderWidth: 2, borderColor: P.white },
+  avatarPlaceholder: { width: 64, height: 64, borderRadius: 32, justifyContent: 'center', alignItems: 'center', borderWidth: 2, borderColor: P.white },
+  avatarInitials: { fontSize: 24, fontWeight: '900', color: P.white, letterSpacing: -1 },
+  verifiedBadge: { position: 'absolute', bottom: -2, right: -2, width: 22, height: 22, borderRadius: 11, backgroundColor: P.green, justifyContent: 'center', alignItems: 'center', borderWidth: 1.5, borderColor: P.white, shadowColor: P.shadow, shadowOpacity: 0.2, shadowOffset: { width: 0, height: 1 }, shadowRadius: 2, elevation: 1 },
+  verifiedIcon: { fontSize: 11, color: P.white, fontWeight: '900' },
+
+  // Seller Details Section
+  sellerDetailsSection: { flex: 1, justifyContent: 'center', gap: 4 },
+  nameRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 2 },
+  heroName: { fontSize: 18, fontWeight: '900', color: P.white, letterSpacing: -0.5, flex: 1 },
+  topSellerBadge: { backgroundColor: 'rgba(34, 197, 94, 0.9)', paddingHorizontal: 5, paddingVertical: 1, borderRadius: 3 },
+  topSellerBadgeTxt: { fontSize: 8, fontWeight: '700', color: P.white, letterSpacing: 0.2 },
 
   // Hero text
-  heroName: { fontSize: 22, fontWeight: '900', color: P.white, marginBottom: 10, letterSpacing: -0.5, textAlign: 'center' },
-  heroMeta: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  heroMetaItem: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  heroMetaText: { fontSize: 13, fontWeight: '600', color: P.cream },
-  heroMetaSep: { fontSize: 13, color: 'rgba(253,246,236,0.5)', fontWeight: '700' },
-  heroLocIcon: { fontSize: 14 },
-  heroRatingStar: { fontSize: 14 },
+  heroMeta: { flexDirection: 'row', alignItems: 'center', gap: 5, marginBottom: 4 },
+  heroMetaItem: { flexDirection: 'row', alignItems: 'center', gap: 2 },
+  heroMetaText: { fontSize: 11, fontWeight: '600', color: 'rgba(255,255,255,0.9)' },
+  heroMetaSep: { fontSize: 11, color: 'rgba(255,255,255,0.3)', fontWeight: '700' },
+  heroLocIcon: { fontSize: 12 },
+  heroRatingStar: { fontSize: 12 },
 
-  // Stats
-  statsRow: { flexDirection: 'row', gap: 10, paddingHorizontal: 20, paddingVertical: 14, backgroundColor: P.white, borderBottomWidth: 1, borderBottomColor: P.dim },
-  statCard: { flex: 1, alignItems: 'center', backgroundColor: P.surface, borderRadius: 10, paddingVertical: 10, borderWidth: 1, borderColor: P.dim },
-  statValue: { fontSize: 20, fontWeight: '900', color: P.terra, marginBottom: 2 },
-  statLabel: { fontSize: 10, fontWeight: '600', color: P.muted, textTransform: 'uppercase', letterSpacing: 0.5 },
+  // Response Badge
+  responseBadge: { flexDirection: 'row', alignItems: 'center', gap: 3, backgroundColor: 'rgba(34, 197, 94, 0.12)', borderRadius: 5, paddingHorizontal: 6, paddingVertical: 3, borderWidth: 0.8, borderColor: 'rgba(34, 197, 94, 0.25)' },
+  responseBadgeIcon: { fontSize: 10 },
+  responseBadgeText: { fontSize: 9, fontWeight: '600', color: 'rgba(255,255,255,0.85)' },
+
+  // Stats - Ultra Compact Chips
+  statsRow: { flexDirection: 'row', gap: 0, alignItems: 'center', paddingHorizontal: 12, paddingVertical: 4, backgroundColor: P.white, borderTopWidth: 1, borderTopColor: 'rgba(0,0,0,0.03)', shadowColor: P.brown, shadowOpacity: 0.02, shadowOffset: { width: 0, height: 0.5 }, shadowRadius: 1, elevation: 0 },
+  statChip: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 3, paddingVertical: 4 },
+  statChipIcon: { fontSize: 13 },
+  statChipValue: { fontSize: 12, fontWeight: '900', color: P.terra, letterSpacing: -0.2 },
+  statChipDivider: { width: 1, height: 14, backgroundColor: 'rgba(107, 114, 128, 0.2)' },
 
   // Filtres
-  filtersRow: { flexDirection: 'row', gap: 10, paddingHorizontal: 20, paddingVertical: 12, backgroundColor: P.white },
-  filterBtn: { flex: 1, paddingVertical: 8, paddingHorizontal: 12, borderRadius: 10, backgroundColor: P.cream, borderWidth: 1.5, borderColor: P.dim, alignItems: 'center' },
+  filtersRow: { flexDirection: 'row', gap: 5, paddingHorizontal: 10, paddingVertical: 7, backgroundColor: P.white },
+  filterBtn: { flex: 1, paddingVertical: 6, paddingHorizontal: 6, borderRadius: 8, backgroundColor: '#F3F4F6', borderWidth: 1, borderColor: '#E8EAEF', alignItems: 'center', justifyContent: 'center', minHeight: 32 },
   filterBtnActive: { backgroundColor: P.terra, borderColor: P.terra },
-  filterBtnText: { fontSize: 12, fontWeight: '700', color: P.muted },
+  filterBtnIcon: { fontSize: 12, marginBottom: 0 },
+  filterBtnIconActive: { fontSize: 12 },
+  filterBtnText: { fontSize: 9, fontWeight: '700', color: P.muted, textAlign: 'center' },
   filterBtnTextActive: { color: P.white },
 
   // Products grid
@@ -389,9 +502,9 @@ const s = StyleSheet.create({
     paddingHorizontal: 12,
     justifyContent: 'flex-start'
   },
-  productCard: { 
-    flex: 1, 
-    maxWidth: (Dimensions.get('window').width - 36) / 2, // (width - padding - gap) / 2
+
+  // Card structure (matching AnnounceCard from ProductsListScreen)
+  card: { 
     backgroundColor: P.white, 
     borderRadius: 16, 
     overflow: 'hidden', 
@@ -402,19 +515,123 @@ const s = StyleSheet.create({
     shadowOpacity: 0.12, 
     shadowOffset: { width: 0, height: 4 }, 
     shadowRadius: 12, 
-    elevation: 4 
+    elevation: 4,
+    flex: 1,
+    maxWidth: (Dimensions.get('window').width - 36) / 2,
   },
-  productImgWrap: { position: 'relative', width: '100%', aspectRatio: 1, backgroundColor: P.sand },
-  productImg: { width: '100%', height: '100%' },
-  productImgOverlay: { position: 'absolute', bottom: 0, left: 0, right: 0, height: '40%' },
-  productTypeBadge: { position: 'absolute', top: 10, right: 10, width: 32, height: 32, borderRadius: 16, justifyContent: 'center', alignItems: 'center', shadowColor: P.shadow, shadowOpacity: 0.2, shadowOffset: { width: 0, height: 2 }, shadowRadius: 4, elevation: 3 },
-  productTypeIcon: { fontSize: 15 },
-  productInfo: { padding: 12 },
-  productTitle: { fontSize: 14, fontWeight: '800', color: P.charcoal, lineHeight: 19, marginBottom: 6, minHeight: 38 },
-  productPrice: { fontSize: 15, fontWeight: '900', color: P.terra, marginBottom: 6, letterSpacing: -0.3 },
-  productMeta: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 6 },
-  productLoc: { fontSize: 11, fontWeight: '600', color: P.muted, flex: 1 },
-  productViews: { fontSize: 10, fontWeight: '600', color: P.muted, backgroundColor: P.cream, paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6 },
+
+  // Card Image Wrapper
+  cardImgWrap: { 
+    position: 'relative', 
+    width: '100%', 
+    aspectRatio: 1, 
+    backgroundColor: P.sand,
+    overflow: 'hidden',
+  },
+  cardImg: { 
+    width: '100%', 
+    height: '100%', 
+  },
+
+  // Time Badge
+  cardTimeBadge: { 
+    position: 'absolute', 
+    top: 10, 
+    left: 10, 
+    flexDirection: 'row', 
+    gap: 4, 
+    alignItems: 'center',
+    backgroundColor: 'rgba(253,246,236,0.92)',
+    paddingVertical: 5,
+    paddingHorizontal: 8,
+    borderRadius: 8,
+  },
+  cardTimeTxt: { 
+    fontSize: 11, 
+    fontWeight: '600', 
+    color: P.charcoal,
+  },
+
+  // Fav Ghost
+  cardFavGhost: { 
+    position: 'absolute', 
+    top: 10, 
+    right: 10, 
+    width: 36, 
+    height: 36, 
+    borderRadius: 18, 
+    backgroundColor: 'rgba(253,246,236,0.92)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+
+  // Card Body
+  cardBody: { 
+    padding: 12,
+  },
+
+  // Title Row
+  cardTitleRow: { 
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 8,
+  },
+  cardTypeGlyphWrap: { 
+    width: 24, 
+    height: 24, 
+    justifyContent: 'center', 
+    alignItems: 'center' 
+  },
+  cardTypeGlyph: { 
+    fontSize: 16, 
+  },
+  cardTitle: { 
+    fontSize: 14, 
+    fontWeight: '800', 
+    color: P.charcoal,
+    flex: 1,
+  },
+
+  // Meta Row (Location + Distance)
+  cardMetaRow: { 
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginBottom: 8,
+  },
+  cardLoc: { 
+    fontSize: 11, 
+    fontWeight: '600', 
+    color: P.muted,
+    flex: 1,
+  },
+  cardMetaDot: { 
+    fontSize: 11, 
+    color: P.muted,
+    fontWeight: '600',
+  },
+  cardMetaTail: { 
+    fontSize: 11, 
+    fontWeight: '600', 
+    color: P.muted,
+  },
+
+  // Price Row
+  cardPriceRow: { 
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    gap: 4,
+  },
+  cardPriceSpacer: { 
+    flex: 1,
+  },
+  cardPriceTxt: { 
+    fontSize: 14, 
+    fontWeight: '900', 
+    letterSpacing: -0.3,
+  },
 
   // Empty state
   emptyState: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingVertical: 80 },

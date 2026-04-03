@@ -1,4 +1,4 @@
-﻿// ─── LoginScreen v2 PREMIUM ─ MarketHub Niger ────────────────────────────────
+// ─── LoginScreen v2 PREMIUM ─ MarketHub Niger ────────────────────────────────
 // Design 100% cohérent avec RegisterScreen & VerifyOTPScreen
 // Zéro valeur hex brute — uniquement les tokens MOBILE_COLORS
 
@@ -214,7 +214,7 @@ export default function LoginScreen({ navigation }) {
           {/* ── Champ identifiant ── */}
           <View style={s.fieldZone}>
             <Text style={s.fieldLabel}>
-              {loginType === 'phone' ? 'Numéro de téléphone' : 'Email'}
+              {loginType === 'phone' ? 'Identifiant numéro' : 'Email'}
             </Text>
 
             {loginType === 'phone' ? (

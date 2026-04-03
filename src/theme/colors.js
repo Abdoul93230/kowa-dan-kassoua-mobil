@@ -30,7 +30,11 @@ export const MOBILE_COLORS = Object.freeze({
   green: '#22C55E',
   greenDark: '#16A34A',
   successSoft: '#D1FAE5',
-  blue: '#3B82F6',
+  blue: '#3B82F6',          // blue-500
+  blue600: '#2563EB',       // blue-600 — identique au web pour les services
+  blue100: '#DBEAFE',       // blue-100 — fond doux service
+  blueSoft: '#EFF6FF',      // blue-50 — fond très doux service
+  blueDark: '#1E40AF',      // blue-800 — variante sombre
   yellow: '#F59E0B',
   yellowSoft: '#FEF3C7',
   peachSoft: '#FFE9DE',

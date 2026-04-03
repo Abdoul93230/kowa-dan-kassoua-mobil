@@ -91,11 +91,17 @@ function formatTime(value) {
   return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
 }
 
+function formatPriceFCFA(value) {
+  const numeric = Number(String(value || '').replace(/[^\d.-]/g, ''));
+  if (!Number.isFinite(numeric) || numeric <= 0) return 'Prix a discuter';
+  return `${Math.round(numeric).toLocaleString('fr-FR')} FCFA`;
+}
+
 export default function ConversationScreen({ route, navigation }) {
   const insets = useSafeAreaInsets();
   const headerHeight = useHeaderHeight();
   const { conversationId } = route.params || {};
-  const { user, token } = useAuth();
+  const { user, token, isAuthenticated } = useAuth();
 
   const [conversation, setConversation] = useState(null);
   const [messages, setMessages] = useState([]);
@@ -195,9 +201,18 @@ export default function ConversationScreen({ route, navigation }) {
 
   useFocusEffect(
     useCallback(() => {
+      // Auth Guard
+      if (!isAuthenticated) {
+        navigation.navigate('QuickAuth', {
+          pendingAction: { type: 'message_conversation', conversationId },
+          returnScreen: 'Conversation',
+          returnParams: { conversationId },
+        });
+        return;
+      }
       setLoading(true);
       loadConversation();
-    }, [loadConversation])
+    }, [loadConversation, isAuthenticated, navigation, conversationId])
   );
 
   useEffect(() => {
@@ -655,6 +670,28 @@ useEffect(() => {
   const peerId = peer?.id || peer?._id;
   const peerIsOnline = peerId ? isUserOnline(String(peerId)) : false;
   const hasText = text.trim().length > 0;
+  const conversationItem = conversation?.item || null;
+  const conversationItemId = normalizeId(conversationItem?.id);
+  const canOpenConversationItem = Boolean(conversationItemId);
+
+  const openConversationItem = useCallback(() => {
+    if (!conversationItemId) {
+      setAlert({
+        visible: true,
+        type: 'info',
+        title: 'Annonce indisponible',
+        message: 'Impossible d\'ouvrir cette annonce pour le moment.',
+        buttons: [{ text: 'OK', onPress: () => {} }],
+      });
+      return;
+    }
+    const raw = conversation?.item?.id;
+
+    const match = raw.match(/ObjectId\('(.+?)'\)/);
+    const productId = match?.[1] ?? null;
+
+    navigation.navigate('ProductDetail', { productId: productId });
+  }, [conversationItemId, navigation]);
 
   const renderMessage = ({ item }) => {
     const mine = isCurrentUserMessage(item, user, currentUserIdSet);
@@ -806,6 +843,35 @@ useEffect(() => {
   onLayout={() => {
     flatListRef.current?.scrollToEnd({ animated: false });
   }}
+          ListHeaderComponent={
+            conversationItem ? (
+              <TouchableOpacity
+                activeOpacity={canOpenConversationItem ? 0.88 : 1}
+                style={[styles.itemCard, !canOpenConversationItem && styles.itemCardDisabled]}
+                onPress={openConversationItem}
+                disabled={!canOpenConversationItem}
+              >
+                <Image
+                  source={{
+                    uri:
+                      conversationItem?.image ||
+                      'https://via.placeholder.com/160x160/F5E6C8/C1440E?text=Annonce',
+                  }}
+                  style={styles.itemImage}
+                />
+                <View style={styles.itemMeta}>
+                  <Text style={styles.itemOverline}>A propos de cette annonce</Text>
+                  <Text numberOfLines={2} style={styles.itemTitle}>
+                    {conversationItem?.title || 'Annonce'}
+                  </Text>
+                  <Text style={styles.itemPrice}>{formatPriceFCFA(conversationItem?.price)}</Text>
+                </View>
+                <View style={styles.itemActionBtn}>
+                  <Ionicons name="open-outline" size={16} color={P.orange500} />
+                </View>
+              </TouchableOpacity>
+            ) : null
+          }
           ListFooterComponent={
             typingLabel ? (
               <View style={styles.typingWrap}>
@@ -917,6 +983,56 @@ const styles = StyleSheet.create({
     fontSize: 12,
     textAlign: 'center',
     marginTop: 4,
+  },
+  itemCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderRadius: 14,
+    padding: 10,
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.14)',
+  },
+  itemCardDisabled: {
+    opacity: 0.72,
+  },
+  itemImage: {
+    width: 56,
+    height: 56,
+    borderRadius: 10,
+    backgroundColor: 'rgba(255,255,255,0.12)',
+  },
+  itemMeta: {
+    flex: 1,
+    minWidth: 0,
+  },
+  itemOverline: {
+    fontSize: 11,
+    color: 'rgba(255,255,255,0.62)',
+    marginBottom: 2,
+  },
+  itemTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#ffffff',
+  },
+  itemPrice: {
+    marginTop: 4,
+    fontSize: 14,
+    fontWeight: '800',
+    color: P.orange500,
+  },
+  itemActionBtn: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(236,90,19,0.2)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.2)',
   },
   messagesContainer: {
     paddingHorizontal: 12,

@@ -113,6 +113,24 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
+  // ✅ Méthode pour forcer la connexion sans appel d'API supplémentaires
+  // (Utilisée après quickRegister)
+  const setAuthData = async (userData, tokens) => {
+    try {
+      const { accessToken, refreshToken } = tokens;
+      await saveAccessToken(accessToken);
+      await saveRefreshToken(refreshToken);
+      await saveUserData(userData);
+      
+      setToken(accessToken);
+      setUser(userData);
+      setIsAuthenticated(true);
+      console.log('✅ Auth locale mise à jour:', userData.name);
+    } catch (error) {
+      console.error('❌ Erreur setAuthData:', error);
+    }
+  };
+
   const logout = async () => {
     try {
       await clearAllData();
@@ -159,6 +177,7 @@ export const AuthProvider = ({ children }) => {
     logout,
     refreshUserProfile,
     updateUserProfile,
+    setAuthData,
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

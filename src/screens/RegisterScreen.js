@@ -1,4 +1,4 @@
-﻿// ─── RegisterScreen v2 PREMIUM ─ MarketHub Niger ─────────────────────────────
+// ─── RegisterScreen v2 PREMIUM ─ MarketHub Niger ─────────────────────────────
 // Micro-étapes animées — une question à la fois, ultra user-friendly
 
 import React, { useState, useRef, useEffect } from 'react';
@@ -27,7 +27,7 @@ const COUNTRIES = [
 const STEPS = [
   { id: 'name',            label: 'Comment vous appelez-vous ?',      icon: '👋', hint: 'Votre nom complet' },
   { id: 'country',         label: 'Votre pays ?',                     icon: '🌍', hint: 'Sélectionnez votre pays' },
-  { id: 'phone',           label: 'Votre numéro de téléphone ?',       icon: '📱', hint: 'Numéro principal' },
+  { id: 'phone',           label: 'Votre identifiant numéro ?',       icon: '📱', hint: 'Numéro principal' },
   { id: 'whatsapp',        label: 'Votre WhatsApp ?',                  icon: '💬', hint: 'Optionnel — même numéro par défaut' },
   { id: 'email',           label: 'Votre email ?',                     icon: '✉️', hint: 'Optionnel' },
   { id: 'password',        label: 'Choisissez un mot de passe',        icon: '🔒', hint: 'Minimum 6 caractères' },
