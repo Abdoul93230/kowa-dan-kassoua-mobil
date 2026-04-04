@@ -244,6 +244,9 @@ export default function SellerProfileScreen({ route, navigation }) {
   const totalCount = allProducts.length;
   const productCount = allProducts.filter(p => p.type === 'product').length;
   const serviceCount = allProducts.filter(p => p.type === 'service').length;
+  const sellerRating = Number(seller?.rating ?? seller?.sellerStats?.rating ?? 0);
+  const sellerTotalReviews = Number(seller?.totalReviews ?? seller?.sellerStats?.totalReviews ?? 0);
+  const sellerResponseRate = Number(seller?.sellerStats?.responseRate ?? 0);
 
   return (
     <View style={s.screen}>
@@ -315,13 +318,16 @@ export default function SellerProfileScreen({ route, navigation }) {
                   {/* Seller Details */}
                   <View style={s.sellerDetailsSection}>
                     <View style={s.nameRow}>
-                      <Text style={s.heroName}>{seller.name}</Text>
+                      <Text style={s.heroName}>{seller.businessName || seller.name}</Text>
                       {seller.sellerStats?.responseRate > 80 && (
                         <View style={s.topSellerBadge}>
                           <Text style={s.topSellerBadgeTxt}>⭐ TOP</Text>
                         </View>
                       )}
                     </View>
+                    {seller.businessName && seller.name && seller.businessName !== seller.name && (
+                      <Text style={s.heroSubName}>{seller.name}</Text>
+                    )}
 
                     {/* Meta: Location + Rating */}
                     <View style={s.heroMeta}>
@@ -333,7 +339,7 @@ export default function SellerProfileScreen({ route, navigation }) {
                       <View style={s.heroMetaItem}>
                         <Text style={s.heroRatingStar}>⭐</Text>
                         <Text style={s.heroMetaText}>
-                          {seller.sellerStats?.rating?.toFixed(1) || '0.0'}/5.0
+                          {sellerRating.toFixed(1)}/5.0
                         </Text>
                       </View>
                     </View>
@@ -357,12 +363,12 @@ export default function SellerProfileScreen({ route, navigation }) {
               <View style={s.statChipDivider} />
               <View style={s.statChip}>
                 <Text style={s.statChipIcon}>💬</Text>
-                <Text style={s.statChipValue}>{seller.sellerStats?.totalReviews || 0}</Text>
+                <Text style={s.statChipValue}>{sellerTotalReviews}</Text>
               </View>
               <View style={s.statChipDivider} />
               <View style={s.statChip}>
                 <Text style={s.statChipIcon}>⚡</Text>
-                <Text style={s.statChipValue}>{seller.sellerStats?.responseRate || 0}%</Text>
+                <Text style={s.statChipValue}>{sellerResponseRate}%</Text>
               </View>
             </View>
 
@@ -464,6 +470,7 @@ const s = StyleSheet.create({
   sellerDetailsSection: { flex: 1, justifyContent: 'center', gap: 4 },
   nameRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 2 },
   heroName: { fontSize: 18, fontWeight: '900', color: P.white, letterSpacing: -0.5, flex: 1 },
+  heroSubName: { fontSize: 10, fontWeight: '600', color: 'rgba(255,255,255,0.72)', marginTop: -2 },
   topSellerBadge: { backgroundColor: 'rgba(34, 197, 94, 0.9)', paddingHorizontal: 5, paddingVertical: 1, borderRadius: 3 },
   topSellerBadgeTxt: { fontSize: 8, fontWeight: '700', color: P.white, letterSpacing: 0.2 },
 

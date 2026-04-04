@@ -16,6 +16,7 @@ import AlertModal from '../components/AlertModal';
 import { MOBILE_COLORS as P } from '../theme/colors';
 
 const { width } = Dimensions.get('window');
+const SCREEN_HEIGHT = Dimensions.get('window').height;
 
 const getCityName = (loc) => (loc ? loc.split(',')[0].trim() : 'Niger');
 const getDistanceKm = (itemId) => {
@@ -80,6 +81,23 @@ function ListingCard({ item, onView, onEdit, onToggle, onDelete, toggling }) {
   const st = statusConfig[item.status] || statusConfig.expired;
   const isService = item.type === 'service';
   const distance = getDistanceKm(item.id || item._id);
+  const typeTheme = isService
+    ? {
+        accent: '#2563EB',
+        accentSoft: 'rgba(37,99,235,0.14)',
+        accentBorder: 'rgba(37,99,235,0.35)',
+        priceBg: 'rgba(30,64,175,0.86)',
+        badgeBg: 'rgba(37,99,235,0.92)',
+        label: 'Service',
+      }
+    : {
+        accent: P.terra,
+        accentSoft: 'rgba(236,90,19,0.14)',
+        accentBorder: 'rgba(236,90,19,0.35)',
+        priceBg: 'rgba(17,24,39,0.8)',
+        badgeBg: 'rgba(236,90,19,0.92)',
+        label: 'Produit',
+      };
 
   return (
     <Animated.View style={[s.card, { opacity: fadeAnim, transform: [{ scale: sc }] }]}>
@@ -103,8 +121,13 @@ function ListingCard({ item, onView, onEdit, onToggle, onDelete, toggling }) {
           <Text style={s.statusBadgeTxt}>{st.label}</Text>
         </View>
 
+        {/* Badge type — top right */}
+        <View style={[s.typeBadge, { backgroundColor: typeTheme.badgeBg }]}>
+          <Text style={s.typeBadgeTxt}>{isService ? '🛠' : '📦'} {typeTheme.label}</Text>
+        </View>
+
         {/* Prix en bas */}
-        <View style={s.cardPriceTag}>
+        <View style={[s.cardPriceTag, { backgroundColor: typeTheme.priceBg }]}> 
           <Text style={s.cardPriceTagTxt}>
             {item.price ? `${parseInt(item.price).toLocaleString('fr-FR')} FCFA` : 'À discuter'}
           </Text>
@@ -123,7 +146,7 @@ function ListingCard({ item, onView, onEdit, onToggle, onDelete, toggling }) {
         {/* Méta */}
         <View style={s.cardMeta}>
           <View style={s.cardMetaItem}>
-            <Feather name="map-pin" size={11} color={P.terra} />
+            <Feather name="map-pin" size={11} color={typeTheme.accent} />
             <Text style={s.cardMetaTxt} numberOfLines={1}>{getCityName(item.location)}</Text>
           </View>
           <View style={s.cardMetaItem}>
@@ -150,8 +173,15 @@ function ListingCard({ item, onView, onEdit, onToggle, onDelete, toggling }) {
           </TouchableOpacity>
 
           {/* Modifier */}
-          <TouchableOpacity style={s.actionOutline} onPress={() => onEdit(item)} activeOpacity={0.75}>
-            <Text style={s.actionOutlineTxt}>Modifier</Text>
+          <TouchableOpacity
+            style={[
+              s.actionOutline,
+              { borderColor: typeTheme.accentBorder, backgroundColor: typeTheme.accentSoft },
+            ]}
+            onPress={() => onEdit(item)}
+            activeOpacity={0.75}
+          >
+            <Text style={[s.actionOutlineTxt, { color: typeTheme.accent }]}>Modifier</Text>
           </TouchableOpacity>
 
           {/* Activer / Désactiver */}
@@ -177,6 +207,122 @@ function ListingCard({ item, onView, onEdit, onToggle, onDelete, toggling }) {
         </View>
       </View>
     </Animated.View>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// FILTRE BOTTOM SHEET (custom)
+// ─────────────────────────────────────────────────────────────────────────────
+function ListingsFilterSheet({
+  visible,
+  onClose,
+  filterStatus,
+  setFilterStatus,
+  filterType,
+  setFilterType,
+}) {
+  const insets = useSafeAreaInsets();
+  const [mounted, setMounted] = useState(false);
+  const slideAnim = useRef(new Animated.Value(SCREEN_HEIGHT)).current;
+
+  useEffect(() => {
+    if (visible) {
+      setMounted(true);
+      slideAnim.setValue(SCREEN_HEIGHT);
+      Animated.spring(slideAnim, {
+        toValue: 0,
+        tension: 82,
+        friction: 12,
+        useNativeDriver: true,
+      }).start();
+    } else {
+      Animated.timing(slideAnim, {
+        toValue: SCREEN_HEIGHT,
+        duration: 220,
+        useNativeDriver: true,
+      }).start(() => setMounted(false));
+    }
+  }, [visible, slideAnim]);
+
+  if (!mounted) return null;
+
+  return (
+    <View style={StyleSheet.absoluteFillObject} pointerEvents={visible ? 'auto' : 'none'}>
+      <TouchableOpacity
+        activeOpacity={1}
+        onPress={onClose}
+        style={[StyleSheet.absoluteFillObject, { backgroundColor: 'rgba(17,24,39,0.55)' }]}
+      />
+
+      <Animated.View
+        style={[
+          s.filterModal,
+          {
+            position: 'absolute',
+            left: 0,
+            right: 0,
+            bottom: 0,
+            paddingBottom: Math.max(insets.bottom + 14, 26),
+            transform: [{ translateY: slideAnim }],
+          },
+        ]}
+      >
+        <View style={s.filterModalHandle} />
+
+        <View style={s.filterModalHead}>
+          <Text style={s.filterModalTitle}>Filtres</Text>
+          <TouchableOpacity onPress={onClose} style={s.filterModalClose}>
+            <Text style={s.filterModalCloseTxt}>✕</Text>
+          </TouchableOpacity>
+        </View>
+
+        <Text style={s.filterGroupLabel}>Statut</Text>
+        <View style={s.filterChips}>
+          {[
+            { value: 'all', label: 'Tous' },
+            { value: 'active', label: 'Actives' },
+            { value: 'expired', label: 'Expirées' },
+          ].map(opt => (
+            <TouchableOpacity
+              key={opt.value}
+              style={[s.filterChip, filterStatus === opt.value && s.filterChipActive]}
+              onPress={() => setFilterStatus(opt.value)}
+              activeOpacity={0.8}
+            >
+              <Text style={[s.filterChipTxt, filterStatus === opt.value && s.filterChipTxtActive]}>
+                {opt.label}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+
+        <Text style={s.filterGroupLabel}>Type</Text>
+        <View style={s.filterChips}>
+          {[
+            { value: 'all', label: 'Tous' },
+            { value: 'product', label: 'Produits' },
+            { value: 'service', label: 'Services' },
+          ].map(opt => (
+            <TouchableOpacity
+              key={opt.value}
+              style={[s.filterChip, filterType === opt.value && s.filterChipActive]}
+              onPress={() => setFilterType(opt.value)}
+              activeOpacity={0.8}
+            >
+              <Text style={[s.filterChipTxt, filterType === opt.value && s.filterChipTxtActive]}>
+                {opt.label}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+
+        <TouchableOpacity onPress={onClose} activeOpacity={0.85}>
+          <LinearGradient colors={[P.orange500, P.orange700]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={s.applyBtn}>
+            <Text style={s.applyBtnTxt}>Appliquer les filtres</Text>
+          </LinearGradient>
+        </TouchableOpacity>
+      </Animated.View>
+    </View>
   );
 }
 
@@ -441,75 +587,15 @@ export default function MyListingsScreen({ navigation }) {
         )}
       </ScrollView>
 
-      {/* ══ MODAL FILTRES ════════════════════════════════════════════════ */}
-      <Modal
+      {/* ══ MODAL FILTRES (BOTTOM SHEET CUSTOM) ═════════════════════════ */}
+      <ListingsFilterSheet
         visible={showFilterModal}
-        transparent
-        animationType="slide"
-        onRequestClose={() => setShowFilterModal(false)}
-      >
-        <View style={s.modalOverlay}>
-          <View style={s.filterModal}>
-            {/* Handle */}
-            <View style={s.filterModalHandle} />
-
-            <View style={s.filterModalHead}>
-              <Text style={s.filterModalTitle}>Filtres</Text>
-              <TouchableOpacity onPress={() => setShowFilterModal(false)} style={s.filterModalClose}>
-                <Text style={s.filterModalCloseTxt}>✕</Text>
-              </TouchableOpacity>
-            </View>
-
-            {/* Statut */}
-            <Text style={s.filterGroupLabel}>Statut</Text>
-            <View style={s.filterChips}>
-              {[
-                { value: 'all', label: 'Tous' },
-                { value: 'active', label: 'Actives' },
-                { value: 'expired', label: 'Expirées' },
-              ].map(opt => (
-                <TouchableOpacity
-                  key={opt.value}
-                  style={[s.filterChip, filterStatus === opt.value && s.filterChipActive]}
-                  onPress={() => setFilterStatus(opt.value)}
-                  activeOpacity={0.8}
-                >
-                  <Text style={[s.filterChipTxt, filterStatus === opt.value && s.filterChipTxtActive]}>
-                    {opt.label}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-
-            {/* Type */}
-            <Text style={s.filterGroupLabel}>Type</Text>
-            <View style={s.filterChips}>
-              {[
-                { value: 'all', label: 'Tous' },
-                { value: 'product', label: 'Produits' },
-                { value: 'service', label: 'Services' },
-              ].map(opt => (
-                <TouchableOpacity
-                  key={opt.value}
-                  style={[s.filterChip, filterType === opt.value && s.filterChipActive]}
-                  onPress={() => setFilterType(opt.value)}
-                  activeOpacity={0.8}
-                >
-                  <Text style={[s.filterChipTxt, filterType === opt.value && s.filterChipTxtActive]}>
-                    {opt.label}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-
-            <TouchableOpacity onPress={() => setShowFilterModal(false)} activeOpacity={0.85}>
-              <LinearGradient colors={[P.orange500, P.orange700]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={s.applyBtn}>
-                <Text style={s.applyBtnTxt}>Appliquer les filtres</Text>
-              </LinearGradient>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
+        onClose={() => setShowFilterModal(false)}
+        filterStatus={filterStatus}
+        setFilterStatus={setFilterStatus}
+        filterType={filterType}
+        setFilterType={setFilterType}
+      />
 
       {/* ══ MODAL SUPPRESSION ════════════════════════════════════════════ */}
       <Modal
@@ -636,6 +722,8 @@ const s = StyleSheet.create({
   statusBadge: { position: 'absolute', top: 10, left: 10, flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 9, paddingVertical: 4, borderRadius: 8 },
   statusDot: { width: 6, height: 6, borderRadius: 3 },
   statusBadgeTxt: { fontSize: 11, fontWeight: '800', color: P.white },
+  typeBadge: { position: 'absolute', top: 10, right: 10, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8 },
+  typeBadgeTxt: { fontSize: 10, fontWeight: '800', color: P.white },
 
   cardPriceTag: { position: 'absolute', bottom: 10, left: 10, backgroundColor: 'rgba(17,24,39,0.8)', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8 },
   cardPriceTagTxt: { fontSize: 12, fontWeight: '900', color: P.white },
