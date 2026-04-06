@@ -13,6 +13,7 @@ import {
   Dimensions, StyleSheet, Keyboard, Platform, ScrollView,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useAppTheme } from '../contexts/ThemeContext';
 import { MOBILE_COLORS as P } from '../theme/colors';
 
 const { height: SCREEN_H } = Dimensions.get('window');
@@ -28,6 +29,7 @@ export default function CustomBottomSheet({
   avoidKeyboard = true,
   bottomOffset = 0,
 }) {
+  const { theme } = useAppTheme();
   const insets    = useSafeAreaInsets();
   const slideY    = useRef(new Animated.Value(SCREEN_H)).current;
   const fadeBack  = useRef(new Animated.Value(0)).current;
@@ -121,6 +123,7 @@ export default function CustomBottomSheet({
       <Animated.View
         style={[
           s.sheet,
+          { backgroundColor: theme.surface },
           {
             height: sheetH,
             transform: [
@@ -132,25 +135,25 @@ export default function CustomBottomSheet({
       >
         {/* Handle swipeable */}
         <View {...pan.panHandlers} style={s.handleZone} hitSlop={{ top: 8, bottom: 8 }}>
-          <View style={s.handle} />
+          <View style={[s.handle, { backgroundColor: theme.divider }]} />
         </View>
 
         {/* Header */}
         <View style={s.header}>
-          <Text style={s.title} numberOfLines={1}>{title}</Text>
+          <Text style={[s.title, { color: theme.text }]} numberOfLines={1}>{title}</Text>
           <TouchableOpacity
             onPress={onClose}
             style={s.closeWrap}
             activeOpacity={0.7}
             hitSlop={{ top: 10, right: 10, bottom: 10, left: 10 }}
           >
-            <View style={s.closeChip}>
-              <Text style={s.closeTxt}>✕</Text>
+            <View style={[s.closeChip, { backgroundColor: theme.glass }]}>
+              <Text style={[s.closeTxt, { color: theme.text }]}>✕</Text>
             </View>
           </TouchableOpacity>
         </View>
 
-        <View style={s.hairline} />
+        <View style={[s.hairline, { backgroundColor: theme.divider }]} />
 
         {/* Scroll — flex:1 : prend TOUT l'espace entre header et footer */}
         <ScrollView
@@ -165,8 +168,8 @@ export default function CustomBottomSheet({
 
         {/* Footer — jamais compressé, toujours visible */}
         {footer ? (
-          <View style={[s.footer, { paddingBottom: safeBot }]}>
-            <View style={s.footerLine} />
+          <View style={[s.footer, { paddingBottom: safeBot, backgroundColor: theme.surface }]}>
+            <View style={[s.footerLine, { backgroundColor: theme.divider }]} />
             <View style={s.footerInner}>{footer}</View>
           </View>
         ) : (
@@ -192,7 +195,6 @@ const s = StyleSheet.create({
     bottom: 0,
     left: 0,
     right: 0,
-    backgroundColor: P.white,
     borderTopLeftRadius: 30,
     borderTopRightRadius: 30,
     // Colonne flex stricte : scroll(flex:1) + footer(flexShrink:0)
@@ -232,7 +234,6 @@ const s = StyleSheet.create({
     flex: 1,
     fontSize: 19,
     fontWeight: '800',
-    color: P.charcoal,
     letterSpacing: -0.4,
   },
   closeWrap: { flexShrink: 0, marginLeft: 12 },
@@ -261,7 +262,6 @@ const s = StyleSheet.create({
   footer:      { flexShrink: 0, backgroundColor: P.white },
   footerLine:  {
     height: StyleSheet.hairlineWidth,
-    backgroundColor: 'rgba(0,0,0,0.07)',
     marginHorizontal: 22,
     marginBottom: 16,
   },

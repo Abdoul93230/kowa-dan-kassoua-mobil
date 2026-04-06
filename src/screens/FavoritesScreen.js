@@ -12,6 +12,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from 'expo-blur';
 import { Feather } from '@expo/vector-icons';
 import { useAuth } from '../contexts/AuthContext';
+import { useAppTheme } from '../contexts/ThemeContext';
 import { getMyFavorites, removeFavorite } from '../api/favorites';
 import { MOBILE_COLORS as P } from '../theme/colors';
 import AlertModal from '../components/AlertModal';
@@ -191,7 +192,7 @@ const FavoriteCard = ({ item, onPress, onRemove, index }) => {
 
 // ─── HEADER STATS BAR ─────────────────────────────────────────────────────────
 
-const StatsBar = ({ count }) => (
+const StatsBar = ({ count, isDark, theme }) => (
   <View style={s.statsBar}>
 
     {/* Pill 1 — Nombre de favoris */}
@@ -199,16 +200,16 @@ const StatsBar = ({ count }) => (
       colors={[P.orange500, P.orange600]}
       start={{ x: 0, y: 0 }}
       end={{ x: 1, y: 1 }}
-      style={s.statPill}
+      style={[s.statPill, !isDark && { borderColor: theme.border }]}
     >
-      <Text style={s.statPillNum}>{count}</Text>
-      <Text style={s.statPillLabel}>annonce{count > 1 ? 's' : ''} sauvegardée{count > 1 ? 's' : ''}</Text>
+      <Text style={[s.statPillNum, !isDark && { color: theme.surface }]}>{count}</Text>
+      <Text style={[s.statPillLabel, !isDark && { color: theme.surface }]}>annonce{count > 1 ? 's' : ''} sauvegardée{count > 1 ? 's' : ''}</Text>
     </LinearGradient>
 
     {/* Pill 2 — Coups de cœur */}
-    <View style={s.statPillGhost}>
+    <View style={[s.statPillGhost, !isDark && { backgroundColor: theme.surfaceAlt, borderColor: theme.border }]}> 
       <Text style={s.statPillGhostIcon}>♥</Text>
-      <Text style={s.statPillGhostLabel}>Mes coups{'\n'}de cœur</Text>
+      <Text style={[s.statPillGhostLabel, !isDark && { color: theme.textMuted }]}>Mes coups{'\n'}de cœur</Text>
     </View>
 
   </View>
@@ -272,6 +273,7 @@ const EmptyState = ({ type, onAction }) => {
 
 export default function FavoritesScreen({ navigation }) {
   const insets = useSafeAreaInsets();
+  const { isDark, theme } = useAppTheme();
   const { isAuthenticated } = useAuth();
 
   const [favorites, setFavorites] = useState([]);
@@ -380,9 +382,9 @@ export default function FavoritesScreen({ navigation }) {
   // ─── HEADER ────────────────────────────────────────────────────────────────
   const renderHeader = () => (
     <Animated.View style={{ opacity: headerAnim, transform: [{ translateY: headerAnim.interpolate({ inputRange: [0, 1], outputRange: [-20, 0] }) }] }}>
-      <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
+      <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} backgroundColor="transparent" translucent />
       <LinearGradient
-        colors={[P.charcoal, P.brown, '#2d3748']}
+        colors={theme.header}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 1 }}
         style={[s.header, { paddingTop: insets.top + 12 }]}
@@ -392,8 +394,8 @@ export default function FavoritesScreen({ navigation }) {
 
         <View style={s.headerTop}>
           <View>
-            <Text style={s.headerEyebrow}>MarketHub Niger</Text>
-            <Text style={s.headerTitle}>Mes Favoris</Text>
+            <Text style={[s.headerEyebrow, { color: isDark ? P.amber : theme.textMuted }]}>MarketHub Niger</Text>
+            <Text style={[s.headerTitle, { color: theme.text }]}>Mes Favoris</Text>
           </View>
           <View style={s.headerBadge}>
             <LinearGradient colors={[P.orange500, P.orange600]} style={s.headerBadgeGrad}>
@@ -402,7 +404,7 @@ export default function FavoritesScreen({ navigation }) {
           </View>
         </View>
 
-        {favorites.length > 0 && <StatsBar count={favorites.length} />}
+        {favorites.length > 0 && <StatsBar count={favorites.length} isDark={isDark} theme={theme} />}
 
         {/* Bottom glow line */}
         <LinearGradient
@@ -430,7 +432,7 @@ export default function FavoritesScreen({ navigation }) {
   // ─── GUARD: NON CONNECTÉ ───────────────────────────────────────────────────
   if (!isAuthenticated) {
     return (
-      <View style={[s.container, { paddingTop: insets.top }]}>
+      <View style={[s.container, { paddingTop: insets.top, backgroundColor: theme.screen }]}>
         {renderHeader()}
         <EmptyState 
           type="auth" 
@@ -446,7 +448,7 @@ export default function FavoritesScreen({ navigation }) {
   // ─── GUARD: CHARGEMENT ─────────────────────────────────────────────────────
   if (loading) {
     return (
-      <View style={s.container}>
+      <View style={[s.container, { backgroundColor: theme.screen }]}> 
         {renderHeader()}
         <View style={s.loadingContainer}>
           <ActivityIndicator size="large" color={P.terra} />
@@ -459,7 +461,7 @@ export default function FavoritesScreen({ navigation }) {
   // ─── GUARD: LISTE VIDE ─────────────────────────────────────────────────────
   if (favorites.length === 0) {
     return (
-      <View style={s.container}>
+      <View style={[s.container, { backgroundColor: theme.screen }]}> 
         {renderHeader()}
         <EmptyState type="empty" onAction={() => navigation.navigate('Home')} />
       </View>
@@ -468,7 +470,7 @@ export default function FavoritesScreen({ navigation }) {
 
   // ─── LISTE ─────────────────────────────────────────────────────────────────
   return (
-    <View style={s.container}>
+    <View style={[s.container, { backgroundColor: theme.screen }]}> 
       {renderHeader()}
       <FlatList
         data={favorites}
@@ -590,6 +592,8 @@ const s = StyleSheet.create({
     paddingVertical: 12,
     paddingHorizontal: 14,
     borderRadius: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
   },
   statPillNum: {
     fontSize: 26,

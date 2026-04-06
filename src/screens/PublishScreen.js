@@ -12,6 +12,7 @@ import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as ImagePicker from 'expo-image-picker';
 import { useAuth } from '../contexts/AuthContext';
+import { useAppTheme } from '../contexts/ThemeContext';
 import { getCategories } from '../api/categories';
 import { createProduct, updateProduct, imagesToBase64 } from '../api/products';
 import AlertModal from '../components/AlertModal';
@@ -49,22 +50,43 @@ const isRemoteImageUrl = (value) => /^https?:\/\//i.test(String(value || ''));
 // Variable globale pour stocker le brouillon temporaire pendant l'authentification
 let temporaryDraftStore = null;
 
-function Field({ label, error, children }) {
+function Field({ label, error, children, inline = false, labelWidth = 88 }) {
+  const { theme } = useAppTheme();
+
   return (
     <View style={f.field}>
-      <Text style={f.label}>{label}</Text>
-      {children}
+      {inline ? (
+        <View style={f.inlineRow}>
+          <Text style={[f.label, f.labelInline, { color: theme.text, width: labelWidth }]}>{label}</Text>
+          <View style={f.inlineControl}>{children}</View>
+        </View>
+      ) : (
+        <>
+          <Text style={[f.label, { color: theme.text }]}>{label}</Text>
+          {children}
+        </>
+      )}
       {error ? <Text style={f.error}>{error}</Text> : null}
     </View>
   );
 }
 
 function StepInput({ placeholder, value, onChangeText, keyboardType, multiline, error }) {
+  const { theme } = useAppTheme();
+
   return (
     <TextInput
-      style={[f.input, multiline && f.textarea, error && f.inputErr]}
+      style={[
+        f.input,
+        {
+          backgroundColor: theme.inputBg,
+          borderColor: error ? P.error : theme.border,
+          color: theme.inputText,
+        },
+        multiline && f.textarea,
+      ]}
       placeholder={placeholder}
-      placeholderTextColor={P.muted}
+      placeholderTextColor={theme.inputPlaceholder}
       value={value}
       onChangeText={onChangeText}
       keyboardType={keyboardType || 'default'}
@@ -76,10 +98,16 @@ function StepInput({ placeholder, value, onChangeText, keyboardType, multiline, 
 }
 
 function ChoiceBtn({ label, emoji, active, onPress, accent = P.terra, activeBg = P.peachSoft }) {
+  const { theme } = useAppTheme();
+
   return (
     <TouchableOpacity
       style={[
         f.choice,
+        {
+          backgroundColor: theme.surface,
+          borderColor: theme.border,
+        },
         active && {
           borderColor: accent,
           backgroundColor: activeBg,
@@ -89,7 +117,7 @@ function ChoiceBtn({ label, emoji, active, onPress, accent = P.terra, activeBg =
       activeOpacity={0.8}
     >
       {emoji ? <Text style={f.choiceEmoji}>{emoji}</Text> : null}
-      <Text style={[f.choiceTxt, active && { color: accent, fontWeight: '800' }]}>{label}</Text>
+      <Text style={[f.choiceTxt, { color: theme.textMuted }, active && { color: accent, fontWeight: '800' }]}>{label}</Text>
     </TouchableOpacity>
   );
 }
@@ -99,6 +127,7 @@ function ChoiceBtn({ label, emoji, active, onPress, accent = P.terra, activeBg =
 // ─────────────────────────────────────────────────────────────────────────────
 export default function PublishScreen({ navigation, route }) {
   const insets = useSafeAreaInsets();
+  const { isDark, theme } = useAppTheme();
   const tabBarHeight = useBottomTabBarHeight();
   const footerOffset = Math.max(tabBarHeight - insets.bottom, 0);
   const { user, isAuthenticated } = useAuth();
@@ -443,6 +472,9 @@ export default function PublishScreen({ navigation, route }) {
   const selectedCat = categories.find(c => c._id === form.category);
   const wordCount   = form.description.trim().split(/\s+/).filter(Boolean).length;
   const isService   = form.type === 'service';
+  const accent = isService ? P.blue : P.terra;
+  const accentSoft = isService ? '#DBEAFE' : P.peachSoft;
+  const accentDark = isService ? '#1D4ED8' : P.orange700;
   
   const d = {
     headerAccent: { backgroundColor: P.blue },
@@ -470,46 +502,64 @@ export default function PublishScreen({ navigation, route }) {
   // ── Rendu principal ─────────────────────────────────────────────────────────
   return (
     <KeyboardAvoidingView
-      style={s.container}
+      style={[s.container, { backgroundColor: theme.screen }]}
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       keyboardVerticalOffset={Platform.OS === 'ios' ? insets.top : 0}
     >
-      <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
+      <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} backgroundColor="transparent" translucent />
 
       {/* ── HEADER ─────────────────────────────────────────────────────── */}
       <LinearGradient
-        colors={['#2d3748','#374151']}
+        colors={theme.header}
         style={[s.header, { paddingTop: (insets.top || 0) + 6 }]}
       >
-        <View style={[s.headerAccent, isService && d.headerAccent]} />
+        <View style={[s.headerAccent, { backgroundColor: accent }, isService && d.headerAccent]} />
         <View style={s.headerRow}>
           <View>
-            <Text style={s.headerEye}>MarketHub Niger</Text>
-            <Text style={s.headerTitle}>Publier une annonce</Text>
+            <Text style={[s.headerEye, { color: theme.textMuted }]}>MarketHub Niger</Text>
+            <Text style={[s.headerTitle, { color: theme.text }]}>Publier une annonce</Text>
           </View>
-          <View style={s.stepBadge}>
-            <Text style={s.stepBadgeTxt}>{step}/3</Text>
+          <View style={[s.stepBadge, { backgroundColor: theme.glass, borderColor: theme.border }]}>
+            <Text style={[s.stepBadgeTxt, { color: theme.text }]}>{step}/3</Text>
           </View>
         </View>
 
         {/* Barre de progression */}
         <View style={s.progWrap}>
           {[1,2,3].map(n => (
-            <View key={n} style={[s.progSeg, n <= step && s.progSegActive, n <= step && isService && d.progSegActive, n < step && s.progSegDone, n < step && isService && d.progSegDone]} />
+            <View
+              key={n}
+              style={[
+                s.progSeg,
+                { backgroundColor: theme.divider },
+                n <= step && [s.progSegActive, { backgroundColor: accentSoft }],
+                n < step && [s.progSegDone, { backgroundColor: accent }],
+                n <= step && isService && d.progSegActive,
+                n < step && isService && d.progSegDone,
+              ]}
+            />
           ))}
         </View>
 
         {/* Labels étapes */}
         <View style={s.stepLabels}>
           {['Infos de base','Détails','Résumé'].map((l,i) => (
-            <Text key={i} style={[s.stepLabel, i+1 === step && s.stepLabelActive, i+1 === step && isService && d.stepLabelActive]}>
+            <Text
+              key={i}
+              style={[
+                s.stepLabel,
+                { color: theme.textSoft },
+                i+1 === step && [s.stepLabelActive, { color: accent }],
+                i+1 === step && isService && d.stepLabelActive,
+              ]}
+            >
               {i+1 === step ? '● ' : ''}{l}
             </Text>
           ))}
         </View>
 
         <LinearGradient
-          colors={['transparent', isService ? P.blue : P.terra, 'transparent']}
+          colors={['transparent', accent, 'transparent']}
           start={{x:0,y:0}} end={{x:1,y:0}}
           style={s.headerGlow}
         />
@@ -527,7 +577,7 @@ export default function PublishScreen({ navigation, route }) {
         {/* ══════════ ÉTAPE 1 ══════════════════════════════════════════ */}
         {step === 1 && (
           <View>
-            <Text style={s.sectionTitle}>Informations de base</Text>
+            {/* <Text style={[s.sectionTitle, { color: theme.text }]}>Informations de base</Text> */}
 
             {/* Type */}
             <Field label="Type d'annonce *">
@@ -552,7 +602,7 @@ export default function PublishScreen({ navigation, route }) {
             </Field>
 
             {/* Titre */}
-            <Field label="Titre *" error={errors.title}>
+            <Field label="Titre *" error={errors.title} inline labelWidth={72}>
               <StepInput
                 placeholder="Ex: iPhone 13 Pro Max 256GB"
                 value={form.title}
@@ -575,14 +625,19 @@ export default function PublishScreen({ navigation, route }) {
                     {categories.map(cat => (
                       <TouchableOpacity
                         key={cat._id}
-                        style={[s.catCard, form.category===cat._id && s.catCardActive, form.category===cat._id && isService && d.catCardActive]}
+                        style={[
+                          s.catCard,
+                          { backgroundColor: theme.surface, borderColor: theme.border, shadowColor: theme.shadow },
+                          form.category===cat._id && [s.catCardActive, { borderColor: accent, backgroundColor: accentSoft }],
+                          form.category===cat._id && isService && d.catCardActive,
+                        ]}
                         onPress={() => set('category', cat._id)}
                         activeOpacity={0.8}
                       >
-                        <View style={[s.catIconWrap, form.category===cat._id && isService && d.catIconWrapActive, form.category===cat._id && !isService && s.catIconWrapActive]}>
+                        <View style={[s.catIconWrap, { backgroundColor: theme.surfaceAlt }, form.category===cat._id && isService && d.catIconWrapActive, form.category===cat._id && !isService && s.catIconWrapActive]}>
                           <Text style={[s.catEmoji, form.category===cat._id && isService && d.catEmojiActive]}>{getEmoji(cat.icon)}</Text>
                         </View>
-                        <Text style={[s.catName, form.category===cat._id && s.catNameActive, form.category===cat._id && isService && d.catNameActive]}>
+                        <Text style={[s.catName, { color: theme.text }, form.category===cat._id && [s.catNameActive, { color: accent }], form.category===cat._id && isService && d.catNameActive]}>
                           {cat.name}
                         </Text>
                       </TouchableOpacity>
@@ -599,12 +654,12 @@ export default function PublishScreen({ navigation, route }) {
                   {selectedCat.subcategories.map(sub => (
                     <TouchableOpacity
                       key={sub._id}
-                      style={[s.subChip, form.subcategory===sub.slug && s.subChipActive, form.subcategory===sub.slug && isService && d.subChipActive]}
+                      style={[s.subChip, { backgroundColor: theme.surface, borderColor: theme.border }, form.subcategory===sub.slug && [s.subChipActive, { borderColor: accent, backgroundColor: accentSoft }], form.subcategory===sub.slug && isService && d.subChipActive]}
                       onPress={() => set('subcategory', sub.slug)}
                       activeOpacity={0.8}
                     >
                       <Text style={{fontSize:16}}>{getEmoji(sub.icon)}</Text>
-                      <Text style={[s.subChipTxt, form.subcategory===sub.slug && s.subChipTxtActive, form.subcategory===sub.slug && isService && d.subChipTxtActive]}>
+                      <Text style={[s.subChipTxt, { color: theme.textMuted }, form.subcategory===sub.slug && [s.subChipTxtActive, { color: accent }], form.subcategory===sub.slug && isService && d.subChipTxtActive]}>
                         {sub.name}
                       </Text>
                     </TouchableOpacity>
@@ -618,20 +673,20 @@ export default function PublishScreen({ navigation, route }) {
         {/* ══════════ ÉTAPE 2 ══════════════════════════════════════════ */}
         {step === 2 && (
           <View>
-            <Text style={s.sectionTitle}>Détails de l'annonce</Text>
+            {/* <Text style={[s.sectionTitle, { color: theme.text }]}>Détails de l'annonce</Text> */}
 
             {/* Prix */}
-            <Field label="Prix en FCFA *" error={errors.price}>
+            <Field label="Prix *" error={errors.price} inline labelWidth={72}>
               <View style={s.priceWrap}>
                 <StepInput
-                  placeholder="Ex: 850000"
+                  placeholder="850000"
                   value={form.price}
                   onChangeText={t => set('price', t.replace(/\D/g,''))}
                   keyboardType="numeric"
                   error={errors.price}
                 />
                 {form.price ? (
-                  <Text style={s.pricePreview}>{parseInt(form.price).toLocaleString('fr-FR')} FCFA</Text>
+                  <Text style={[s.pricePreview, { color: accent }]}>{parseInt(form.price).toLocaleString('fr-FR')} FCFA</Text>
                 ) : null}
               </View>
             </Field>
@@ -654,8 +709,8 @@ export default function PublishScreen({ navigation, route }) {
             {form.type === 'product' && (
               <Field label="État du produit *">
                 <View style={f.row}>
-                  <ChoiceBtn label="Neuf"      active={form.condition==='new'}  onPress={() => set('condition','new')} />
                   <ChoiceBtn label="Occasion"  active={form.condition==='used'} onPress={() => set('condition','used')} />
+                  <ChoiceBtn label="Neuf"      active={form.condition==='new'}  onPress={() => set('condition','new')} />
                 </View>
               </Field>
             )}
@@ -687,16 +742,16 @@ export default function PublishScreen({ navigation, route }) {
             {/* Livraison (produit) */}
             {form.type === 'product' && (
               <>
-                <View style={s.switchCard}>
+                <View style={[s.switchCard, { backgroundColor: theme.surface, borderColor: theme.border }]}>
                   <View style={{flex:1}}>
-                    <Text style={s.switchLabel}>🚚 Livraison disponible</Text>
-                    <Text style={s.switchSub}>Proposez-vous la livraison ?</Text>
+                    <Text style={[s.switchLabel, { color: theme.text }]}>🚚 Livraison disponible</Text>
+                    <Text style={[s.switchSub, { color: theme.textMuted }]}>Proposez-vous la livraison ?</Text>
                   </View>
                   <Switch
                     value={form.delivery}
                     onValueChange={v => set('delivery', v)}
-                    trackColor={{false:P.dim, true:P.amber}}
-                    thumbColor={form.delivery ? P.terra : P.white}
+                    trackColor={{false:theme.divider, true:accentSoft}}
+                    thumbColor={form.delivery ? accent : theme.surface}
                   />
                 </View>
 
@@ -713,9 +768,9 @@ export default function PublishScreen({ navigation, route }) {
                     <Field label="Zones de livraison">
                       <View style={s.tagInput}>
                         <TextInput
-                          style={[f.input, {flex:1, marginBottom:0}]}
+                          style={[f.input, {flex:1, marginBottom:0, backgroundColor: theme.inputBg, borderColor: theme.border, color: theme.inputText}]}
                           placeholder="Ex: Niamey, Maradi…"
-                          placeholderTextColor={P.muted}
+                          placeholderTextColor={theme.inputPlaceholder}
                           value={delArea}
                           onChangeText={setDelArea}
                         />
@@ -735,7 +790,7 @@ export default function PublishScreen({ navigation, route }) {
                         <View style={s.tags}>
                           {form.deliveryAreas.map((a,i) => (
                             <TouchableOpacity
-                              key={i} style={s.tag}
+                              key={i} style={[s.tag, { backgroundColor: accent }]}
                               onPress={() => set('deliveryAreas', form.deliveryAreas.filter((_,j) => j!==i))}
                             >
                               <Text style={s.tagTxt}>{a} ✕</Text>
@@ -751,16 +806,16 @@ export default function PublishScreen({ navigation, route }) {
                 <Field label="📑 Spécifications (optionnel)">
                   <View style={s.specInputRow}>
                     <TextInput
-                      style={[f.input, {flex:1, marginBottom:0}]}
+                      style={[f.input, {flex:1, marginBottom:0, backgroundColor: theme.inputBg, borderColor: theme.border, color: theme.inputText}]}
                       placeholder="Caractéristique"
-                      placeholderTextColor={P.muted}
+                      placeholderTextColor={theme.inputPlaceholder}
                       value={specKey}
                       onChangeText={setSpecKey}
                     />
                     <TextInput
-                      style={[f.input, {flex:1, marginBottom:0}]}
+                      style={[f.input, {flex:1, marginBottom:0, backgroundColor: theme.inputBg, borderColor: theme.border, color: theme.inputText}]}
                       placeholder="Valeur"
-                      placeholderTextColor={P.muted}
+                      placeholderTextColor={theme.inputPlaceholder}
                       value={specVal}
                       onChangeText={setSpecVal}
                     />
@@ -777,14 +832,14 @@ export default function PublishScreen({ navigation, route }) {
                     </TouchableOpacity>
                   </View>
                   {Object.keys(form.specifications).length > 0 && (
-                    <View style={s.specsList}>
+                    <View style={[s.specsList, { backgroundColor: theme.surfaceAlt }]}> 
                       {Object.entries(form.specifications).map(([k,v]) => (
                         <TouchableOpacity
-                          key={k} style={s.specItem}
+                          key={k} style={[s.specItem, { backgroundColor: theme.surface, borderColor: theme.border }]}
                           onPress={() => { const ns={...form.specifications}; delete ns[k]; set('specifications',ns); }}
                         >
-                          <Text style={s.specK}>{k}:</Text>
-                          <Text style={s.specV}> {v}</Text>
+                          <Text style={[s.specK, { color: theme.text }]}>{k}:</Text>
+                          <Text style={[s.specV, { color: theme.text }]}> {v}</Text>
                           <Text style={s.specDel}> ✕</Text>
                         </TouchableOpacity>
                       ))}
@@ -799,7 +854,7 @@ export default function PublishScreen({ navigation, route }) {
               <Field label="🕒 Horaires de disponibilité">
                 <View style={s.timeRow}>
                   <View style={{flex:1, marginRight:8}}>
-                    <Text style={s.timeLabel}>Ouverture</Text>
+                    <Text style={[s.timeLabel, { color: theme.textMuted }]}>Ouverture</Text>
                     <StepInput
                       placeholder="8h00"
                       value={form.availability.openingTime}
@@ -807,7 +862,7 @@ export default function PublishScreen({ navigation, route }) {
                     />
                   </View>
                   <View style={{flex:1}}>
-                    <Text style={s.timeLabel}>Fermeture</Text>
+                    <Text style={[s.timeLabel, { color: theme.textMuted }]}>Fermeture</Text>
                     <StepInput
                       placeholder="18h00"
                       value={form.availability.closingTime}
@@ -823,7 +878,7 @@ export default function PublishScreen({ navigation, route }) {
         {/* ══════════ ÉTAPE 3 — RÉSUMÉ ════════════════════════════════ */}
         {step === 3 && (
           <View>
-            <Text style={s.sectionTitle}>Résumé de votre annonce</Text>
+            <Text style={[s.sectionTitle, { color: theme.text }]}>Résumé de votre annonce</Text>
 
             {/* Preview image principale */}
             {form.images.length > 0 && (
@@ -851,9 +906,9 @@ export default function PublishScreen({ navigation, route }) {
               form.type==='product' && form.delivery && { label:'🚚 Livraison', value: form.deliveryCost ? `${parseInt(form.deliveryCost).toLocaleString('fr-FR')} FCFA` : 'Incluse' },
               form.type==='service' && form.availability.openingTime && { label:'🕒 Horaires', value: `${form.availability.openingTime} — ${form.availability.closingTime}` },
             ].filter(Boolean).map((row, i) => (
-              <View key={i} style={s.summaryRow}>
-                <Text style={s.summaryLabel}>{row.label}</Text>
-                <Text style={[s.summaryVal, row.accent && {color:P.terra, fontWeight:'900', fontSize:17}]}>
+              <View key={i} style={[s.summaryRow, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+                <Text style={[s.summaryLabel, { color: theme.textMuted }]}>{row.label}</Text>
+                <Text style={[s.summaryVal, { color: theme.text }, row.accent && {color:accent, fontWeight:'900', fontSize:17}]}>
                   {row.value}
                 </Text>
               </View>
@@ -861,8 +916,8 @@ export default function PublishScreen({ navigation, route }) {
 
             {/* Photos miniatures */}
             {form.images.length > 1 && (
-              <View style={s.summaryRow}>
-                <Text style={s.summaryLabel}>Photos</Text>
+              <View style={[s.summaryRow, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+                <Text style={[s.summaryLabel, { color: theme.textMuted }]}>Photos</Text>
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{marginTop:6}}>
                   {form.images.map((uri,i) => (
                     <Image key={i} source={{uri}} style={s.summaryThumb} />
@@ -872,17 +927,17 @@ export default function PublishScreen({ navigation, route }) {
             )}
 
             {/* Vendeur info */}
-            <View style={s.sellerBox}>
+            <View style={[s.sellerBox, { backgroundColor: theme.surfaceAlt, borderColor: theme.border }]}> 
               <View style={[s.sellerBoxAccent, isService && d.sellerBoxAccent]} />
-              <Text style={s.sellerBoxTitle}>Vos coordonnées</Text>
+              <Text style={[s.sellerBoxTitle, { color: theme.text }]}>Vos coordonnées</Text>
               {isAuthenticated && user ? (
                 <>
-                  <Text style={s.sellerBoxItem}>📍 {user.location || 'Niger'}</Text>
-                  <Text style={s.sellerBoxItem}>👤 {user.name}</Text>
-                  <Text style={s.sellerBoxItem}>📞 {user.phone}</Text>
+                  <Text style={[s.sellerBoxItem, { color: theme.textMuted }]}>📍 {user.location || 'Niger'}</Text>
+                  <Text style={[s.sellerBoxItem, { color: theme.textMuted }]}>👤 {user.name}</Text>
+                  <Text style={[s.sellerBoxItem, { color: theme.textMuted }]}>📞 {user.phone}</Text>
                 </>
               ) : (
-                <Text style={s.sellerBoxItem}>🔒 Vos informations apparaîtront après la connexion</Text>
+                <Text style={[s.sellerBoxItem, { color: theme.textMuted }]}>🔒 Vos informations apparaîtront après la connexion</Text>
               )}
             </View>
           </View>
@@ -893,6 +948,7 @@ export default function PublishScreen({ navigation, route }) {
       <View
         style={[
           s.footer,
+          { backgroundColor: theme.surface, borderTopColor: theme.border },
           {
             marginBottom: keyboardVisible ? 0 : footerOffset,
             paddingBottom: Math.max(insets.bottom, 12) + 4,
@@ -900,8 +956,8 @@ export default function PublishScreen({ navigation, route }) {
         ]}
       >
         {step > 1 && (
-          <TouchableOpacity style={[s.btnBack, isService && d.btnBack]} onPress={prev} activeOpacity={0.8}>
-            <Text style={[s.btnBackTxt, isService && d.btnBackTxt]}>← Retour</Text>
+          <TouchableOpacity style={[s.btnBack, { borderColor: accent, backgroundColor: theme.surfaceAlt }, isService && d.btnBack]} onPress={prev} activeOpacity={0.8}>
+            <Text style={[s.btnBackTxt, { color: accent }, isService && d.btnBackTxt]}>← Retour</Text>
           </TouchableOpacity>
         )}
         <TouchableOpacity
@@ -911,7 +967,7 @@ export default function PublishScreen({ navigation, route }) {
           activeOpacity={0.85}
         >
           <LinearGradient
-            colors={isService ? [P.blue, '#1D4ED8'] : [P.orange500, P.orange700]}
+            colors={[accent, accentDark]}
             start={{x:0,y:0}} end={{x:1,y:0}}
             style={s.btnNextGrad}
           >
@@ -933,13 +989,13 @@ export default function PublishScreen({ navigation, route }) {
 
       {/* ── LOADER FULL SCREEN BLAZING FAST RENDERING ── */}
       <Modal visible={submitting} transparent={true} animationType="fade" statusBarTranslucent>
-        <View style={s.loaderOverlay}>
-          <View style={s.loaderBox}>
+        <View style={[s.loaderOverlay, { backgroundColor: theme.overlay }]}> 
+          <View style={[s.loaderBox, { backgroundColor: theme.surface }]}> 
             <View style={[s.loaderIconWrap, isService && d.loaderIconWrap]}>
               <ActivityIndicator size="large" color={P.white} />
             </View>
-            <Text style={s.loaderTitle}>{isEditing ? 'Mise a jour en cours...' : 'Creation en cours...'}</Text>
-            <Text style={s.loaderSub}>
+            <Text style={[s.loaderTitle, { color: theme.text }]}>{isEditing ? 'Mise a jour en cours...' : 'Creation en cours...'}</Text>
+            <Text style={[s.loaderSub, { color: theme.textMuted }]}>
               {isEditing
                 ? 'Veuillez patienter pendant la mise a jour de votre annonce'
                 : 'Veuillez patienter pendant la publication de votre annonce'}
@@ -954,7 +1010,10 @@ export default function PublishScreen({ navigation, route }) {
 // ─── STYLES CHAMPS ────────────────────────────────────────────────────────────
 const f = StyleSheet.create({
   field:         { marginBottom: 16 },
+  inlineRow:     { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  inlineControl: { flex: 1 },
   label:         { fontSize: 13, fontWeight: '700', color: P.brown, marginBottom: 8 },
+  labelInline:   { marginBottom: 0 },
   error:         { fontSize: 12, color: P.error, marginTop: 4 },
   input:         { backgroundColor: P.white, borderWidth: 1, borderColor: P.dim, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 13, fontSize: 15, color: P.charcoal, marginBottom: 0 },
   inputErr:      { borderColor: P.error },
@@ -973,7 +1032,6 @@ const s = StyleSheet.create({
 
   // Header
   header:       { paddingHorizontal: 20, paddingBottom: 16, overflow: 'hidden', position: 'relative' },
-    header:       { paddingHorizontal: 20, paddingBottom: 16, overflow: 'hidden', position: 'relative' },
   headerAccent: { position: 'absolute', top: 0, left: 0, right: 0, height: 3, backgroundColor: P.terra },
   headerRow:    { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 },
   headerEye:    { fontSize: 10, fontWeight: '700', color: P.amber, letterSpacing: 2, textTransform: 'uppercase', marginBottom: 3 },

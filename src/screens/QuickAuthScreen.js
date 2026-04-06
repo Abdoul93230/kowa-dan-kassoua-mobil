@@ -13,18 +13,57 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useAuth } from '../contexts/AuthContext';
+import { useAppTheme } from '../contexts/ThemeContext';
 import { checkPhone, sendOTP } from '../api/auth';
 import { MOBILE_COLORS as P } from '../theme/colors';
 
 const COUNTRIES = [
-  { code: 'NE', name: 'Niger',         dialCode: '+227', flag: '🇳🇪' },
-  { code: 'SN', name: 'Sénégal',       dialCode: '+221', flag: '🇸🇳' },
-  { code: 'CI', name: "Côte d'Ivoire", dialCode: '+225', flag: '🇨🇮' },
-  { code: 'BF', name: 'Burkina Faso',  dialCode: '+226', flag: '🇧🇫' },
-  { code: 'ML', name: 'Mali',          dialCode: '+223', flag: '🇲🇱' },
-  { code: 'TG', name: 'Togo',          dialCode: '+228', flag: '🇹🇬' },
-  { code: 'BJ', name: 'Bénin',         dialCode: '+229', flag: '🇧🇯' },
+  { code: 'NE', name: 'Niger',         dialCode: '+227', flag: '🇳🇪', nationalLength: 8, phoneGroups: [2, 2, 2, 2], sample: '90 12 34 56' },
+  { code: 'SN', name: 'Sénégal',       dialCode: '+221', flag: '🇸🇳', nationalLength: 9, phoneGroups: [2, 3, 2, 2], sample: '77 123 45 67' },
+  { code: 'CI', name: "Côte d'Ivoire", dialCode: '+225', flag: '🇨🇮', nationalLength: 10, phoneGroups: [2, 2, 2, 2, 2], sample: '07 12 34 56 78' },
+  { code: 'BF', name: 'Burkina Faso',  dialCode: '+226', flag: '🇧🇫', nationalLength: 8, phoneGroups: [2, 2, 2, 2], sample: '70 12 34 56' },
+  { code: 'ML', name: 'Mali',          dialCode: '+223', flag: '🇲🇱', nationalLength: 8, phoneGroups: [2, 2, 2, 2], sample: '60 12 34 56' },
+  { code: 'TG', name: 'Togo',          dialCode: '+228', flag: '🇹🇬', nationalLength: 8, phoneGroups: [2, 2, 2, 2], sample: '90 12 34 56' },
+  { code: 'BJ', name: 'Bénin',         dialCode: '+229', flag: '🇧🇯', nationalLength: 8, phoneGroups: [2, 2, 2, 2], sample: '90 12 34 56' },
 ];
+
+const normalizePhoneDigits = (value = '') =>
+  String(value)
+    .replace(/\D/g, '')
+    .replace(/^0+/, '');
+
+const formatNationalPhone = (country, digits) => {
+  const chunks = [];
+  let cursor = 0;
+  const groups = country?.phoneGroups || [];
+
+  groups.forEach((size) => {
+    if (cursor >= digits.length) return;
+    const part = digits.slice(cursor, cursor + size);
+    if (part) chunks.push(part);
+    cursor += size;
+  });
+
+  if (cursor < digits.length) {
+    chunks.push(digits.slice(cursor));
+  }
+
+  return chunks.join(' ').trim();
+};
+
+const validatePhoneForCountry = (country, digits) => {
+  const maxLen = country?.nationalLength || 8;
+
+  if (!digits) return 'Numéro requis';
+  if (digits.length !== maxLen) {
+    return `Le numéro doit contenir ${maxLen} chiffres pour ${country?.name}.`;
+  }
+  if (/^(\d)\1+$/.test(digits)) {
+    return 'Numéro invalide';
+  }
+
+  return '';
+};
 
 // Étapes du parcours contextuel
 const STEP_PHONE = 'phone';       // Saisie du numéro
@@ -33,6 +72,7 @@ const STEP_REGISTER = 'register'; // Numéro inconnu → nom + envoi OTP
 
 export default function QuickAuthScreen({ navigation, route }) {
   const insets = useSafeAreaInsets();
+  const { isDark, theme } = useAppTheme();
   const { login } = useAuth();
 
   // Params passés par la navigation (action en attente)
@@ -50,6 +90,8 @@ export default function QuickAuthScreen({ navigation, route }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
+  const accent = P.terra;
+
   const fadeAnim = useRef(new Animated.Value(1)).current;
   const slideAnim = useRef(new Animated.Value(0)).current;
 
@@ -66,16 +108,31 @@ export default function QuickAuthScreen({ navigation, route }) {
     });
   };
 
+  const handlePhoneChange = (rawValue) => {
+    const maxDigits = country?.nationalLength || 8;
+    const digits = normalizePhoneDigits(rawValue).slice(0, maxDigits);
+    setPhone(formatNationalPhone(country, digits));
+    setError('');
+  };
+
+  useEffect(() => {
+    const maxDigits = country?.nationalLength || 8;
+    const currentDigits = normalizePhoneDigits(phone).slice(0, maxDigits);
+    setPhone(formatNationalPhone(country, currentDigits));
+  }, [country]);
+
   // ── Étape 1 : Vérifier le numéro ──
   const handleCheckPhone = async () => {
-    if (!phone.trim() || phone.trim().length < 7) {
-      setError('Numéro invalide (min 7 chiffres)');
+    const phoneDigits = normalizePhoneDigits(phone);
+    const phoneErr = validatePhoneForCountry(country, phoneDigits);
+    if (phoneErr) {
+      setError(phoneErr);
       return;
     }
     setLoading(true);
     setError('');
     try {
-      const fmtPhone = `${country.dialCode} ${phone.trim()}`;
+      const fmtPhone = `${country.dialCode} ${phoneDigits}`;
       const result = await checkPhone(fmtPhone);
       
       if (result.data?.exists) {
@@ -96,6 +153,13 @@ export default function QuickAuthScreen({ navigation, route }) {
 
   // ── Étape 2a : Login (numéro connu) ──
   const handleLogin = async () => {
+    const phoneDigits = normalizePhoneDigits(phone);
+    const phoneErr = validatePhoneForCountry(country, phoneDigits);
+    if (phoneErr) {
+      setError(phoneErr);
+      return;
+    }
+
     if (!password) {
       setError('Mot de passe requis');
       return;
@@ -103,7 +167,7 @@ export default function QuickAuthScreen({ navigation, route }) {
     setLoading(true);
     setError('');
     try {
-      const fmtPhone = `${country.dialCode} ${phone.trim()}`;
+      const fmtPhone = `${country.dialCode} ${phoneDigits}`;
       const result = await login(fmtPhone, password);
       if (!result.success) {
         setError(result.message || 'Identifiants incorrects');
@@ -120,6 +184,13 @@ export default function QuickAuthScreen({ navigation, route }) {
 
   // ── Étape 2b : Inscription rapide (numéro inconnu) ──
   const handleQuickRegister = async () => {
+    const phoneDigits = normalizePhoneDigits(phone);
+    const phoneErr = validatePhoneForCountry(country, phoneDigits);
+    if (phoneErr) {
+      setError(phoneErr);
+      return;
+    }
+
     if (!name.trim() || name.trim().length < 2) {
       setError('Minimum 2 caractères pour le nom');
       return;
@@ -127,7 +198,7 @@ export default function QuickAuthScreen({ navigation, route }) {
     setLoading(true);
     setError('');
     try {
-      const fmtPhone = `${country.dialCode} ${phone.trim()}`;
+      const fmtPhone = `${country.dialCode} ${phoneDigits}`;
       const result = await sendOTP(fmtPhone);
       
       if (result.success) {
@@ -191,7 +262,8 @@ export default function QuickAuthScreen({ navigation, route }) {
     }
   };
 
-  const fmtPhone = `${country.dialCode} ${phone.trim()}`;
+  const phoneDigits = normalizePhoneDigits(phone);
+  const fmtPhone = `${country.dialCode} ${formatNationalPhone(country, phoneDigits)}`;
 
   // ── Titre et sous-titre dynamiques ──
   const getTitle = () => {
@@ -214,39 +286,39 @@ export default function QuickAuthScreen({ navigation, route }) {
 
   return (
     <KeyboardAvoidingView
-      style={s.container}
+      style={[s.container, { backgroundColor: theme.screen }]}
       behavior={Platform.OS === 'ios' ? 'padding' : 'padding'}
     >
-      <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
+      <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} backgroundColor="transparent" translucent />
 
       {/* ── HEADER ── */}
       <LinearGradient
-        colors={[P.brown, P.charcoal]}
+        colors={theme.header}
         style={[s.header, { paddingTop: (insets.top || 0) + 6 }]}
       >
-        <View style={s.headerAccent} />
+        <View style={[s.headerAccent, { backgroundColor: accent }]} />
         <View style={s.headerRow}>
-          <TouchableOpacity style={s.backBtn} onPress={handleBack} activeOpacity={0.8}>
-            <Text style={s.backBtnTxt}>←</Text>
+          <TouchableOpacity style={[s.backBtn, { backgroundColor: theme.glass }]} onPress={handleBack} activeOpacity={0.8}>
+            <Text style={[s.backBtnTxt, { color: theme.text }]}>←</Text>
           </TouchableOpacity>
           <View style={s.headerCenter}>
             <LinearGradient colors={[P.orange500, P.orange700]} style={s.logoMini}>
               <Text style={s.logoMiniTxt}>M</Text>
             </LinearGradient>
-            <Text style={s.headerBrand}>MarketHub</Text>
+            <Text style={[s.headerBrand, { color: theme.text }]}>MarketHub</Text>
           </View>
           <View style={{ width: 38 }} />
         </View>
 
         {/* Indicateur d'étape */}
         <View style={s.stepIndicator}>
-          <View style={[s.stepDot, s.stepDotActive]} />
-          <View style={[s.stepDot, step !== STEP_PHONE && s.stepDotActive]} />
-          {step === STEP_REGISTER && <View style={[s.stepDot, s.stepDotActive]} />}
+          <View style={[s.stepDot, { backgroundColor: theme.divider }, s.stepDotActive, { backgroundColor: accent }]} />
+          <View style={[s.stepDot, { backgroundColor: theme.divider }, step !== STEP_PHONE && s.stepDotActive, step !== STEP_PHONE && { backgroundColor: accent }]} />
+          {step === STEP_REGISTER && <View style={[s.stepDot, { backgroundColor: accent }]} />}
         </View>
 
         <LinearGradient
-          colors={[P.charcoal, P.terra, P.charcoal]}
+          colors={[theme.divider, accent, theme.divider]}
           start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
           style={s.headerGlow}
         />
@@ -266,34 +338,38 @@ export default function QuickAuthScreen({ navigation, route }) {
             <Text style={s.heroIcon}>
               {step === STEP_PHONE ? '📱' : step === STEP_LOGIN ? '🔐' : '✨'}
             </Text>
-            <Text style={s.heroTitle}>{getTitle()}</Text>
-            <Text style={s.heroSub}>{getSubtitle()}</Text>
+            <Text style={[s.heroTitle, { color: theme.text }]}>{getTitle()}</Text>
+            <Text style={[s.heroSub, { color: theme.textMuted }]}>{getSubtitle()}</Text>
           </View>
 
           {/* ── ÉTAPE 1 : Téléphone ── */}
           {step === STEP_PHONE && (
             <View style={s.fieldZone}>
-              <Text style={s.fieldLabel}>Numéro de téléphone</Text>
+              <Text style={[s.fieldLabel, { color: theme.textMuted }]}>Numéro de téléphone</Text>
               <View style={s.phoneWrap}>
                 <TouchableOpacity
-                  style={s.dialBadge}
+                  style={[s.dialBadge, { backgroundColor: theme.surfaceAlt, borderColor: theme.border }]}
                   onPress={() => setShowPicker(true)}
                   activeOpacity={0.85}
                 >
                   <Text style={s.dialFlag}>{country.flag}</Text>
-                  <Text style={s.dialCode}>{country.dialCode}</Text>
-                  <Text style={s.dialArrow}>▾</Text>
+                  <Text style={[s.dialCode, { color: theme.text }]}>{country.dialCode}</Text>
+                  <Text style={[s.dialArrow, { color: theme.textMuted }]}>▾</Text>
                 </TouchableOpacity>
                 <TextInput
-                  style={s.phoneInput}
-                  placeholder="12 34 56 78"
-                  placeholderTextColor={P.muted}
+                  style={[s.phoneInput, { color: theme.text, borderBottomColor: accent }]}
+                  placeholder={country.sample}
+                  placeholderTextColor={theme.inputPlaceholder}
                   value={phone}
-                  onChangeText={v => { setPhone(v); setError(''); }}
+                  onChangeText={handlePhoneChange}
                   keyboardType="phone-pad"
+                  maxLength={(country?.nationalLength || 8) + ((country?.phoneGroups?.length || 1) - 1)}
+                  autoComplete="tel"
+                  textContentType="telephoneNumber"
                   autoFocus
                 />
               </View>
+              <Text style={[s.phoneHelper, { color: theme.textSoft }]}>Format attendu: {country.sample} ({country.nationalLength} chiffres)</Text>
             </View>
           )}
 
@@ -303,9 +379,9 @@ export default function QuickAuthScreen({ navigation, route }) {
               {/* Phone affiché (non modifiable) */}
               <View style={s.fieldZone}>
                 <Text style={s.fieldLabel}>Numéro de téléphone</Text>
-                <View style={s.phoneReadonly}>
+                <View style={[s.phoneReadonly, { backgroundColor: theme.surfaceAlt, borderColor: theme.border }]}>
                   <Text style={s.phoneReadonlyFlag}>{country.flag}</Text>
-                  <Text style={s.phoneReadonlyTxt}>{fmtPhone}</Text>
+                  <Text style={[s.phoneReadonlyTxt, { color: theme.text }]}>{fmtPhone}</Text>
                   <TouchableOpacity onPress={handleBack}>
                     <Text style={s.phoneChangeTxt}>Modifier</Text>
                   </TouchableOpacity>
@@ -317,9 +393,9 @@ export default function QuickAuthScreen({ navigation, route }) {
                 <Text style={s.fieldLabel}>Mot de passe</Text>
                 <View style={s.pwdWrap}>
                   <TextInput
-                    style={s.pwdInput}
+                    style={[s.pwdInput, { color: theme.text, borderBottomColor: accent }]}
                     placeholder="••••••••"
-                    placeholderTextColor={P.muted}
+                    placeholderTextColor={theme.inputPlaceholder}
                     value={password}
                     onChangeText={v => { setPassword(v); setError(''); }}
                     secureTextEntry={!showPwd}
@@ -349,9 +425,9 @@ export default function QuickAuthScreen({ navigation, route }) {
               {/* Phone affiché */}
               <View style={s.fieldZone}>
                 <Text style={s.fieldLabel}>Numéro de téléphone</Text>
-                <View style={s.phoneReadonly}>
+                  <View style={[s.phoneReadonly, { backgroundColor: theme.surfaceAlt, borderColor: theme.border }]}>
                   <Text style={s.phoneReadonlyFlag}>{country.flag}</Text>
-                  <Text style={s.phoneReadonlyTxt}>{fmtPhone}</Text>
+                    <Text style={[s.phoneReadonlyTxt, { color: theme.text }]}>{fmtPhone}</Text>
                   <TouchableOpacity onPress={handleBack}>
                     <Text style={s.phoneChangeTxt}>Modifier</Text>
                   </TouchableOpacity>
@@ -362,9 +438,9 @@ export default function QuickAuthScreen({ navigation, route }) {
               <View style={s.fieldZone}>
                 <Text style={s.fieldLabel}>Nom complet</Text>
                 <TextInput
-                  style={s.mainInput}
+                  style={[s.mainInput, { color: theme.inputText, borderBottomColor: accent, backgroundColor: theme.inputBg }]}
                   placeholder="Ex: Amadou Diallo"
-                  placeholderTextColor={P.muted}
+                  placeholderTextColor={theme.inputPlaceholder}
                   value={name}
                   onChangeText={v => { setName(v); setError(''); }}
                   autoCapitalize="words"
@@ -373,9 +449,9 @@ export default function QuickAuthScreen({ navigation, route }) {
               </View>
 
               {/* Info rassurant */}
-              <View style={s.infoBox}>
+              <View style={[s.infoBox, { backgroundColor: theme.surfaceAlt, borderColor: theme.border }]}>
                 <Text style={s.infoIcon}>🔒</Text>
-                <Text style={s.infoText}>
+                <Text style={[s.infoText, { color: theme.text }]}> 
                   Un mot de passe temporaire sera généré. Vous pourrez le modifier plus tard.
                 </Text>
               </View>
@@ -393,7 +469,7 @@ export default function QuickAuthScreen({ navigation, route }) {
       </ScrollView>
 
       {/* ── FOOTER bouton ── */}
-      <View style={[s.footer, { paddingBottom: Math.max(insets.bottom, 12) + 4 }]}>
+      <View style={[s.footer, { backgroundColor: theme.screen, borderTopColor: theme.divider, paddingBottom: Math.max(insets.bottom, 12) + 4 }]}> 
         <TouchableOpacity
           onPress={
             step === STEP_PHONE ? handleCheckPhone :
@@ -435,28 +511,32 @@ export default function QuickAuthScreen({ navigation, route }) {
             activeOpacity={1}
             onPress={() => setShowPicker(false)}
           />
-          <View style={[s.modal, { paddingBottom: Math.max(insets.bottom, 8) }]}>
-            <View style={s.modalHandle} />
-            <View style={s.modalHead}>
-              <Text style={s.modalTitle}>Choisir un pays</Text>
-              <TouchableOpacity onPress={() => setShowPicker(false)} style={s.modalClose}>
-                <Text style={s.modalCloseTxt}>✕</Text>
+          <View style={[s.modal, { backgroundColor: theme.surface, paddingBottom: Math.max(insets.bottom, 8) }]}> 
+            <View style={[s.modalHandle, { backgroundColor: theme.divider }]} />
+            <View style={[s.modalHead, { borderBottomColor: theme.border }]}> 
+              <Text style={[s.modalTitle, { color: theme.text }]}>Choisir un pays</Text>
+              <TouchableOpacity onPress={() => setShowPicker(false)} style={[s.modalClose, { backgroundColor: theme.surfaceAlt }]}>
+                <Text style={[s.modalCloseTxt, { color: theme.textMuted }]}>✕</Text>
               </TouchableOpacity>
             </View>
             <ScrollView showsVerticalScrollIndicator={false}>
               {COUNTRIES.map(c => (
                 <TouchableOpacity
                   key={c.code}
-                  style={[s.countryRow, country.code === c.code && s.countryRowActive]}
+                  style={[
+                    s.countryRow,
+                    { borderBottomColor: theme.border },
+                    country.code === c.code && [s.countryRowActive, { backgroundColor: theme.surfaceAlt }],
+                  ]}
                   onPress={() => { setCountry(c); setShowPicker(false); setError(''); }}
                   activeOpacity={0.8}
                 >
                   <Text style={s.countryRowFlag}>{c.flag}</Text>
-                  <Text style={[s.countryRowName, country.code === c.code && { color: P.terra }]}>
+                  <Text style={[s.countryRowName, { color: theme.text }, country.code === c.code && { color: accent }]}> 
                     {c.name}
                   </Text>
-                  <Text style={s.countryRowDial}>{c.dialCode}</Text>
-                  {country.code === c.code && <Text style={{ color: P.terra, fontWeight: '900' }}>✓</Text>}
+                  <Text style={[s.countryRowDial, { color: theme.textMuted }]}>{c.dialCode}</Text>
+                  {country.code === c.code && <Text style={{ color: accent, fontWeight: '900' }}>✓</Text>}
                 </TouchableOpacity>
               ))}
             </ScrollView>
@@ -523,6 +603,7 @@ const s = StyleSheet.create({
     flex: 1, fontSize: 18, fontWeight: '600', color: P.charcoal,
     borderBottomWidth: 2.5, borderBottomColor: P.terra, paddingVertical: 10,
   },
+  phoneHelper: { fontSize: 12, marginTop: 8 },
 
   // ── Phone readonly ──
   phoneReadonly:     { flexDirection: 'row', alignItems: 'center', backgroundColor: P.surface, borderRadius: 12, padding: 14, gap: 10, borderWidth: 1, borderColor: P.dim },

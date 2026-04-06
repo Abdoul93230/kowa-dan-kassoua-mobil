@@ -8,18 +8,20 @@ import {
   StatusBar,
 } from 'react-native';
 import { useAuth } from '../contexts/AuthContext';
+import { useAppTheme } from '../contexts/ThemeContext';
 import { COLORS } from '../utils/constants';
 
 export default function HomeScreen({ navigation }) {
   const { user, logout } = useAuth();
+  const { isDark, theme } = useAppTheme();
 
   const handleLogout = async () => {
     await logout();
   };
 
   return (
-    <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="dark-content" backgroundColor={COLORS.white} />
+    <SafeAreaView style={[styles.container, { backgroundColor: theme.screen }]}>
+      <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} backgroundColor="transparent" translucent />
       
       <View style={styles.content}>
         {/* Header */}

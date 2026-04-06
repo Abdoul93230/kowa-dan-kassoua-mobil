@@ -13,6 +13,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Feather } from '@expo/vector-icons';
 import { CATEGORIES } from '../utils/constants';
 import { apiClient } from '../api/auth';
+import { useAppTheme } from '../contexts/ThemeContext';
 import { MOBILE_COLORS as P } from '../theme/colors';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
@@ -473,6 +474,7 @@ const fc = StyleSheet.create({
 // ─────────────────────────────────────────────────────────────────────────────
 export default function CategoryProductsScreen({ route, navigation }) {
   const insets = useSafeAreaInsets();
+  const { isDark, theme: appTheme } = useAppTheme();
   const { categorySlug, categoryName } = route.params;
 
   const [products,     setProducts]     = useState([]);
@@ -495,6 +497,17 @@ export default function CategoryProductsScreen({ route, navigation }) {
   const modalAccent = isServiceFilter ? '#2563EB' : P.terra;
   const modalAccentDark = isServiceFilter ? '#1D4ED8' : P.orange700;
   const modalAccentSoft = isServiceFilter ? P.blue100 : P.peachSoft;
+  const uiTheme = {
+    screen: appTheme.screen,
+    header: appTheme.header,
+    headerText: appTheme.text,
+    headerSubText: appTheme.textMuted,
+    headerGlass: appTheme.glass,
+    statsGlass: appTheme.glass,
+    statDivider: appTheme.divider,
+    loadScreenColors: appTheme.shell,
+    loadBrandColor: appTheme.text,
+  };
 
   // ── Header shrink ──────────────────────────────────────────────────────────
   const headerHeight = scrollY.interpolate({
@@ -595,11 +608,11 @@ export default function CategoryProductsScreen({ route, navigation }) {
   if (loading) {
     return (
       <View style={s.loadScreen}>
-        <LinearGradient colors={[P.charcoal, P.brown]} style={s.loadInner}>
+        <LinearGradient colors={uiTheme.loadScreenColors} style={s.loadInner}>
           <LinearGradient colors={[P.gold, P.amber]} style={s.loadLogoBox}>
             <Text style={s.loadLogoTxt}>M</Text>
           </LinearGradient>
-          <Text style={s.loadBrand}>MarketHub</Text>
+          <Text style={[s.loadBrand, { color: uiTheme.loadBrandColor }]}>MarketHub</Text>
           <ActivityIndicator size="large" color={P.amber} style={{ marginTop: 24 }} />
         </LinearGradient>
       </View>
@@ -608,35 +621,35 @@ export default function CategoryProductsScreen({ route, navigation }) {
 
   // ── Rendu ──────────────────────────────────────────────────────────────────
   return (
-    <View style={s.screen}>
-      <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
+    <View style={[s.screen, { backgroundColor: uiTheme.screen }]}> 
+      <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} backgroundColor="transparent" translucent />
 
       {/* ══ HEADER SHRINKABLE ═══════════════════════════════════════════════ */}
       <Animated.View style={[s.header, { height: Animated.add(headerHeight, insets.top || 0) }]}>
-        <LinearGradient colors={[P.brown, P.charcoal]} style={StyleSheet.absoluteFill} />
-        <View style={s.headerAccent} />
+        <LinearGradient colors={uiTheme.header} style={StyleSheet.absoluteFill} />
+        <View style={[s.headerAccent, { backgroundColor: modalAccent }]} />
 
         <Animated.View style={[s.headerInner, { paddingTop: (insets.top || 0) + 6, opacity: headerFade }]}>
           {/* Ligne principale */}
           <View style={s.headerRow}>
-            <TouchableOpacity style={s.backBtn} onPress={() => navigation.goBack()} activeOpacity={0.8}>
-              <Text style={s.backBtnTxt}>←</Text>
+            <TouchableOpacity style={[s.backBtn, { backgroundColor: uiTheme.headerGlass }]} onPress={() => navigation.goBack()} activeOpacity={0.8}>
+              <Text style={[s.backBtnTxt, { color: uiTheme.headerText }]}>←</Text>
             </TouchableOpacity>
 
             <Animated.View style={[s.headerCenter, { transform: [{ scale: heroScale }] }]}>
               <View style={s.headerTitleRow}>
                 <Text style={s.headerEmoji}>{categoryEmoji}</Text>
-                <Animated.Text style={[s.headerTitle, { fontSize: titleSize }]} numberOfLines={1}>
+                <Animated.Text style={[s.headerTitle, { fontSize: titleSize, color: uiTheme.headerText }]} numberOfLines={1}>
                   {categoryName}
                 </Animated.Text>
               </View>
-              <Text style={s.headerCount}>{processed.length} annonce{processed.length > 1 ? 's' : ''}</Text>
+              <Text style={[s.headerCount, { color: uiTheme.headerSubText }]}>{processed.length} annonce{processed.length > 1 ? 's' : ''}</Text>
             </Animated.View>
 
             <View style={s.headerActions}>
               {/* Tri rapide */}
               <TouchableOpacity
-                style={s.actionBtn}
+                style={[s.actionBtn, { backgroundColor: uiTheme.headerGlass }]}
                 activeOpacity={0.8}
                 onPress={() => setSortBy(v => v === 'recent' ? 'price-asc' : v === 'price-asc' ? 'price-desc' : 'recent')}
               >
@@ -646,31 +659,31 @@ export default function CategoryProductsScreen({ route, navigation }) {
               </TouchableOpacity>
               {/* Filtre prix */}
               <TouchableOpacity
-                style={[s.actionBtn, filterActive && s.actionBtnActive]}
+                style={[s.actionBtn, { backgroundColor: uiTheme.headerGlass }, filterActive && [s.actionBtnActive, { backgroundColor: modalAccent }]]}
                 activeOpacity={0.8}
                 onPress={() => setShowFilter(true)}
               >
                 <Text style={s.actionBtnTxt}>⚖️</Text>
-                {filterActive && <View style={s.actionDot} />}
+                {filterActive && <View style={[s.actionDot, { borderColor: modalAccent }]} />}
               </TouchableOpacity>
             </View>
           </View>
 
           {/* Stats produits / services — disparaissent au scroll */}
-          <Animated.View style={[s.statsRow, { opacity: statsOpacity }]}>
-            <TouchableOpacity style={[s.statBox, filterType === 'all' && s.statBoxActive]} onPress={() => setFilterType('all')} activeOpacity={0.8}>
-              <Text style={s.statNum}>{products.length}</Text>
-              <Text style={s.statLbl}>Tout</Text>
+          <Animated.View style={[s.statsRow, { opacity: statsOpacity, backgroundColor: uiTheme.statsGlass }]}>
+            <TouchableOpacity style={[s.statBox, filterType === 'all' && [s.statBoxActive, { backgroundColor: modalAccent }]]} onPress={() => setFilterType('all')} activeOpacity={0.8}>
+              <Text style={[s.statNum, { color: filterType === 'all' ? P.white : uiTheme.headerText }]}>{products.length}</Text>
+              <Text style={[s.statLbl, { color: filterType === 'all' ? P.white : uiTheme.headerSubText }]}>Tout</Text>
             </TouchableOpacity>
-            <View style={s.statDivider} />
-            <TouchableOpacity style={[s.statBox, filterType === 'product' && s.statBoxActive]} onPress={() => setFilterType('product')} activeOpacity={0.8}>
-              <Text style={s.statNum}>{productsCount}</Text>
-              <Text style={s.statLbl}>📦 Produits</Text>
+            <View style={[s.statDivider, { backgroundColor: uiTheme.statDivider }]} />
+            <TouchableOpacity style={[s.statBox, filterType === 'product' && [s.statBoxActive, { backgroundColor: modalAccent }]]} onPress={() => setFilterType('product')} activeOpacity={0.8}>
+              <Text style={[s.statNum, { color: filterType === 'product' ? P.white : uiTheme.headerText }]}>{productsCount}</Text>
+              <Text style={[s.statLbl, { color: filterType === 'product' ? P.white : uiTheme.headerSubText }]}>📦 Produits</Text>
             </TouchableOpacity>
-            <View style={s.statDivider} />
-            <TouchableOpacity style={[s.statBox, filterType === 'service' && s.statBoxActive]} onPress={() => setFilterType('service')} activeOpacity={0.8}>
-              <Text style={s.statNum}>{servicesCount}</Text>
-              <Text style={s.statLbl}>🛠 Services</Text>
+            <View style={[s.statDivider, { backgroundColor: uiTheme.statDivider }]} />
+            <TouchableOpacity style={[s.statBox, filterType === 'service' && [s.statBoxActive, { backgroundColor: modalAccent }]]} onPress={() => setFilterType('service')} activeOpacity={0.8}>
+              <Text style={[s.statNum, { color: filterType === 'service' ? P.white : uiTheme.headerText }]}>{servicesCount}</Text>
+              <Text style={[s.statLbl, { color: filterType === 'service' ? P.white : uiTheme.headerSubText }]}>🛠 Services</Text>
             </TouchableOpacity>
           </Animated.View>
         </Animated.View>

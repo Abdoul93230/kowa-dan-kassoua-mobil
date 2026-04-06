@@ -14,6 +14,7 @@ import { CATEGORIES } from '../utils/constants';
 import { apiClient } from '../api/auth';
 import { getUnreadCount } from '../api/messaging';
 import { useAuth } from '../contexts/AuthContext';
+import { useAppTheme } from '../contexts/ThemeContext';
 import { useSocket } from '../hooks/useSocket';
 import { MOBILE_COLORS as P } from '../theme/colors';
 
@@ -95,7 +96,7 @@ function PulseBadge({ text }) {
 }
 
 // Ticker animé horizontal
-function StatsTicker({ stats }) {
+function StatsTicker({ stats, isDark, theme }) {
   const tx = useRef(new Animated.Value(width)).current;
   const [idx, setIdx] = useState(0);
 
@@ -117,10 +118,10 @@ function StatsTicker({ stats }) {
   }, [stats]);
 
   return (
-    <View style={s.ticker}>
+    <View style={[s.ticker, !isDark && { backgroundColor: theme.cardSoft, borderColor: theme.border }]}> 
       <View style={s.tickerPill} />
       <View style={s.tickerTrack}>
-        <Animated.Text style={[s.tickerTxt, { transform: [{ translateX: tx }] }]}>
+        <Animated.Text style={[s.tickerTxt, !isDark && { color: theme.textMuted }, { transform: [{ translateX: tx }] }]}>
           {msgs[idx]}
         </Animated.Text>
       </View>
@@ -300,6 +301,7 @@ function EmptyCard({ text }) {
 export default function ProductsListScreen({ navigation }) {
   const insets = useSafeAreaInsets();
   const { isAuthenticated, token } = useAuth();
+  const { isDark, theme } = useAppTheme();
   const { isConnected, on, off } = useSocket({
     enabled: isAuthenticated,
     token,
@@ -451,8 +453,8 @@ export default function ProductsListScreen({ navigation }) {
   // ─── Loading screen ────────────────────────────────────────────────────────
   if (loading) {
     return (
-      <LinearGradient colors={[P.charcoal, P.brown]} style={s.loadScreen}>
-        <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
+      <LinearGradient colors={theme.shell} style={s.loadScreen}>
+        <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} backgroundColor="transparent" translucent />
         <View style={s.loadLogoWrap}>
           <LinearGradient colors={[P.orange500, P.orange700]} style={s.loadLogoBox}>
             <Text style={s.loadLogoTxt}>M</Text>
@@ -460,8 +462,8 @@ export default function ProductsListScreen({ navigation }) {
           {/* Anneau décoratif */}
           <View style={s.loadRing} />
         </View>
-        <Text style={s.loadBrand}>MarketHub</Text>
-        <Text style={s.loadSlogan}>Kowa Dan Kassoua · Niger</Text>
+        <Text style={[s.loadBrand, { color: theme.text }]}>MarketHub</Text>
+        <Text style={[s.loadSlogan, { color: theme.textMuted }]}>Kowa Dan Kassoua · Niger</Text>
         <ActivityIndicator size="large" color={P.amber} style={{ marginTop: 40 }} />
       </LinearGradient>
     );
@@ -469,8 +471,8 @@ export default function ProductsListScreen({ navigation }) {
 
   // ─── Rendu principal ───────────────────────────────────────────────────────
   return (
-    <View style={s.screen}>
-      <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
+    <View style={[s.screen, { backgroundColor: theme.screen }]}> 
+      <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} backgroundColor="transparent" translucent />
 
       <ScrollView
         showsVerticalScrollIndicator={false}
@@ -484,7 +486,7 @@ export default function ProductsListScreen({ navigation }) {
             HERO — fond sombre premium
         ═══════════════════════════════════════════════════════════════════ */}
         <LinearGradient
-          colors={['#2d3748', '#374151', '#3d4a5c']}
+          colors={theme.header}
           start={{ x: 0, y: 0 }}
           end={{ x: 1, y: 1 }}
           style={[s.hero, { paddingTop: (insets.top || 0) + 8 }]}
@@ -504,11 +506,11 @@ export default function ProductsListScreen({ navigation }) {
                 <Text style={s.logoTxt}>M</Text>
               </LinearGradient>
               <View style={{ flex: 1 }}>
-                <Text style={s.brandName}>MarketHub</Text>
-                <Text style={s.brandSub}>Kowa Dan Kassoua · Niger</Text>
+                <Text style={[s.brandName, { color: theme.text }]}>MarketHub</Text>
+                <Text style={[s.brandSub, { color: theme.textMuted }]}>Kowa Dan Kassoua · Niger</Text>
               </View>
               <TouchableOpacity
-                style={s.notifBox}
+                style={[s.notifBox, { backgroundColor: theme.cardSoft, borderColor: theme.border }]}
                 onPress={() => {
                   if (!isAuthenticated) {
                     navigation.navigate('QuickAuth', {
@@ -540,7 +542,7 @@ export default function ProductsListScreen({ navigation }) {
 
             {/* ── Accroche ── */}
             <View style={s.heroTextWrap}>
-              <Text style={s.heroH1}>
+                  <Text style={[s.heroH1, { color: theme.text }]}>
                 Trouvez, contactez,{'\n'}
                 <Text style={s.heroH1Accent}>concluez.</Text>
               </Text>
@@ -550,16 +552,16 @@ export default function ProductsListScreen({ navigation }) {
             </View>
 
             {/* ── Ticker live ── */}
-            <StatsTicker stats={platformStats} />
+            <StatsTicker stats={platformStats} isDark={isDark} theme={theme} />
 
             {/* ── Barre de recherche ── */}
             <View style={s.searchBar}>
-              <View style={s.searchInner}>
+                  <View style={[s.searchInner, { backgroundColor: theme.surface, borderColor: theme.border }]}> 
                 <Text style={s.searchIcon}>🔍</Text>
                 <TextInput
-                  style={s.searchInput}
+                      style={[s.searchInput, { color: theme.text }]}
                   placeholder="Rechercher une annonce…"
-                  placeholderTextColor="rgba(107,114,128,0.8)"
+                      placeholderTextColor={theme.textMuted}
                   value={searchQuery}
                   onChangeText={setSearchQuery}
                   returnKeyType="search"
@@ -580,20 +582,20 @@ export default function ProductsListScreen({ navigation }) {
             <TouchableOpacity
               activeOpacity={0.8}
               onPress={() => setShowQuickSearch((value) => !value)}
-              style={s.searchToggle}
+              style={[s.searchToggle, { backgroundColor: theme.cardSoft, borderColor: theme.border }]}
             >
-              <Feather name={showQuickSearch ? 'chevron-up' : 'chevron-down'} size={12} color={P.amber} />
-              <Text style={s.searchToggleTxt}>
+              <Feather name={showQuickSearch ? 'chevron-up' : 'chevron-down'} size={12} color={theme.textMuted} />
+              <Text style={[s.searchToggleTxt, { color: theme.textMuted }]}>
                 {showQuickSearch ? 'Masquer les options' : 'Plus d’options'}
               </Text>
             </TouchableOpacity>
 
             {showQuickSearch && (
-              <View style={s.quickSearchCard}>
+              <View style={[s.quickSearchCard, { backgroundColor: theme.cardSoft, borderColor: theme.border }]}> 
                 <View style={s.quickSearchHead}>
                   <View style={s.quickSearchHeadLeft}>
-                    <Feather name="sliders" size={11} color={P.amber} />
-                    <Text style={s.quickSearchTitle}>Filtres rapides</Text>
+                    <Feather name="sliders" size={11} color={theme.textMuted} />
+                    <Text style={[s.quickSearchTitle, { color: theme.text }]}>Filtres rapides</Text>
                   </View>
                   <TouchableOpacity
                     activeOpacity={0.8}
@@ -601,9 +603,9 @@ export default function ProductsListScreen({ navigation }) {
                       setSelectedLocation('all');
                       setSearchQuery('');
                     }}
-                    style={s.quickResetBtn}
+                    style={[s.quickResetBtn, { backgroundColor: theme.surfaceAlt, borderColor: theme.border }]}
                   >
-                    <Text style={s.quickResetTxt}>Effacer</Text>
+                    <Text style={[s.quickResetTxt, { color: theme.textMuted }]}>Effacer</Text>
                   </TouchableOpacity>
                 </View>
 
@@ -617,12 +619,14 @@ export default function ProductsListScreen({ navigation }) {
                     onPress={() => setSelectedLocation('all')}
                     style={[
                       s.quickChip,
+                      { backgroundColor: theme.surfaceAlt, borderColor: theme.border },
                       selectedLocation === 'all' && s.quickChipActive,
                     ]}
                   >
-                    <Feather name="map-pin" size={10} color={selectedLocation === 'all' ? P.amber : 'rgba(255,255,255,0.72)'} />
+                    <Feather name="map-pin" size={10} color={selectedLocation === 'all' ? P.amber : theme.textMuted} />
                     <Text style={[
                       s.quickChipTxt,
+                      { color: theme.textMuted },
                       selectedLocation === 'all' && s.quickChipTxtActive,
                     ]}>Toutes</Text>
                   </TouchableOpacity>
@@ -634,11 +638,13 @@ export default function ProductsListScreen({ navigation }) {
                       onPress={() => setSelectedLocation(city)}
                       style={[
                         s.quickChip,
+                        { backgroundColor: theme.surfaceAlt, borderColor: theme.border },
                         selectedLocation === city && s.quickChipActive,
                       ]}
                     >
                       <Text style={[
                         s.quickChipTxt,
+                        { color: theme.textMuted },
                         selectedLocation === city && s.quickChipTxtActive,
                       ]}>{city}</Text>
                     </TouchableOpacity>
@@ -654,11 +660,11 @@ export default function ProductsListScreen({ navigation }) {
                     <TouchableOpacity
                       key={term}
                       activeOpacity={0.85}
-                      style={s.quickChip}
+                      style={[s.quickChip, { backgroundColor: theme.surfaceAlt, borderColor: theme.border }]}
                       onPress={() => handlePopularSearch(term)}
                     >
-                      <Feather name="trending-up" size={10} color="rgba(255,255,255,0.72)" />
-                      <Text style={s.quickChipTxt}>{term}</Text>
+                      <Feather name="trending-up" size={10} color={theme.textMuted} />
+                      <Text style={[s.quickChipTxt, { color: theme.textMuted }]}>{term}</Text>
                     </TouchableOpacity>
                   ))}
                 </ScrollView>
@@ -870,8 +876,8 @@ export default function ProductsListScreen({ navigation }) {
         {/* ══════════════════════════════════════════════════════════════════
             CONFIANCE
         ═══════════════════════════════════════════════════════════════════ */}
-        <View style={s.trustSection}>
-          <SectionHeader title="Pourquoi MarketHub ?" light />
+        <View style={[s.trustSection, { backgroundColor: isDark ? '#374151' : theme.surfaceAlt }]}> 
+          <SectionHeader title="Pourquoi MarketHub ?" light={isDark} />
           <ScrollView
             horizontal
             showsHorizontalScrollIndicator={false}
@@ -1069,7 +1075,7 @@ const s = StyleSheet.create({
   section: {
     paddingVertical: 22,
     backgroundColor: P.white,
-    marginTop: 8,
+    marginTop: 0,
   },
 
   // Section header

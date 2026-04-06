@@ -11,11 +11,13 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { forgotPassword } from '../api/auth';
+import { useAppTheme } from '../contexts/ThemeContext';
 import { MOBILE_COLORS as P } from '../theme/colors';
 
 // ─────────────────────────────────────────────────────────────────────────────
 export default function ForgotPasswordScreen({ navigation }) {
   const insets = useSafeAreaInsets();
+  const { isDark, theme } = useAppTheme();
 
   const [identifier, setIdentifier] = useState('');
   const [loading,    setLoading]    = useState(false);
@@ -68,32 +70,32 @@ export default function ForgotPasswordScreen({ navigation }) {
 
   return (
     <KeyboardAvoidingView
-      style={s.container}
+      style={[s.container, { backgroundColor: theme.screen }]}
       behavior={Platform.OS === 'ios' ? 'padding' : 'padding'}
     >
-      <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
+      <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} backgroundColor="transparent" translucent />
 
       {/* ── HEADER ardoise ── identique Login/Register ───────────────── */}
       <LinearGradient
-        colors={[P.brown, P.charcoal]}
+        colors={theme.header}
         style={[s.header, { paddingTop: (insets.top || 0) + 6 }]}
       >
         <View style={s.headerAccent} />
 
         <View style={s.headerRow}>
           <TouchableOpacity
-            style={s.backBtn}
+            style={[s.backBtn, { backgroundColor: theme.glass }]}
             onPress={() => navigation.goBack()}
             activeOpacity={0.8}
           >
-            <Text style={s.backBtnTxt}>←</Text>
+            <Text style={[s.backBtnTxt, { color: theme.text }]}>←</Text>
           </TouchableOpacity>
 
           <View style={s.headerCenter}>
             <LinearGradient colors={[P.orange500, P.orange700]} style={s.logoMini}>
               <Text style={s.logoMiniTxt}>M</Text>
             </LinearGradient>
-            <Text style={s.headerBrand}>MarketHub</Text>
+            <Text style={[s.headerBrand, { color: theme.text }]}>MarketHub</Text>
           </View>
 
           {/* Espace symétrique */}
@@ -101,7 +103,7 @@ export default function ForgotPasswordScreen({ navigation }) {
         </View>
 
         <LinearGradient
-          colors={[P.charcoal, P.terra, P.charcoal]}
+          colors={[theme.divider, P.terra, theme.divider]}
           start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
           style={s.headerGlow}
         />
@@ -125,8 +127,8 @@ export default function ForgotPasswordScreen({ navigation }) {
               </LinearGradient>
               <View style={s.heroRing} />
             </View>
-            <Text style={s.heroTitle}>Mot de passe oublié ?</Text>
-            <Text style={s.heroSub}>
+            <Text style={[s.heroTitle, { color: theme.text }]}>Mot de passe oublié ?</Text>
+            <Text style={[s.heroSub, { color: theme.textMuted }]}>
               Entrez votre email ou numéro de téléphone.{'\n'}
               Nous vous enverrons un code de réinitialisation.
             </Text>
@@ -134,11 +136,11 @@ export default function ForgotPasswordScreen({ navigation }) {
 
           {/* ── Champ identifiant ── style underline Register ── */}
           <View style={s.fieldZone}>
-            <Text style={s.fieldLabel}>Email ou Téléphone</Text>
+            <Text style={[s.fieldLabel, { color: theme.textMuted }]}>Email ou Téléphone</Text>
             <TextInput
-              style={s.mainInput}
+              style={[s.mainInput, { color: theme.text }]}
               placeholder="exemple@email.com ou +227 12345678"
-              placeholderTextColor={P.muted}
+              placeholderTextColor={theme.inputPlaceholder}
               value={identifier}
               onChangeText={v => { setIdentifier(v); setError(''); }}
               keyboardType="default"
@@ -157,7 +159,7 @@ export default function ForgotPasswordScreen({ navigation }) {
 
           {/* ── Lien retour connexion ── */}
           <View style={s.loginRow}>
-            <Text style={s.loginRowTxt}>Vous vous souvenez ? </Text>
+            <Text style={[s.loginRowTxt, { color: theme.textMuted }]}>Vous vous souvenez ? </Text>
             <TouchableOpacity onPress={() => navigation.navigate('Login')} activeOpacity={0.7}>
               <Text style={s.loginRowLink}>Se connecter</Text>
             </TouchableOpacity>
@@ -167,7 +169,7 @@ export default function ForgotPasswordScreen({ navigation }) {
       </ScrollView>
 
       {/* ── FOOTER bouton ── identique Login/Register ────────────────── */}
-      <View style={[s.footer, { paddingBottom: Math.max(insets.bottom, 12) + 4 }]}>
+      <View style={[s.footer, { backgroundColor: theme.screen, borderTopColor: theme.divider, paddingBottom: Math.max(insets.bottom, 12) + 4 }]}>
         <TouchableOpacity
           onPress={handleSend}
           disabled={loading}
@@ -236,7 +238,7 @@ const s = StyleSheet.create({
   mainInput: {
     fontSize: 18, fontWeight: '600', color: P.charcoal,
     borderBottomWidth: 2.5, borderBottomColor: P.terra,
-    paddingVertical: 10, backgroundColor: P.white,
+    paddingVertical: 10, backgroundColor: 'transparent',
   },
 
   // ── Erreur ──

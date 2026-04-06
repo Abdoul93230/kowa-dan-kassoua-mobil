@@ -1,8 +1,9 @@
-import React, { useCallback, useEffect, useState } from 'react';
-import { NavigationContainer, getFocusedRouteNameFromRoute } from '@react-navigation/native';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { NavigationContainer, getFocusedRouteNameFromRoute, DarkTheme, DefaultTheme } from '@react-navigation/native';
 import { createStackNavigator } from '@react-navigation/stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { useAuth } from '../contexts/AuthContext';
+import { useAppTheme } from '../contexts/ThemeContext';
 import { ActivityIndicator, View, StyleSheet, Text, TouchableOpacity, Platform, StatusBar } from 'react-native';
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -41,7 +42,7 @@ const BASE_TAB_BAR_STYLE = {
   bottom: 0,
   left: 0,
   right: 0,
-  backgroundColor: '#111827',
+  backgroundColor: 'transparent',
   borderTopWidth: 0,
   borderTopColor: 'transparent',
   elevation: 0,
@@ -50,10 +51,12 @@ const BASE_TAB_BAR_STYLE = {
 
 // ─── Fond sombre de la tab bar ────────────────────────────────────────────────
 function TabBarBackground() {
+  const { isDark, theme } = useAppTheme();
+
   return (
     <View style={StyleSheet.absoluteFill}>
       <LinearGradient
-        colors={['#111827', '#0d1420']}
+        colors={isDark ? theme.shell : theme.header}
         start={{ x: 0, y: 0 }}
         end={{ x: 0, y: 1 }}
         style={StyleSheet.absoluteFill}
@@ -74,12 +77,14 @@ function TabBarBackground() {
 }
 
 function MessagesNavigator() {
+  const { theme } = useAppTheme();
+
   return (
     <MessagesStack.Navigator
       screenOptions={{
         headerShown: false,
         tabBarShowLabel: false,
-        cardStyle: { backgroundColor: '#111827' },
+        cardStyle: { backgroundColor: theme.screen },
       }}
     >
       <MessagesStack.Screen name="MessagesList" component={MessagesListScreen} />
@@ -163,6 +168,7 @@ function PlaceholderScreen({ route, navigation }) {
 // ─── Navigation principale avec onglets ───────────────────────────────────────
 function MainTabs() {
   const { isAuthenticated, token, user } = useAuth();
+  const { isDark, theme } = useAppTheme();
   const insets = useSafeAreaInsets();
   const TAB_HEIGHT = 54 + Math.max(insets.bottom, 6);
   const [unreadCount, setUnreadCount] = useState(0);
@@ -234,12 +240,13 @@ function MainTabs() {
 
         // ── Couleurs ──────────────────────────────────────────────────────────
         tabBarActiveTintColor:   P.amber,
-        tabBarInactiveTintColor: 'rgba(255,255,255,0.38)',
+        tabBarInactiveTintColor: isDark ? 'rgba(255,255,255,0.38)' : 'rgba(17,24,39,0.42)',
 
         // ── Style de la barre ─────────────────────────────────────────────────
         // backgroundColor EN DUR ici — c'est lui qui écrase le blanc par défaut
         tabBarStyle: {
           ...BASE_TAB_BAR_STYLE,
+          backgroundColor: isDark ? '#111827' : '#ffffff',
           height: TAB_HEIGHT,
         },
 
@@ -316,6 +323,7 @@ function MainTabs() {
               ? { display: 'none' }
               : {
                   ...BASE_TAB_BAR_STYLE,
+                  backgroundColor: isDark ? '#111827' : '#ffffff',
                   height: TAB_HEIGHT,
                 },
             tabBarIcon: ({ focused, color }) => (
@@ -347,12 +355,30 @@ function MainTabs() {
  */
 export default function AppNavigator() {
   const { loading } = useAuth();
+  const { isDark, theme } = useAppTheme();
+
+  const navigationTheme = useMemo(() => {
+    const baseTheme = isDark ? DarkTheme : DefaultTheme;
+
+    return {
+      ...baseTheme,
+      colors: {
+        ...baseTheme.colors,
+        background: theme.screen,
+        card: theme.surface,
+        text: theme.text,
+        border: theme.border,
+        primary: P.terra,
+        notification: P.orange500,
+      },
+    };
+  }, [isDark, theme]);
 
   if (loading) {
     return (
       <SafeAreaProvider>
-        <StatusBar barStyle="light-content" backgroundColor="#111827" />
-        <View style={styles.loadingContainer}>
+        <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} backgroundColor={theme.screen} />
+        <View style={[styles.loadingContainer, { backgroundColor: theme.screen }]}>
           <ActivityIndicator size="large" color={COLORS.primary} />
         </View>
       </SafeAreaProvider>
@@ -361,8 +387,8 @@ export default function AppNavigator() {
 
   return (
     <SafeAreaProvider>
-      <StatusBar barStyle="light-content" backgroundColor="#111827" />
-      <NavigationContainer>
+      <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} backgroundColor={theme.screen} />
+      <NavigationContainer theme={navigationTheme}>
         <Stack.Navigator screenOptions={{ headerShown: false }}>
           <Stack.Screen name="MainTabs" component={MainTabs} />
           <Stack.Screen name="Categories" component={CategoriesScreen} options={{ headerShown: false }} />
@@ -389,7 +415,6 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#111827',
   },
   placeholderContainer: {
     flex: 1,

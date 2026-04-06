@@ -10,6 +10,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Feather } from '@expo/vector-icons';
 import { apiClient } from '../api/auth';
+import { useAppTheme } from '../contexts/ThemeContext';
 import { MOBILE_COLORS as P } from '../theme/colors';
 
 const { width } = Dimensions.get('window');
@@ -150,6 +151,7 @@ function ProductCard({ item, onPress }) {
 // ─────────────────────────────────────────────────────────────────────────────
 export default function SellerProfileScreen({ route, navigation }) {
   const insets = useSafeAreaInsets();
+  const { isDark } = useAppTheme();
   const { sellerId } = route.params;
   const [seller, setSeller] = useState(null);
   const [products, setProducts] = useState([]);
@@ -250,7 +252,7 @@ export default function SellerProfileScreen({ route, navigation }) {
 
   return (
     <View style={s.screen}>
-      <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
+      <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} backgroundColor="transparent" translucent />
 
       {/* ══════════════ BACK BUTTON FLOTTANT ══════════════════════════════ */}
       <View style={[s.headerFloat, { paddingTop: insets.top + 10 }]}>

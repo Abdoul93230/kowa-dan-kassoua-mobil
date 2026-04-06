@@ -11,6 +11,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Clipboard from 'expo-clipboard';
 import { useAuth } from '../contexts/AuthContext';
+import { useAppTheme } from '../contexts/ThemeContext';
 import { sendOTP, verifyOTP, forgotPassword } from '../api/auth';
 import AlertModal from '../components/AlertModal';
 import { MOBILE_COLORS as P } from '../theme/colors';
@@ -23,6 +24,7 @@ export default function VerifyOTPScreen({ navigation, route }) {
   } = route.params || {};
 
   const insets = useSafeAreaInsets();
+  const { isDark, theme } = useAppTheme();
   const { setAuthData } = useAuth();
   const isRegister       = type === 'register';
   const isQuickRegister  = type === 'quick-register';
@@ -221,37 +223,37 @@ export default function VerifyOTPScreen({ navigation, route }) {
 
   return (
     <KeyboardAvoidingView
-      style={s.container}
+      style={[s.container, { backgroundColor: theme.screen }]}
       behavior={Platform.OS === 'ios' ? 'padding' : 'padding'}
     >
-      <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
+      <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} backgroundColor="transparent" translucent />
 
       {/* ── HEADER ardoise ─────────────────────────────────────────────── */}
       <LinearGradient
-        colors={['#2d3748', '#374151']}
+        colors={theme.header}
         style={[s.header, { paddingTop: (insets.top || 0) + 6 }]}
       >
         <View style={s.headerAccent} />
         <View style={s.headerRow}>
           <TouchableOpacity
-            style={s.backBtn}
+            style={[s.backBtn, { backgroundColor: theme.glass }]}
             onPress={() => navigation.goBack()}
             activeOpacity={0.8}
           >
-            <Text style={s.backBtnTxt}>←</Text>
+            <Text style={[s.backBtnTxt, { color: theme.text }]}>←</Text>
           </TouchableOpacity>
 
           <View style={s.headerCenter}>
             <LinearGradient colors={[P.orange500, P.orange700]} style={s.logoMini}>
               <Text style={s.logoMiniTxt}>M</Text>
             </LinearGradient>
-            <Text style={s.headerBrand}>MarketHub</Text>
+            <Text style={[s.headerBrand, { color: theme.text }]}>MarketHub</Text>
           </View>
 
           <View style={{ width: 38 }} />
         </View>
         <LinearGradient
-          colors={['transparent', P.terra, 'transparent']}
+          colors={[theme.divider, P.terra, theme.divider]}
           start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
           style={s.headerGlow}
         />
@@ -272,10 +274,10 @@ export default function VerifyOTPScreen({ navigation, route }) {
               <LinearGradient colors={[P.orange500, P.orange700]} style={s.heroIconGrad}>
                 <Text style={s.heroIconTxt}>✉</Text>
               </LinearGradient>
-              <View style={s.heroRing} />
+                  <View style={[s.heroRing, { borderColor: theme.divider }]} />
             </View>
-            <Text style={s.heroTitle}>Vérification</Text>
-            <Text style={s.heroSub}>
+                <Text style={[s.heroTitle, { color: theme.text }]}>Vérification</Text>
+                <Text style={[s.heroSub, { color: theme.textMuted }]}>
               Code envoyé au{'\n'}
               <Text style={s.heroPhone}>{displayIdentifier}</Text>
             </Text>
@@ -300,6 +302,7 @@ export default function VerifyOTPScreen({ navigation, route }) {
                 ref={r => { inputRefs.current[i] = r; }}
                 style={[
                   s.otpInput,
+                  { backgroundColor: theme.surface, borderColor: theme.border, color: theme.text },
                   digit && s.otpInputFilled,
                   error && s.otpInputError,
                   i === code.filter(Boolean).length && !digit && s.otpInputActive,
@@ -354,7 +357,7 @@ export default function VerifyOTPScreen({ navigation, route }) {
 
           {/* Renvoyer */}
           <View style={s.resendRow}>
-            <Text style={s.resendTxt}>Pas reçu le code ? </Text>
+            <Text style={[s.resendTxt, { color: theme.textMuted }]}>Pas reçu le code ? </Text>
             <TouchableOpacity
               onPress={handleResend}
               disabled={loading || cooldown > 0 || attemptsLeft <= 0}

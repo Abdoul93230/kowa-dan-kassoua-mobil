@@ -14,6 +14,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Feather } from '@expo/vector-icons';
 import { getCategories } from '../api/categories';
+import { useAppTheme } from '../contexts/ThemeContext';
 import { MOBILE_COLORS as P } from '../theme/colors';
 
 const iconToEmoji = {
@@ -37,33 +38,33 @@ const iconToEmoji = {
 
 const getEmoji = (icon, fallback) => fallback || iconToEmoji[icon] || '📦';
 
-function CategoryCard({ item, onPress }) {
+function CategoryCard({ item, onPress, theme, isDark }) {
   const total = Number(item?.totalCount || 0);
   const subcategories = Array.isArray(item?.subcategories) ? item.subcategories : [];
 
   return (
-    <TouchableOpacity style={s.card} onPress={onPress} activeOpacity={0.85}>
-      <LinearGradient colors={['#FFE9DE', P.white]} style={s.cardHead}>
-        <View style={s.iconWrap}>
+    <TouchableOpacity style={[s.card, { backgroundColor: theme.surface, borderColor: theme.border, shadowColor: theme.shadow }]} onPress={onPress} activeOpacity={0.85}>
+      <LinearGradient colors={isDark ? [theme.surfaceAlt, theme.surface] : ['#FFE9DE', theme.surface]} style={s.cardHead}>
+        <View style={[s.iconWrap, { backgroundColor: theme.surface, borderColor: isDark ? theme.border : 'rgba(236,90,19,0.18)' }]}>
           <Text style={s.iconTxt}>{getEmoji(item?.icon, item?.emoji)}</Text>
         </View>
         <View style={{ flex: 1 }}>
-          <Text style={s.cardTitle} numberOfLines={1}>{item?.name || 'Catégorie'}</Text>
-          <Text style={s.cardDesc} numberOfLines={2}>{item?.description || 'Explorez les annonces de cette catégorie.'}</Text>
+          <Text style={[s.cardTitle, { color: theme.text }]} numberOfLines={1}>{item?.name || 'Catégorie'}</Text>
+          <Text style={[s.cardDesc, { color: theme.textMuted }]} numberOfLines={2}>{item?.description || 'Explorez les annonces de cette catégorie.'}</Text>
         </View>
-        <Feather name="chevron-right" size={18} color={P.terra} />
+        <Feather name="chevron-right" size={18} color={isDark ? P.amber : P.terra} />
       </LinearGradient>
 
       <View style={s.cardBody}>
-        <View style={s.statPill}>
-          <Text style={s.statPillTxt}>{total.toLocaleString()} annonces</Text>
+        <View style={[s.statPill, { backgroundColor: isDark ? 'rgba(236,90,19,0.18)' : P.peachSoft }]}>
+          <Text style={[s.statPillTxt, { color: isDark ? P.amber : P.terra }]}>{total.toLocaleString()} annonces</Text>
         </View>
 
         {subcategories.length > 0 && (
           <View style={s.subWrap}>
             {subcategories.slice(0, 3).map((sub) => (
-              <View key={sub?._id || sub?.slug || sub?.name} style={s.subChip}>
-                <Text style={s.subChipTxt} numberOfLines={1}>{sub?.name || 'Sous-catégorie'}</Text>
+              <View key={sub?._id || sub?.slug || sub?.name} style={[s.subChip, { backgroundColor: theme.surfaceAlt, borderColor: theme.border }]}>
+                <Text style={[s.subChipTxt, { color: theme.textMuted }]} numberOfLines={1}>{sub?.name || 'Sous-catégorie'}</Text>
               </View>
             ))}
           </View>
@@ -75,6 +76,7 @@ function CategoryCard({ item, onPress }) {
 
 export default function CategoriesScreen({ navigation }) {
   const insets = useSafeAreaInsets();
+  const { isDark, theme } = useAppTheme();
   const [categories, setCategories] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -113,41 +115,41 @@ export default function CategoriesScreen({ navigation }) {
   const totalSubs = categories.reduce((acc, cat) => acc + ((cat?.subcategories || []).length || 0), 0);
 
   return (
-    <View style={s.screen}>
-      <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
+    <View style={[s.screen, { backgroundColor: theme.screen }]}> 
+      <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} backgroundColor="transparent" translucent />
 
-      <LinearGradient colors={['#2D3748', '#374151']} style={[s.header, { paddingTop: (insets.top || 0) + 4 }]}>
-        <TouchableOpacity style={s.backBtn} onPress={() => navigation.goBack()} activeOpacity={0.8}>
-          <Text style={s.backTxt}>←</Text>
+      <LinearGradient colors={theme.header} style={[s.header, { paddingTop: (insets.top || 0) + 4 }]}>
+        <TouchableOpacity style={[s.backBtn, { backgroundColor: theme.cardSoft, borderColor: theme.border }]} onPress={() => navigation.goBack()} activeOpacity={0.8}>
+          <Text style={[s.backTxt, { color: theme.text }]}>←</Text>
         </TouchableOpacity>
-        <Text style={s.headerTitle}>Toutes les catégories</Text>
-        <Text style={s.headerSub}>Explorez les univers disponibles</Text>
+        <Text style={[s.headerTitle, { color: theme.text }]}>Toutes les catégories</Text>
+        <Text style={[s.headerSub, { color: theme.textMuted }]}>Explorez les univers disponibles</Text>
 
-        <View style={s.searchWrap}>
-          <Feather name="search" size={16} color={P.muted} />
+        <View style={[s.searchWrap, { backgroundColor: theme.surface, borderColor: theme.border }]}> 
+          <Feather name="search" size={16} color={theme.iconMuted} />
           <TextInput
-            style={s.searchInput}
+            style={[s.searchInput, { color: theme.inputText }]}
             placeholder="Rechercher une catégorie..."
-            placeholderTextColor={P.muted}
+            placeholderTextColor={theme.inputPlaceholder}
             value={query}
             onChangeText={setQuery}
           />
           {query.length > 0 && (
             <TouchableOpacity onPress={() => setQuery('')} activeOpacity={0.7}>
-              <Text style={s.clearTxt}>✕</Text>
+              <Text style={[s.clearTxt, { color: theme.textMuted }]}>✕</Text>
             </TouchableOpacity>
           )}
         </View>
 
-        <View style={s.statsRow}>
+        <View style={[s.statsRow, { backgroundColor: theme.glass, borderColor: theme.border }]}>
           <View style={s.statBox}>
-            <Text style={s.statNum}>{categories.length}</Text>
-            <Text style={s.statLbl}>Catégories</Text>
+            <Text style={[s.statNum, { color: theme.text }]}>{categories.length}</Text>
+            <Text style={[s.statLbl, { color: theme.textMuted }]}>Catégories</Text>
           </View>
-          <View style={s.statDivider} />
+          <View style={[s.statDivider, { backgroundColor: theme.divider }]} />
           <View style={s.statBox}>
-            <Text style={s.statNum}>{totalSubs}</Text>
-            <Text style={s.statLbl}>Sous-catégories</Text>
+            <Text style={[s.statNum, { color: theme.text }]}>{totalSubs}</Text>
+            <Text style={[s.statLbl, { color: theme.textMuted }]}>Sous-catégories</Text>
           </View>
         </View>
       </LinearGradient>
@@ -165,6 +167,8 @@ export default function CategoriesScreen({ navigation }) {
           renderItem={({ item }) => (
             <CategoryCard
               item={item}
+              theme={theme}
+              isDark={isDark}
               onPress={() => navigation.navigate('CategoryProducts', {
                 categorySlug: item?.slug,
                 categoryName: item?.name,
@@ -203,6 +207,8 @@ const s = StyleSheet.create({
     height: 32,
     borderRadius: 16,
     backgroundColor: 'rgba(255,255,255,0.18)',
+    borderWidth: 1,
+    borderColor: 'transparent',
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 8,
@@ -214,6 +220,8 @@ const s = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: P.white,
+    borderWidth: 1,
+    borderColor: 'transparent',
     borderRadius: 10,
     paddingHorizontal: 10,
     paddingVertical: 8,
@@ -225,6 +233,8 @@ const s = StyleSheet.create({
     marginTop: 8,
     borderRadius: 10,
     backgroundColor: 'rgba(255,255,255,0.12)',
+    borderWidth: 1,
+    borderColor: 'transparent',
     paddingVertical: 6,
     flexDirection: 'row',
     alignItems: 'center',

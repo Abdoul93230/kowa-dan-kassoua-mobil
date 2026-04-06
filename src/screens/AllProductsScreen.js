@@ -13,6 +13,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Feather } from '@expo/vector-icons';
 import { apiClient } from '../api/auth';
 import { useAuth } from '../contexts/AuthContext';
+import { useAppTheme } from '../contexts/ThemeContext';
 import { getFavoriteIds, toggleFavorite } from '../api/favorites';
 import AlertModal from '../components/AlertModal';
 import { MOBILE_COLORS as P } from '../theme/colors';
@@ -463,6 +464,7 @@ handle:      { width: 36, height: 4, borderRadius: 2, backgroundColor: P.dim, al
 // ─────────────────────────────────────────────────────────────────────────────
 export default function AllProductsScreen({ route, navigation }) {
   const insets = useSafeAreaInsets();
+  const { isDark, theme: appTheme } = useAppTheme();
   const typeParam = route?.params?.type || 'all';
   const queryParam = route?.params?.q || '';
   const locationParam = route?.params?.location || '';
@@ -499,9 +501,18 @@ export default function AllProductsScreen({ route, navigation }) {
     accent: isServicePage ? '#2563EB' : P.terra,
     accentDark: isServicePage ? '#1D4ED8' : P.orange700,
     accentSoft: isServicePage ? P.blue100 : P.peachSoft,
-    headerColors: [P.brown, P.charcoal],
+    headerCountColor: isDark
+      ? (isServicePage ? P.blue100 : P.amber)
+      : (isServicePage ? P.blueDark : P.orange700),
+    headerColors: appTheme.header,
+    headerText: appTheme.text,
+    headerSubText: appTheme.textMuted,
+    headerActionText: appTheme.text,
+    headerGlass: appTheme.glass,
     headerGlow: isServicePage ? ['#1E40AF', '#60A5FA', '#1E40AF'] : [P.charcoal, P.terra, P.charcoal],
+    loadScreenColors: appTheme.shell,
     loadLogoColors: isServicePage ? ['#DBEAFE', '#2563EB'] : [P.gold, P.amber],
+    loadBrandColor: appTheme.text,
     applyColors: isServicePage ? ['#2563EB', '#1D4ED8'] : [P.orange500, P.orange700],
   };
 
@@ -677,11 +688,11 @@ export default function AllProductsScreen({ route, navigation }) {
   if (loading) {
     return (
       <View style={s.loadScreen}>
-        <LinearGradient colors={[P.charcoal, P.brown]} style={s.loadInner}>
+        <LinearGradient colors={theme.loadScreenColors} style={s.loadInner}>
           <LinearGradient colors={theme.loadLogoColors} style={s.loadLogoBox}>
-            <Text style={s.loadLogoTxt}>M</Text>
+            <Text style={[s.loadLogoTxt, { color: isServicePage ? P.white : P.brown }]}>M</Text>
           </LinearGradient>
-          <Text style={s.loadBrand}>MarketHub</Text>
+          <Text style={[s.loadBrand, { color: theme.loadBrandColor }]}>MarketHub</Text>
           <ActivityIndicator size="large" color={theme.accent} style={{ marginTop: 24 }} />
         </LinearGradient>
       </View>
@@ -690,8 +701,8 @@ export default function AllProductsScreen({ route, navigation }) {
 
   // ── Rendu ──────────────────────────────────────────────────────────────────
   return (
-    <View style={s.screen}>
-      <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
+    <View style={[s.screen, { backgroundColor: appTheme.screen }]}>
+      <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} backgroundColor="transparent" translucent />
 
       {/* ══ HEADER SHRINKABLE ═══════════════════════════════════════════════ */}
       <Animated.View style={[s.header, { height: Animated.add(headerHeight, insets.top || 0) }]}>
@@ -701,38 +712,38 @@ export default function AllProductsScreen({ route, navigation }) {
         <Animated.View style={[s.headerInner, { paddingTop: (insets.top || 0) + 6, opacity: headerFade }]}>
           {/* Ligne principale */}
           <View style={s.headerRow}>
-            <TouchableOpacity style={s.backBtn} onPress={() => navigation.goBack()} activeOpacity={0.8}>
-              <Text style={s.backBtnTxt}>←</Text>
+            <TouchableOpacity style={[s.backBtn, { backgroundColor: theme.headerGlass }]} onPress={() => navigation.goBack()} activeOpacity={0.8}>
+              <Text style={[s.backBtnTxt, { color: theme.headerText }]}>←</Text>
             </TouchableOpacity>
 
             <Animated.View style={[s.headerCenter, { transform: [{ scale: heroScale }] }]}>
-              <Animated.Text style={[s.headerTitle, { fontSize: titleSize }]}>
+              <Animated.Text style={[s.headerTitle, { fontSize: titleSize, color: theme.headerText }]}> 
                 {emoji} {title}
               </Animated.Text>
               {!!headerContext && (
-                <Text style={s.headerQuery} numberOfLines={1}>{headerContext}</Text>
+                <Text style={[s.headerQuery, { color: theme.headerSubText }]} numberOfLines={1}>{headerContext}</Text>
               )}
-              <Text style={[s.headerCount, { color: theme.accentSoft }]}>{processed.length} annonce{processed.length > 1 ? 's' : ''}</Text>
+              <Text style={[s.headerCount, { color: theme.headerCountColor }]}>{processed.length} annonce{processed.length > 1 ? 's' : ''}</Text>
             </Animated.View>
 
             <View style={s.headerActions}>
               {/* Tri rapide */}
               <TouchableOpacity
-                style={s.actionBtn}
+                style={[s.actionBtn, { backgroundColor: theme.headerGlass }]}
                 activeOpacity={0.8}
                 onPress={() => setSortBy(s => s === 'recent' ? 'price-asc' : s === 'price-asc' ? 'price-desc' : 'recent')}
               >
-                <Text style={s.actionBtnTxt}>
+                <Text style={[s.actionBtnTxt, { color: theme.headerActionText }]}>
                   {sortBy === 'recent' ? '🕐' : sortBy === 'price-asc' ? '↑' : '↓'}
                 </Text>
               </TouchableOpacity>
               {/* Filtre prix */}
               <TouchableOpacity
-                style={[s.actionBtn, filterActive && [s.actionBtnActive, { backgroundColor: theme.accent }]]}
+                style={[s.actionBtn, { backgroundColor: theme.headerGlass }, filterActive && [s.actionBtnActive, { backgroundColor: theme.accent }]]}
                 activeOpacity={0.8}
                 onPress={() => setShowFilter(true)}
               >
-                <Text style={s.actionBtnTxt}>⚖️</Text>
+                <Text style={[s.actionBtnTxt, { color: theme.headerActionText }]}>⚖️</Text>
                 {filterActive && <View style={[s.actionDot, { backgroundColor: theme.accentSoft, borderColor: theme.accent }]} />}
               </TouchableOpacity>
             </View>

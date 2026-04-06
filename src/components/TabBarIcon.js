@@ -6,6 +6,7 @@ import { View, Text, StyleSheet, Animated } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Feather } from '@expo/vector-icons';
 import { MOBILE_COLORS as P } from '../theme/colors';
+import { useAppTheme } from '../contexts/ThemeContext';
 
 // ─── ICÔNES ───────────────────────────────────────────────────────────────────
 const ICONS = {
@@ -20,6 +21,7 @@ const ICONS = {
 // BADGE ANIMÉ
 // ─────────────────────────────────────────────────────────────────────────────
 function AnimatedBadge({ count }) {
+  const { isDark } = useAppTheme();
   const scale = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
@@ -34,7 +36,7 @@ function AnimatedBadge({ count }) {
   if (!count || count <= 0) return null;
 
   return (
-    <Animated.View style={[s.badge, { transform: [{ scale }] }]}>
+    <Animated.View style={[s.badge, { transform: [{ scale }], borderColor: isDark ? '#111827' : '#ffffff' }]}>
       <Text style={s.badgeTxt}>{count > 9 ? '9+' : count}</Text>
     </Animated.View>
   );
@@ -92,6 +94,7 @@ function PublishButton({ focused }) {
 // ICÔNE STANDARD
 // ─────────────────────────────────────────────────────────────────────────────
 function StandardIcon({ name, focused, badge }) {
+  const { isDark } = useAppTheme();
   const scale = useRef(new Animated.Value(1)).current;
   const pillAnim = useRef(new Animated.Value(focused ? 1 : 0)).current;
 
@@ -112,7 +115,7 @@ function StandardIcon({ name, focused, badge }) {
   }, [focused]);
 
   const icon = ICONS[name] || ICONS.profile;
-  const iconColor = focused ? P.amber : 'rgba(255,255,255,0.4)';
+  const iconColor = focused ? P.amber : (isDark ? 'rgba(255,255,255,0.4)' : 'rgba(17,24,39,0.45)');
   const iconSize = name === 'profile'
     ? (focused ? 25 : 23)
     : (focused ? 23 : 21);
@@ -184,7 +187,6 @@ const s = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 3,
     borderWidth: 1.5,
-    borderColor: '#111827',
     shadowColor: P.error,
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.5,

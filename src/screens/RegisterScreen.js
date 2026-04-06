@@ -10,17 +10,58 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { sendOTP } from '../api/auth';
+import { useAppTheme } from '../contexts/ThemeContext';
 import { MOBILE_COLORS as P } from '../theme/colors';
 
 const COUNTRIES = [
-  { name: 'Niger',        code: 'NE', dialCode: '+227', flag: '🇳🇪' },
-  { name: 'Sénégal',      code: 'SN', dialCode: '+221', flag: '🇸🇳' },
-  { name: 'Mali',         code: 'ML', dialCode: '+223', flag: '🇲🇱' },
-  { name: 'Burkina Faso', code: 'BF', dialCode: '+226', flag: '🇧🇫' },
-  { name: "Côte d'Ivoire",code: 'CI', dialCode: '+225', flag: '🇨🇮' },
-  { name: 'Bénin',        code: 'BJ', dialCode: '+229', flag: '🇧🇯' },
-  { name: 'Togo',         code: 'TG', dialCode: '+228', flag: '🇹🇬' },
+  { name: 'Niger',        code: 'NE', dialCode: '+227', flag: '🇳🇪', nationalLength: 8, phoneGroups: [2, 2, 2, 2], sample: '90 12 34 56' },
+  { name: 'Sénégal',      code: 'SN', dialCode: '+221', flag: '🇸🇳', nationalLength: 9, phoneGroups: [2, 3, 2, 2], sample: '77 123 45 67' },
+  { name: 'Mali',         code: 'ML', dialCode: '+223', flag: '🇲🇱', nationalLength: 8, phoneGroups: [2, 2, 2, 2], sample: '60 12 34 56' },
+  { name: 'Burkina Faso', code: 'BF', dialCode: '+226', flag: '🇧🇫', nationalLength: 8, phoneGroups: [2, 2, 2, 2], sample: '70 12 34 56' },
+  { name: "Côte d'Ivoire",code: 'CI', dialCode: '+225', flag: '🇨🇮', nationalLength: 10, phoneGroups: [2, 2, 2, 2, 2], sample: '07 12 34 56 78' },
+  { name: 'Bénin',        code: 'BJ', dialCode: '+229', flag: '🇧🇯', nationalLength: 8, phoneGroups: [2, 2, 2, 2], sample: '90 12 34 56' },
+  { name: 'Togo',         code: 'TG', dialCode: '+228', flag: '🇹🇬', nationalLength: 8, phoneGroups: [2, 2, 2, 2], sample: '90 12 34 56' },
 ];
+
+const normalizePhoneDigits = (value = '') =>
+  String(value)
+    .replace(/\D/g, '')
+    .replace(/^0+/, '');
+
+const formatNationalPhone = (country, digits) => {
+  const chunks = [];
+  let cursor = 0;
+  const groups = country?.phoneGroups || [];
+
+  groups.forEach((size) => {
+    if (cursor >= digits.length) return;
+    const part = digits.slice(cursor, cursor + size);
+    if (part) chunks.push(part);
+    cursor += size;
+  });
+
+  if (cursor < digits.length) {
+    chunks.push(digits.slice(cursor));
+  }
+
+  return chunks.join(' ').trim();
+};
+
+const validatePhoneForCountry = (country, digits, required = true) => {
+  const maxLen = country?.nationalLength || 8;
+
+  if (!digits) {
+    return required ? 'Numéro requis' : '';
+  }
+  if (digits.length !== maxLen) {
+    return `Le numéro doit contenir ${maxLen} chiffres pour ${country?.name}.`;
+  }
+  if (/^(\d)\1+$/.test(digits)) {
+    return 'Numéro invalide';
+  }
+
+  return '';
+};
 
 // Définition des micro-étapes
 // Chaque étape = une seule question
@@ -37,6 +78,7 @@ const STEPS = [
 // ─────────────────────────────────────────────────────────────────────────────
 export default function RegisterScreen({ navigation }) {
   const insets = useSafeAreaInsets();
+  const { isDark, theme } = useAppTheme();
   const [stepIndex,  setStepIndex]  = useState(0);
   const [country,    setCountry]    = useState(COUNTRIES[0]);
   const [showPicker, setShowPicker] = useState(false);
@@ -65,6 +107,18 @@ export default function RegisterScreen({ navigation }) {
     }).start();
   }, [stepIndex]);
 
+  useEffect(() => {
+    const maxDigits = country?.nationalLength || 8;
+    const phoneDigits = normalizePhoneDigits(form.phone).slice(0, maxDigits);
+    const whatsappDigits = normalizePhoneDigits(form.whatsapp).slice(0, maxDigits);
+
+    setForm((prev) => ({
+      ...prev,
+      phone: formatNationalPhone(country, phoneDigits),
+      whatsapp: formatNationalPhone(country, whatsappDigits),
+    }));
+  }, [country]);
+
   // Animation de transition entre étapes
   const animateNext = (forward = true) => {
     Animated.parallel([
@@ -84,6 +138,12 @@ export default function RegisterScreen({ navigation }) {
     setForm(p => ({ ...p, [key]: val }));
   };
 
+  const setPhoneField = (key, rawValue) => {
+    const maxDigits = country?.nationalLength || 8;
+    const digits = normalizePhoneDigits(rawValue).slice(0, maxDigits);
+    set(key, formatNationalPhone(country, digits));
+  };
+
   // Validation par étape
   const validate = () => {
     const v = form;
@@ -93,8 +153,16 @@ export default function RegisterScreen({ navigation }) {
           return 'Minimum 2 caractères requis';
         break;
       case 'phone':
-        if (!v.phone.trim() || v.phone.trim().length < 7)
-          return 'Numéro invalide (min 7 chiffres)';
+        {
+          const phoneErr = validatePhoneForCountry(country, normalizePhoneDigits(v.phone), true);
+          if (phoneErr) return phoneErr;
+        }
+        break;
+      case 'whatsapp':
+        {
+          const whatsappErr = validatePhoneForCountry(country, normalizePhoneDigits(v.whatsapp), false);
+          if (whatsappErr) return whatsappErr;
+        }
         break;
       case 'email':
         if (v.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.email))
@@ -142,9 +210,11 @@ export default function RegisterScreen({ navigation }) {
     setLoading(true);
     setError('');
     try {
-      const fmtPhone    = `${country.dialCode} ${form.phone.trim()}`;
-      const fmtWhatsapp = form.whatsapp.trim()
-        ? `${country.dialCode} ${form.whatsapp.trim()}`
+      const phoneDigits = normalizePhoneDigits(form.phone);
+      const whatsappDigits = normalizePhoneDigits(form.whatsapp);
+      const fmtPhone = `${country.dialCode} ${phoneDigits}`;
+      const fmtWhatsapp = whatsappDigits
+        ? `${country.dialCode} ${whatsappDigits}`
         : fmtPhone;
 
       const result = await sendOTP(fmtPhone);
@@ -207,14 +277,14 @@ export default function RegisterScreen({ navigation }) {
 
   return (
     <KeyboardAvoidingView
-      style={s.container}
+      style={[s.container, { backgroundColor: theme.screen }]}
       behavior={Platform.OS === 'ios' ? 'padding' : 'padding'}
     >
-      <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
+      <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} backgroundColor="transparent" translucent />
 
       {/* ── HEADER ardoise ────────────────────────────────────────────── */}
       <LinearGradient
-        colors={['#2d3748', '#374151']}
+        colors={theme.header}
         style={[s.header, { paddingTop: (insets.top || 0) + 6 }]}
       >
         <View style={s.headerAccent} />
@@ -222,22 +292,22 @@ export default function RegisterScreen({ navigation }) {
         {/* Top row */}
         <View style={s.headerRow}>
           <TouchableOpacity
-            style={s.backBtn}
+            style={[s.backBtn, { backgroundColor: theme.glass }]}
             onPress={stepIndex > 0 ? goPrev : () => navigation.goBack()}
             activeOpacity={0.8}
           >
-            <Text style={s.backBtnTxt}>←</Text>
+            <Text style={[s.backBtnTxt, { color: theme.text }]}>←</Text>
           </TouchableOpacity>
 
           <View style={s.headerCenter}>
             <LinearGradient colors={[P.orange500, P.orange700]} style={s.logoMini}>
               <Text style={s.logoMiniTxt}>M</Text>
             </LinearGradient>
-            <Text style={s.headerBrand}>MarketHub</Text>
+            <Text style={[s.headerBrand, { color: theme.text }]}>MarketHub</Text>
           </View>
 
-          <TouchableOpacity onPress={() => navigation.navigate('Login')} style={s.loginLink}>
-            <Text style={s.loginLinkTxt}>Connexion</Text>
+          <TouchableOpacity onPress={() => navigation.navigate('Login')} style={[s.loginLink, { borderColor: theme.border, backgroundColor: theme.glass }]}>
+            <Text style={[s.loginLinkTxt, { color: theme.text }]}>Connexion</Text>
           </TouchableOpacity>
         </View>
 
@@ -248,6 +318,7 @@ export default function RegisterScreen({ navigation }) {
               key={i}
               style={[
                 s.progSeg,
+                { backgroundColor: theme.divider },
                 i < stepIndex  && s.progSegDone,
                 i === stepIndex && s.progSegActive,
               ]}
@@ -256,10 +327,10 @@ export default function RegisterScreen({ navigation }) {
         </View>
 
         {/* Compteur */}
-        <Text style={s.stepCount}>{stepIndex + 1} / {STEPS.length}</Text>
+        <Text style={[s.stepCount, { color: theme.textSoft }]}>{stepIndex + 1} / {STEPS.length}</Text>
 
         <LinearGradient
-          colors={['transparent', P.terra, 'transparent']}
+          colors={[theme.divider, P.terra, theme.divider]}
           start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
           style={s.headerGlow}
         />
@@ -277,8 +348,8 @@ export default function RegisterScreen({ navigation }) {
         <View style={s.questionZone}>
           <Animated.View style={[s.questionWrap, { opacity: fadeAnim, transform: [{ translateX: slideX }] }]}>
             <Text style={s.stepIcon}>{step.icon}</Text>
-            <Text style={s.question}>{step.label}</Text>
-            {step.hint ? <Text style={s.questionHint}>{step.hint}</Text> : null}
+            <Text style={[s.question, { color: theme.text }]}>{step.label}</Text>
+            {step.hint ? <Text style={[s.questionHint, { color: theme.textMuted }]}>{step.hint}</Text> : null}
           </Animated.View>
         </View>
 
@@ -289,32 +360,32 @@ export default function RegisterScreen({ navigation }) {
           {/* Sélecteur pays */}
           {step.id === 'country' && (
             <TouchableOpacity
-              style={s.countryBtn}
+              style={[s.countryBtn, { backgroundColor: theme.surfaceAlt, borderColor: theme.border }]}
               onPress={() => setShowPicker(true)}
               activeOpacity={0.85}
             >
               <Text style={s.countryBtnFlag}>{country.flag}</Text>
               <View style={{ flex: 1 }}>
-                <Text style={s.countryBtnName}>{country.name}</Text>
-                <Text style={s.countryBtnDial}>{country.dialCode}</Text>
+                <Text style={[s.countryBtnName, { color: theme.text }]}>{country.name}</Text>
+                <Text style={[s.countryBtnDial, { color: theme.textMuted }]}>{country.dialCode}</Text>
               </View>
-              <Text style={s.countryBtnArrow}>▾</Text>
+              <Text style={[s.countryBtnArrow, { color: theme.textMuted }]}>▾</Text>
             </TouchableOpacity>
           )}
 
           {/* Numéro de téléphone / whatsapp avec indicatif */}
           {(step.id === 'phone' || step.id === 'whatsapp') && (
             <View style={s.phoneWrap}>
-              <View style={s.dialBadge}>
+              <View style={[s.dialBadge, { backgroundColor: theme.surfaceAlt, borderColor: theme.border }]}>
                 <Text style={s.dialFlag}>{country.flag}</Text>
-                <Text style={s.dialCode}>{country.dialCode}</Text>
+                <Text style={[s.dialCode, { color: theme.text }]}>{country.dialCode}</Text>
               </View>
               <TextInput
-                style={s.phoneInput}
-                placeholder={step.id === 'phone' ? '12 34 56 78' : 'Même numéro (optionnel)'}
-                placeholderTextColor="rgba(107,114,128,0.6)"
+                style={[s.phoneInput, { color: theme.text }]}
+                placeholder={step.id === 'phone' ? country.sample : `${country.sample} (optionnel)`}
+                placeholderTextColor={theme.inputPlaceholder}
                 value={form[step.id]}
-                onChangeText={v => set(step.id, v)}
+                onChangeText={v => setPhoneField(step.id, v)}
                 keyboardType="phone-pad"
               />
             </View>
@@ -323,9 +394,9 @@ export default function RegisterScreen({ navigation }) {
           {/* Champs texte normaux */}
           {step.id === 'name' && (
             <TextInput
-              style={s.mainInput}
+              style={[s.mainInput, { color: theme.text }]}
               placeholder="Ex: Amadou Diallo"
-              placeholderTextColor="rgba(107,114,128,0.6)"
+              placeholderTextColor={theme.inputPlaceholder}
               value={form.name}
               onChangeText={v => set('name', v)}
               autoCapitalize="words"
@@ -334,9 +405,9 @@ export default function RegisterScreen({ navigation }) {
 
           {step.id === 'email' && (
             <TextInput
-              style={s.mainInput}
+              style={[s.mainInput, { color: theme.text }]}
               placeholder="exemple@email.com (optionnel)"
-              placeholderTextColor="rgba(107,114,128,0.6)"
+              placeholderTextColor={theme.inputPlaceholder}
               value={form.email}
               onChangeText={v => set('email', v)}
               keyboardType="email-address"
@@ -349,9 +420,9 @@ export default function RegisterScreen({ navigation }) {
             <View>
               <View style={s.pwdWrap}>
                 <TextInput
-                  style={s.pwdInput}
+                  style={[s.pwdInput, { color: theme.text }]}
                   placeholder="Minimum 6 caractères"
-                  placeholderTextColor="rgba(107,114,128,0.6)"
+                  placeholderTextColor={theme.inputPlaceholder}
                   value={form.password}
                   onChangeText={v => set('password', v)}
                   secureTextEntry={!showPwd}
@@ -405,9 +476,9 @@ export default function RegisterScreen({ navigation }) {
           {step.id === 'confirmPassword' && (
             <View style={s.pwdWrap}>
               <TextInput
-                style={s.pwdInput}
+                style={[s.pwdInput, { color: theme.text }]}
                 placeholder="Retapez votre mot de passe"
-                placeholderTextColor="rgba(107,114,128,0.6)"
+                placeholderTextColor={theme.inputPlaceholder}
                 value={form.confirmPassword}
                 onChangeText={v => set('confirmPassword', v)}
                 secureTextEntry={!showCPwd}
@@ -443,7 +514,7 @@ export default function RegisterScreen({ navigation }) {
       </ScrollView>
 
       {/* ── BOUTON SUIVANT ─────────────────────────────────────────────── */}
-      <View style={[s.footer, { paddingBottom: Math.max(insets.bottom, 12) + 4 }]}>
+      <View style={[s.footer, { backgroundColor: theme.screen, borderTopColor: theme.divider, paddingBottom: Math.max(insets.bottom, 12) + 4 }]}>
         <TouchableOpacity
           onPress={goNext}
           disabled={loading}
@@ -466,7 +537,7 @@ export default function RegisterScreen({ navigation }) {
 
         {/* Lien connexion */}
         <View style={s.loginRow}>
-          <Text style={s.loginRowTxt}>Déjà un compte ? </Text>
+          <Text style={[s.loginRowTxt, { color: theme.textMuted }]}>Déjà un compte ? </Text>
           <TouchableOpacity onPress={() => navigation.navigate('Login')}>
             <Text style={s.loginRowLink}>Se connecter</Text>
           </TouchableOpacity>
@@ -480,28 +551,28 @@ export default function RegisterScreen({ navigation }) {
         animationType="slide"
         onRequestClose={() => setShowPicker(false)}
       >
-        <View style={s.modalOverlay}>
-          <View style={s.modal}>
-            <View style={s.modalHandle} />
-            <View style={s.modalHead}>
-              <Text style={s.modalTitle}>Choisir un pays</Text>
-              <TouchableOpacity onPress={() => setShowPicker(false)} style={s.modalClose}>
-                <Text style={s.modalCloseTxt}>✕</Text>
+        <View style={[s.modalOverlay, { backgroundColor: theme.overlay }]}>
+          <View style={[s.modal, { backgroundColor: theme.surface }]}>
+            <View style={[s.modalHandle, { backgroundColor: theme.divider }]} />
+            <View style={[s.modalHead, { borderBottomColor: theme.border }]}>
+              <Text style={[s.modalTitle, { color: theme.text }]}>Choisir un pays</Text>
+              <TouchableOpacity onPress={() => setShowPicker(false)} style={[s.modalClose, { backgroundColor: theme.surfaceAlt }]}>
+                <Text style={[s.modalCloseTxt, { color: theme.textMuted }]}>✕</Text>
               </TouchableOpacity>
             </View>
             <ScrollView>
               {COUNTRIES.map(c => (
                 <TouchableOpacity
                   key={c.code}
-                  style={[s.countryRow, country.code === c.code && s.countryRowActive]}
+                  style={[s.countryRow, { borderBottomColor: theme.border }, country.code === c.code && [s.countryRowActive, { backgroundColor: theme.surfaceAlt }]]}
                   onPress={() => { setCountry(c); setShowPicker(false); setError(''); }}
                   activeOpacity={0.8}
                 >
                   <Text style={s.countryRowFlag}>{c.flag}</Text>
-                  <Text style={[s.countryRowName, country.code === c.code && { color: P.terra }]}>
+                  <Text style={[s.countryRowName, { color: theme.text }, country.code === c.code && { color: P.terra }]}> 
                     {c.name}
                   </Text>
-                  <Text style={s.countryRowDial}>{c.dialCode}</Text>
+                  <Text style={[s.countryRowDial, { color: theme.textMuted }]}>{c.dialCode}</Text>
                   {country.code === c.code && <Text style={{ color: P.terra, fontWeight: '900' }}>✓</Text>}
                 </TouchableOpacity>
               ))}

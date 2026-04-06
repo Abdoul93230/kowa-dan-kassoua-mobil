@@ -4,6 +4,7 @@ import {
   FlatList,
   Image,
   RefreshControl,
+  StatusBar,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -14,6 +15,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useAuth } from '../contexts/AuthContext';
+import { useAppTheme } from '../contexts/ThemeContext';
 import { createOrGetConversation, getConversations } from '../api/messaging';
 import { MOBILE_COLORS as P } from '../theme/colors';
 import { useSocket } from '../hooks/useSocket';
@@ -67,6 +69,7 @@ function isCurrentUserMessage(message, user, currentUserId) {
 export default function MessagesListScreen({ navigation, route }) {
   const insets = useSafeAreaInsets();
   const { isAuthenticated, user, token } = useAuth();
+  const { isDark, theme } = useAppTheme();
 
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -83,6 +86,8 @@ export default function MessagesListScreen({ navigation, route }) {
     enabled: isAuthenticated,
     token,
   });
+
+  const styles = useMemo(() => createStyles(theme), [theme]);
 
   useEffect(() => {
     if (!isAuthenticated) return;
@@ -279,7 +284,8 @@ export default function MessagesListScreen({ navigation, route }) {
 
   if (!isAuthenticated) {
     return (
-      <LinearGradient colors={[P.charcoal, '#0d1420']} style={styles.container}>
+      <LinearGradient colors={theme.shell} style={styles.container}>
+        <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} backgroundColor="transparent" translucent />
         <View style={[styles.center, { paddingTop: insets.top + 24 }]}> 
           <Text style={styles.emptyTitle}>Connexion requise</Text>
           <Text style={styles.emptySubtitle}>Connectez-vous pour lire et envoyer des messages.</Text>
@@ -292,7 +298,8 @@ export default function MessagesListScreen({ navigation, route }) {
   }
 
   return (
-    <LinearGradient colors={[P.charcoal, '#0d1420']} style={styles.container}>
+    <LinearGradient colors={theme.shell} style={styles.container}>
+      <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} backgroundColor="transparent" translucent />
       <View style={[styles.header, { paddingTop: insets.top + 8 }]}> 
         <Text style={styles.headerTitle}>Messages</Text>
       </View>
@@ -333,208 +340,210 @@ export default function MessagesListScreen({ navigation, route }) {
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-  },
-  header: {
-    paddingHorizontal: 16,
-    paddingBottom: 12,
-  },
-  headerTitle: {
-    color: '#ffffff',
-    fontSize: 26,
-    fontWeight: '800',
-    letterSpacing: 0.3,
-  },
-  listContent: {
-    paddingHorizontal: 12,
-    gap: 10,
-  },
-  itemCard: {
-    flexDirection: 'row',
-    backgroundColor: 'rgba(255,255,255,0.05)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.08)',
-    borderRadius: 16,
-    padding: 12,
-    gap: 10,
-  },
-  avatarWrap: {
-    width: 52,
-    height: 52,
-  },
-  avatar: {
-    width: 52,
-    height: 52,
-    borderRadius: 26,
-  },
-  avatarFallback: {
-    width: 52,
-    height: 52,
-    borderRadius: 26,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  avatarFallbackText: {
-    color: '#fff',
-    fontSize: 20,
-    fontWeight: '800',
-  },
-  unreadDot: {
-    position: 'absolute',
-    right: 0,
-    top: 0,
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-    backgroundColor: P.orange500,
-    borderWidth: 2,
-    borderColor: P.charcoal,
-  },
-  onlineDot: {
-    position: 'absolute',
-    right: 1,
-    bottom: 1,
-    width: 11,
-    height: 11,
-    borderRadius: 6,
-    borderWidth: 2,
-    borderColor: P.charcoal,
-  },
-  onlineDotOn: {
-    backgroundColor: '#22c55e',
-  },
-  onlineDotOff: {
-    backgroundColor: 'rgba(156,163,175,0.85)',
-  },
-  contentCol: {
-    flex: 1,
-  },
-  rowTop: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 8,
-  },
-  rowBottom: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  deliveryWrap: {
-    width: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  name: {
-    flex: 1,
-    color: '#ffffff',
-    fontSize: 16,
-    fontWeight: '700',
-  },
-  date: {
-    color: 'rgba(255,255,255,0.6)',
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  itemTitle: {
-    color: P.amber,
-    marginTop: 2,
-    marginBottom: 4,
-    fontSize: 13,
-    fontWeight: '600',
-  },
-  preview: {
-    flex: 1,
-    color: 'rgba(255,255,255,0.72)',
-    fontSize: 14,
-  },
-  previewUnread: {
-    color: '#ffffff',
-    fontWeight: '700',
-  },
-  unreadBadge: {
-    minWidth: 22,
-    height: 22,
-    borderRadius: 11,
-    paddingHorizontal: 6,
-    backgroundColor: P.orange500,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  unreadBadgeText: {
-    color: '#fff',
-    fontSize: 12,
-    fontWeight: '800',
-  },
-  productPreviewWrap: {
-    marginTop: 7,
-    paddingTop: 7,
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(255,255,255,0.08)',
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  productPreviewImage: {
-    width: 36,
-    height: 36,
-    borderRadius: 8,
-    backgroundColor: 'rgba(255,255,255,0.08)',
-  },
-  productPreviewTitle: {
-    flex: 1,
-    color: 'rgba(255,255,255,0.72)',
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  center: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 20,
-  },
-  emptyListContainer: {
-    flexGrow: 1,
-  },
-  emptyTitle: {
-    color: '#fff',
-    fontSize: 22,
-    fontWeight: '800',
-    textAlign: 'center',
-    marginBottom: 8,
-  },
-  emptySubtitle: {
-    color: 'rgba(255,255,255,0.72)',
-    fontSize: 15,
-    lineHeight: 22,
-    textAlign: 'center',
-  },
-  loginButton: {
-    marginTop: 18,
-    backgroundColor: P.orange500,
-    borderRadius: 12,
-    paddingHorizontal: 22,
-    paddingVertical: 12,
-  },
-  loginButtonText: {
-    color: '#fff',
-    fontSize: 15,
-    fontWeight: '700',
-  },
-  errorCard: {
-    marginHorizontal: 12,
-    marginBottom: 10,
-    padding: 10,
-    borderRadius: 12,
-    backgroundColor: 'rgba(239,68,68,0.18)',
-    borderWidth: 1,
-    borderColor: 'rgba(239,68,68,0.35)',
-  },
-  errorText: {
-    color: '#fca5a5',
-    fontSize: 13,
-    fontWeight: '600',
-  },
-});
+function createStyles(theme) {
+  return StyleSheet.create({
+    container: {
+      flex: 1,
+    },
+    header: {
+      paddingHorizontal: 16,
+      paddingBottom: 12,
+    },
+    headerTitle: {
+      color: theme.text,
+      fontSize: 26,
+      fontWeight: '800',
+      letterSpacing: 0.3,
+    },
+    listContent: {
+      paddingHorizontal: 12,
+      gap: 10,
+    },
+    itemCard: {
+      flexDirection: 'row',
+      backgroundColor: theme.cardSoft,
+      borderWidth: 1,
+      borderColor: theme.border,
+      borderRadius: 16,
+      padding: 12,
+      gap: 10,
+    },
+    avatarWrap: {
+      width: 52,
+      height: 52,
+    },
+    avatar: {
+      width: 52,
+      height: 52,
+      borderRadius: 26,
+    },
+    avatarFallback: {
+      width: 52,
+      height: 52,
+      borderRadius: 26,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    avatarFallbackText: {
+      color: theme.text,
+      fontSize: 20,
+      fontWeight: '800',
+    },
+    unreadDot: {
+      position: 'absolute',
+      right: 0,
+      top: 0,
+      width: 12,
+      height: 12,
+      borderRadius: 6,
+      backgroundColor: P.orange500,
+      borderWidth: 2,
+      borderColor: theme.surface,
+    },
+    onlineDot: {
+      position: 'absolute',
+      right: 1,
+      bottom: 1,
+      width: 11,
+      height: 11,
+      borderRadius: 6,
+      borderWidth: 2,
+      borderColor: theme.surface,
+    },
+    onlineDotOn: {
+      backgroundColor: '#22c55e',
+    },
+    onlineDotOff: {
+      backgroundColor: 'rgba(156,163,175,0.85)',
+    },
+    contentCol: {
+      flex: 1,
+    },
+    rowTop: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: 8,
+    },
+    rowBottom: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+    },
+    deliveryWrap: {
+      width: 16,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    name: {
+      flex: 1,
+      color: theme.text,
+      fontSize: 16,
+      fontWeight: '700',
+    },
+    date: {
+      color: theme.textMuted,
+      fontSize: 12,
+      fontWeight: '600',
+    },
+    itemTitle: {
+      color: P.orange500,
+      marginTop: 2,
+      marginBottom: 4,
+      fontSize: 13,
+      fontWeight: '600',
+    },
+    preview: {
+      flex: 1,
+      color: theme.textMuted,
+      fontSize: 14,
+    },
+    previewUnread: {
+      color: theme.text,
+      fontWeight: '700',
+    },
+    unreadBadge: {
+      minWidth: 22,
+      height: 22,
+      borderRadius: 11,
+      paddingHorizontal: 6,
+      backgroundColor: P.orange500,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    unreadBadgeText: {
+      color: '#fff',
+      fontSize: 12,
+      fontWeight: '800',
+    },
+    productPreviewWrap: {
+      marginTop: 7,
+      paddingTop: 7,
+      borderTopWidth: 1,
+      borderTopColor: theme.border,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+    },
+    productPreviewImage: {
+      width: 36,
+      height: 36,
+      borderRadius: 8,
+      backgroundColor: theme.surfaceAlt,
+    },
+    productPreviewTitle: {
+      flex: 1,
+      color: theme.textMuted,
+      fontSize: 12,
+      fontWeight: '600',
+    },
+    center: {
+      flex: 1,
+      justifyContent: 'center',
+      alignItems: 'center',
+      paddingHorizontal: 20,
+    },
+    emptyListContainer: {
+      flexGrow: 1,
+    },
+    emptyTitle: {
+      color: theme.text,
+      fontSize: 22,
+      fontWeight: '800',
+      textAlign: 'center',
+      marginBottom: 8,
+    },
+    emptySubtitle: {
+      color: theme.textMuted,
+      fontSize: 15,
+      lineHeight: 22,
+      textAlign: 'center',
+    },
+    loginButton: {
+      marginTop: 18,
+      backgroundColor: P.orange500,
+      borderRadius: 12,
+      paddingHorizontal: 22,
+      paddingVertical: 12,
+    },
+    loginButtonText: {
+      color: '#fff',
+      fontSize: 15,
+      fontWeight: '700',
+    },
+    errorCard: {
+      marginHorizontal: 12,
+      marginBottom: 10,
+      padding: 10,
+      borderRadius: 12,
+      backgroundColor: 'rgba(239,68,68,0.10)',
+      borderWidth: 1,
+      borderColor: 'rgba(239,68,68,0.22)',
+    },
+    errorText: {
+      color: '#b91c1c',
+      fontSize: 13,
+      fontWeight: '600',
+    },
+  });
+}

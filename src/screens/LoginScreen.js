@@ -12,21 +12,61 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useAuth } from '../contexts/AuthContext';
+import { useAppTheme } from '../contexts/ThemeContext';
 import { MOBILE_COLORS as P } from '../theme/colors';
 
 const COUNTRIES = [
-  { code: 'NE', name: 'Niger',         dialCode: '+227', flag: '🇳🇪' },
-  { code: 'SN', name: 'Sénégal',       dialCode: '+221', flag: '🇸🇳' },
-  { code: 'CI', name: "Côte d'Ivoire", dialCode: '+225', flag: '🇨🇮' },
-  { code: 'BF', name: 'Burkina Faso',  dialCode: '+226', flag: '🇧🇫' },
-  { code: 'ML', name: 'Mali',          dialCode: '+223', flag: '🇲🇱' },
-  { code: 'TG', name: 'Togo',          dialCode: '+228', flag: '🇹🇬' },
-  { code: 'BJ', name: 'Bénin',         dialCode: '+229', flag: '🇧🇯' },
+  { code: 'NE', name: 'Niger',         dialCode: '+227', flag: '🇳🇪', nationalLength: 8, phoneGroups: [2, 2, 2, 2], sample: '90 12 34 56' },
+  { code: 'SN', name: 'Sénégal',       dialCode: '+221', flag: '🇸🇳', nationalLength: 9, phoneGroups: [2, 3, 2, 2], sample: '77 123 45 67' },
+  { code: 'CI', name: "Côte d'Ivoire", dialCode: '+225', flag: '🇨🇮', nationalLength: 10, phoneGroups: [2, 2, 2, 2, 2], sample: '07 12 34 56 78' },
+  { code: 'BF', name: 'Burkina Faso',  dialCode: '+226', flag: '🇧🇫', nationalLength: 8, phoneGroups: [2, 2, 2, 2], sample: '70 12 34 56' },
+  { code: 'ML', name: 'Mali',          dialCode: '+223', flag: '🇲🇱', nationalLength: 8, phoneGroups: [2, 2, 2, 2], sample: '60 12 34 56' },
+  { code: 'TG', name: 'Togo',          dialCode: '+228', flag: '🇹🇬', nationalLength: 8, phoneGroups: [2, 2, 2, 2], sample: '90 12 34 56' },
+  { code: 'BJ', name: 'Bénin',         dialCode: '+229', flag: '🇧🇯', nationalLength: 8, phoneGroups: [2, 2, 2, 2], sample: '90 12 34 56' },
 ];
+
+const normalizePhoneDigits = (value = '') =>
+  String(value)
+    .replace(/\D/g, '')
+    .replace(/^0+/, '');
+
+const formatNationalPhone = (country, digits) => {
+  const chunks = [];
+  let cursor = 0;
+  const groups = country?.phoneGroups || [];
+
+  groups.forEach((size) => {
+    if (cursor >= digits.length) return;
+    const part = digits.slice(cursor, cursor + size);
+    if (part) chunks.push(part);
+    cursor += size;
+  });
+
+  if (cursor < digits.length) {
+    chunks.push(digits.slice(cursor));
+  }
+
+  return chunks.join(' ').trim();
+};
+
+const validatePhoneForCountry = (country, digits) => {
+  const maxLen = country?.nationalLength || 8;
+
+  if (!digits) return 'Numéro requis';
+  if (digits.length !== maxLen) {
+    return `Le numéro doit contenir ${maxLen} chiffres pour ${country?.name}.`;
+  }
+  if (/^(\d)\1+$/.test(digits)) {
+    return 'Numéro invalide';
+  }
+
+  return '';
+};
 
 // ─────────────────────────────────────────────────────────────────────────────
 export default function LoginScreen({ navigation }) {
   const insets = useSafeAreaInsets();
+  const { isDark, theme } = useAppTheme();
   const { login } = useAuth();
 
   const [loginType,  setLoginType]  = useState('phone');
@@ -51,6 +91,19 @@ export default function LoginScreen({ navigation }) {
     ]).start();
     loadSaved();
   }, []);
+
+  useEffect(() => {
+    const maxDigits = country?.nationalLength || 8;
+    const currentDigits = normalizePhoneDigits(phone).slice(0, maxDigits);
+    setPhone(formatNationalPhone(country, currentDigits));
+  }, [country]);
+
+  const handlePhoneChange = (rawValue) => {
+    const maxDigits = country?.nationalLength || 8;
+    const digits = normalizePhoneDigits(rawValue).slice(0, maxDigits);
+    setPhone(formatNationalPhone(country, digits));
+    setError('');
+  };
 
   const switchTab = (type) => {
     if (type === loginType) return;
@@ -78,8 +131,8 @@ export default function LoginScreen({ navigation }) {
 
   const validate = () => {
     if (loginType === 'phone') {
-      if (!phone.trim() || phone.trim().length < 7)
-        return 'Numéro invalide (min 7 chiffres)';
+      const phoneErr = validatePhoneForCountry(country, normalizePhoneDigits(phone));
+      if (phoneErr) return phoneErr;
     } else {
       if (!email.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
         return 'Adresse email invalide';
@@ -94,8 +147,9 @@ export default function LoginScreen({ navigation }) {
     setLoading(true);
     setError('');
     try {
+      const phoneDigits = normalizePhoneDigits(phone);
       const identifier = loginType === 'phone'
-        ? `${country.dialCode} ${phone.trim()}`
+        ? `${country.dialCode} ${phoneDigits}`
         : email.trim();
       const result = await login(identifier, password);
       if (!result.success) { setError(result.message || 'Identifiants incorrects.'); return; }
@@ -125,44 +179,44 @@ export default function LoginScreen({ navigation }) {
 
   return (
     <KeyboardAvoidingView
-      style={s.container}
+      style={[s.container, { backgroundColor: theme.screen }]}
       behavior={Platform.OS === 'ios' ? 'padding' : 'padding'}
     >
-      <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
+      <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} backgroundColor="transparent" translucent />
 
       {/* ── HEADER ardoise ── */}
       <LinearGradient
-        colors={[P.brown, P.charcoal]}
+        colors={theme.header}
         style={[s.header, { paddingTop: (insets.top || 0) + 6 }]}
       >
         <View style={s.headerAccent} />
 
         <View style={s.headerRow}>
           <TouchableOpacity
-            style={s.backBtn}
+            style={[s.backBtn, { backgroundColor: theme.glass }]}
             onPress={() => navigation.goBack()}
             activeOpacity={0.8}
           >
-            <Text style={s.backBtnTxt}>←</Text>
+            <Text style={[s.backBtnTxt, { color: theme.text }]}>←</Text>
           </TouchableOpacity>
 
           <View style={s.headerCenter}>
             <LinearGradient colors={[P.orange500, P.orange700]} style={s.logoMini}>
               <Text style={s.logoMiniTxt}>M</Text>
             </LinearGradient>
-            <Text style={s.headerBrand}>MarketHub</Text>
+            <Text style={[s.headerBrand, { color: theme.text }]}>MarketHub</Text>
           </View>
 
           <TouchableOpacity
             onPress={() => navigation.navigate('Register')}
-            style={s.registerLink}
+            style={[s.registerLink, { borderColor: theme.border, backgroundColor: theme.glass }]}
           >
-            <Text style={s.registerLinkTxt}>S'inscrire</Text>
+            <Text style={[s.registerLinkTxt, { color: theme.text }]}>S'inscrire</Text>
           </TouchableOpacity>
         </View>
 
         <LinearGradient
-          colors={[P.charcoal, P.terra, P.charcoal]}
+          colors={[theme.divider, P.terra, theme.divider]}
           start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
           style={s.headerGlow}
         />
@@ -186,15 +240,16 @@ export default function LoginScreen({ navigation }) {
               </LinearGradient>
               <View style={s.heroRing} />
             </View>
-            <Text style={s.heroTitle}>Bon retour !</Text>
-            <Text style={s.heroSub}>Connectez-vous à votre compte</Text>
+            <Text style={[s.heroTitle, { color: theme.text }]}>Bon retour !</Text>
+            <Text style={[s.heroSub, { color: theme.textMuted }]}>Connectez-vous à votre compte</Text>
           </View>
 
           {/* ── Toggle onglets animés ── */}
-          <View style={s.tabWrap}>
+          <View style={[s.tabWrap, { backgroundColor: theme.surfaceAlt, borderColor: theme.border }]}>
             <Animated.View
               style={[
                 s.tabCursor,
+                { backgroundColor: theme.surface },
                 {
                   left: tabAnim.interpolate({
                     inputRange: [0, 1],
@@ -204,44 +259,44 @@ export default function LoginScreen({ navigation }) {
               ]}
             />
             <TouchableOpacity style={s.tabBtn} onPress={() => switchTab('phone')} activeOpacity={0.8}>
-              <Text style={[s.tabTxt, loginType === 'phone' && s.tabTxtActive]}>📱 Téléphone</Text>
+              <Text style={[s.tabTxt, { color: theme.textMuted }, loginType === 'phone' && s.tabTxtActive]}>📱 Téléphone</Text>
             </TouchableOpacity>
             <TouchableOpacity style={s.tabBtn} onPress={() => switchTab('email')} activeOpacity={0.8}>
-              <Text style={[s.tabTxt, loginType === 'email' && s.tabTxtActive]}>✉️ Email</Text>
+              <Text style={[s.tabTxt, { color: theme.textMuted }, loginType === 'email' && s.tabTxtActive]}>✉️ Email</Text>
             </TouchableOpacity>
           </View>
 
           {/* ── Champ identifiant ── */}
           <View style={s.fieldZone}>
-            <Text style={s.fieldLabel}>
+            <Text style={[s.fieldLabel, { color: theme.textMuted }]}>
               {loginType === 'phone' ? 'Identifiant numéro' : 'Email'}
             </Text>
 
             {loginType === 'phone' ? (
               <View style={s.phoneWrap}>
                 <TouchableOpacity
-                  style={s.dialBadge}
+                  style={[s.dialBadge, { backgroundColor: theme.surfaceAlt, borderColor: theme.border }]}
                   onPress={() => setShowPicker(true)}
                   activeOpacity={0.85}
                 >
                   <Text style={s.dialFlag}>{country.flag}</Text>
-                  <Text style={s.dialCode}>{country.dialCode}</Text>
-                  <Text style={s.dialArrow}>▾</Text>
+                  <Text style={[s.dialCode, { color: theme.text }]}>{country.dialCode}</Text>
+                  <Text style={[s.dialArrow, { color: theme.textMuted }]}>▾</Text>
                 </TouchableOpacity>
                 <TextInput
-                  style={s.phoneInput}
-                  placeholder="12 34 56 78"
-                  placeholderTextColor={P.muted}
+                  style={[s.phoneInput, { color: theme.text }]}
+                  placeholder={country.sample}
+                  placeholderTextColor={theme.inputPlaceholder}
                   value={phone}
-                  onChangeText={v => { setPhone(v); setError(''); }}
+                  onChangeText={handlePhoneChange}
                   keyboardType="phone-pad"
                 />
               </View>
             ) : (
               <TextInput
-                style={s.mainInput}
+                style={[s.mainInput, { color: theme.text }]}
                 placeholder="exemple@email.com"
-                placeholderTextColor={P.muted}
+                placeholderTextColor={theme.inputPlaceholder}
                 value={email}
                 onChangeText={v => { setEmail(v); setError(''); }}
                 keyboardType="email-address"
@@ -252,12 +307,12 @@ export default function LoginScreen({ navigation }) {
 
           {/* ── Mot de passe ── */}
           <View style={s.fieldZone}>
-            <Text style={s.fieldLabel}>Mot de passe</Text>
+            <Text style={[s.fieldLabel, { color: theme.textMuted }]}>Mot de passe</Text>
             <View style={s.pwdWrap}>
               <TextInput
-                style={s.pwdInput}
+                style={[s.pwdInput, { color: theme.text }]}
                 placeholder="••••••••"
-                placeholderTextColor={P.muted}
+                placeholderTextColor={theme.inputPlaceholder}
                 value={password}
                 onChangeText={v => { setPassword(v); setError(''); }}
                 secureTextEntry={!showPwd}
@@ -279,7 +334,7 @@ export default function LoginScreen({ navigation }) {
               <View style={[s.checkbox, rememberMe && s.checkboxOn]}>
                 {rememberMe && <Text style={s.checkmark}>✓</Text>}
               </View>
-              <Text style={s.rememberTxt}>Se souvenir de moi</Text>
+              <Text style={[s.rememberTxt, { color: theme.text }]}>Se souvenir de moi</Text>
             </TouchableOpacity>
 
             <TouchableOpacity onPress={() => navigation.navigate('ForgotPassword')} activeOpacity={0.7}>
@@ -298,7 +353,7 @@ export default function LoginScreen({ navigation }) {
       </ScrollView>
 
       {/* ── FOOTER bouton ── */}
-      <View style={[s.footer, { paddingBottom: Math.max(insets.bottom, 12) + 4 }]}>
+      <View style={[s.footer, { backgroundColor: theme.screen, borderTopColor: theme.divider, paddingBottom: Math.max(insets.bottom, 12) + 4 }]}>
         <TouchableOpacity
           onPress={handleLogin}
           disabled={loading}
@@ -318,7 +373,7 @@ export default function LoginScreen({ navigation }) {
         </TouchableOpacity>
 
         <View style={s.registerRow}>
-          <Text style={s.registerRowTxt}>Pas encore de compte ? </Text>
+          <Text style={[s.registerRowTxt, { color: theme.textMuted }]}>Pas encore de compte ? </Text>
           <TouchableOpacity onPress={() => navigation.navigate('Register')}>
             <Text style={s.registerRowLink}>Créer un compte</Text>
           </TouchableOpacity>
@@ -347,12 +402,12 @@ export default function LoginScreen({ navigation }) {
           />
 
           {/* Sheet */}
-          <View style={[s.modal, { paddingBottom: Math.max(insets.bottom, 8) }]}>
-            <View style={s.modalHandle} />
-            <View style={s.modalHead}>
-              <Text style={s.modalTitle}>Choisir un pays</Text>
-              <TouchableOpacity onPress={() => setShowPicker(false)} style={s.modalClose}>
-                <Text style={s.modalCloseTxt}>✕</Text>
+          <View style={[s.modal, { backgroundColor: theme.surface, paddingBottom: Math.max(insets.bottom, 8) }]}>
+            <View style={[s.modalHandle, { backgroundColor: theme.divider }]} />
+            <View style={[s.modalHead, { borderBottomColor: theme.border }]}>
+              <Text style={[s.modalTitle, { color: theme.text }]}>Choisir un pays</Text>
+              <TouchableOpacity onPress={() => setShowPicker(false)} style={[s.modalClose, { backgroundColor: theme.surfaceAlt }]}>
+                <Text style={[s.modalCloseTxt, { color: theme.textMuted }]}>✕</Text>
               </TouchableOpacity>
             </View>
             <ScrollView
@@ -362,15 +417,19 @@ export default function LoginScreen({ navigation }) {
               {COUNTRIES.map(c => (
                 <TouchableOpacity
                   key={c.code}
-                  style={[s.countryRow, country.code === c.code && s.countryRowActive]}
+                  style={[
+                    s.countryRow,
+                    { borderBottomColor: theme.border },
+                    country.code === c.code && [s.countryRowActive, { backgroundColor: theme.surfaceAlt }],
+                  ]}
                   onPress={() => { setCountry(c); setShowPicker(false); setError(''); }}
                   activeOpacity={0.8}
                 >
                   <Text style={s.countryRowFlag}>{c.flag}</Text>
-                  <Text style={[s.countryRowName, country.code === c.code && s.countryRowNameActive]}>
+                  <Text style={[s.countryRowName, { color: theme.text }, country.code === c.code && s.countryRowNameActive]}>
                     {c.name}
                   </Text>
-                  <Text style={s.countryRowDial}>{c.dialCode}</Text>
+                  <Text style={[s.countryRowDial, { color: theme.textMuted }]}>{c.dialCode}</Text>
                   {country.code === c.code && <Text style={s.countryRowCheck}>✓</Text>}
                 </TouchableOpacity>
               ))}
@@ -443,7 +502,7 @@ const s = StyleSheet.create({
   mainInput: {
     fontSize: 18, fontWeight: '600', color: P.charcoal,
     borderBottomWidth: 2.5, borderBottomColor: P.terra,
-    paddingVertical: 10, backgroundColor: P.white,
+    paddingVertical: 10, backgroundColor: 'transparent',
   },
 
   // ── Phone ──

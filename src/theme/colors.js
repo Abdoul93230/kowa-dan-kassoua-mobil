@@ -1,6 +1,63 @@
 // Centralized color system for the mobile app.
 // Use this file as the single source of truth for all UI colors.
 
+export const THEME_MODES = Object.freeze({
+  LIGHT: 'light',
+  DARK: 'dark',
+  SYSTEM: 'system',
+});
+
+export const APP_THEME_PALETTES = Object.freeze({
+  dark: {
+    screen: '#111827',
+    surface: '#1f2937',
+    surfaceAlt: '#0f172a',
+    card: '#111827',
+    cardSoft: 'rgba(255,255,255,0.05)',
+    text: '#ffffff',
+    textMuted: 'rgba(255,255,255,0.72)',
+    textSoft: 'rgba(255,255,255,0.55)',
+    border: 'rgba(255,255,255,0.08)',
+    shadow: 'rgba(0,0,0,0.55)',
+    header: ['#111827', '#0d1420'],
+    shell: ['#111827', '#0d1420'],
+    overlay: 'rgba(17,24,39,0.55)',
+    glass: 'rgba(255,255,255,0.25)',
+    iconMuted: 'rgba(255,255,255,0.40)',
+    badgeBorder: '#111827',
+    inputBg: '#ffffff',
+    inputText: '#111827',
+    inputPlaceholder: '#6b7280',
+    divider: 'rgba(255,255,255,0.08)',
+  },
+  light: {
+    screen: '#f6f7fb',
+    surface: '#ffffff',
+    surfaceAlt: '#f8fafc',
+    card: '#ffffff',
+    cardSoft: 'rgba(255,255,255,0.95)',
+    text: '#111827',
+    textMuted: '#4b5563',
+    textSoft: '#6b7280',
+    border: 'rgba(17,24,39,0.10)',
+    shadow: 'rgba(15,23,42,0.12)',
+    header: ['#ffffff', '#f1f5f9'],
+    shell: ['#f8fafc', '#ffffff'],
+    overlay: 'rgba(15,23,42,0.28)',
+    glass: 'rgba(17,24,39,0.06)',
+    iconMuted: 'rgba(17,24,39,0.48)',
+    badgeBorder: '#ffffff',
+    inputBg: '#ffffff',
+    inputText: '#111827',
+    inputPlaceholder: '#6b7280',
+    divider: 'rgba(17,24,39,0.08)',
+  },
+});
+
+export const getThemePalette = (mode = 'dark') => {
+  return mode === 'light' ? APP_THEME_PALETTES.light : APP_THEME_PALETTES.dark;
+};
+
 export const MOBILE_COLORS = Object.freeze({
   // Web-aligned brand palette
   terra: '#ec5a13',

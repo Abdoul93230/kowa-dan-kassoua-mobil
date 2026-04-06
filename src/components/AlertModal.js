@@ -4,6 +4,7 @@ import {
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { MOBILE_COLORS as P } from '../theme/colors';
+import { useAppTheme } from '../contexts/ThemeContext';
 
 export const AlertModal = React.forwardRef(({
   visible = false,
@@ -13,6 +14,7 @@ export const AlertModal = React.forwardRef(({
   buttons = [{ text: 'OK', onPress: () => {} }],
   onDismiss = () => {},
 }, ref) => {
+  const { isDark, theme } = useAppTheme();
   const scaleAnim = useRef(new Animated.Value(0.8)).current;
   const opacityAnim = useRef(new Animated.Value(0)).current;
 
@@ -97,6 +99,7 @@ export const AlertModal = React.forwardRef(({
       <Animated.View
         style={[
           styles.backdrop,
+          { backgroundColor: isDark ? 'rgba(0,0,0,0.5)' : 'rgba(15,23,42,0.28)' },
           { opacity: opacityAnim },
         ]}
       >
@@ -111,6 +114,7 @@ export const AlertModal = React.forwardRef(({
         <Animated.View
           style={[
             styles.modalView,
+            { backgroundColor: theme.surface, shadowColor: theme.shadow },
             {
               transform: [{ scale: scaleAnim }],
               opacity: opacityAnim,
@@ -124,10 +128,10 @@ export const AlertModal = React.forwardRef(({
           </LinearGradient>
 
           {/* Message */}
-          <Text style={styles.message}>{message}</Text>
+          <Text style={[styles.message, { color: theme.textMuted }]}>{message}</Text>
 
           {/* Buttons */}
-          <View style={styles.buttonsContainer}>
+          <View style={[styles.buttonsContainer, { borderTopColor: theme.border }]}>
             {buttons.map((button, index) => (
               <TouchableOpacity
                 key={index}
@@ -135,7 +139,7 @@ export const AlertModal = React.forwardRef(({
                   styles.button,
                   buttons.length > 1 && index === 0 && styles.buttonLeft,
                   buttons.length > 1 && index === buttons.length - 1 && styles.buttonRight,
-                  { borderColor: config.buttonColor },
+                  { borderColor: theme.border },
                 ]}
                 onPress={() => handleButtonPress(button)}
                 activeOpacity={0.7}
@@ -160,7 +164,6 @@ export const AlertModal = React.forwardRef(({
 const styles = StyleSheet.create({
   backdrop: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
   },
   backdropTouchable: {
     ...StyleSheet.absoluteFillObject,
@@ -172,11 +175,9 @@ const styles = StyleSheet.create({
   },
   modalView: {
     width: '85%',
-    backgroundColor: '#1f2937',
     borderRadius: 16,
     overflow: 'hidden',
     elevation: 20,
-    shadowColor: '#000',
     shadowOffset: { width: 0, height: 10 },
     shadowOpacity: 0.3,
     shadowRadius: 20,
@@ -198,7 +199,6 @@ const styles = StyleSheet.create({
   },
   message: {
     fontSize: 14,
-    color: '#d1d5db',
     textAlign: 'center',
     marginHorizontal: 20,
     marginVertical: 18,
@@ -208,13 +208,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     marginBottom: 0,
     borderTopWidth: 1,
-    borderTopColor: '#374151',
   },
   button: {
     flex: 1,
     paddingVertical: 14,
     borderRightWidth: 1,
-    borderRightColor: '#374151',
     justifyContent: 'center',
     alignItems: 'center',
   },

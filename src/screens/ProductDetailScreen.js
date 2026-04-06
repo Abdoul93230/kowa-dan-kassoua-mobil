@@ -14,6 +14,7 @@ import { apiClient } from '../api/auth';
 import { checkFavorite, toggleFavorite } from '../api/favorites';
 import { createReview, getProductReviews, markReviewHelpful } from '../api/reviews';
 import { useAuth } from '../contexts/AuthContext';
+import { useAppTheme } from '../contexts/ThemeContext';
 import AlertModal from '../components/AlertModal';
 import { MOBILE_COLORS as P } from '../theme/colors';
 
@@ -149,13 +150,13 @@ function ImageCarousel({ images }) {
 // ─────────────────────────────────────────────────────────────────────────────
 // SECTION avec accent orange latéral
 // ─────────────────────────────────────────────────────────────────────────────
-function Section({ title, children, dark, isService }) {
+function Section({ title, children, isService, appTheme }) {
   const d = getThemeConfig(isService);
   return (
-    <View style={[s.section, dark && s.sectionDark]}>
+    <View style={[s.section, { backgroundColor: appTheme.surface }]}> 
       <View style={s.secHeadRow}>
         <LinearGradient colors={isService ? d.secBar : [P.orange500, P.orange300]} style={s.secBar} />
-        <Text style={[s.secTitle, dark && s.secTitleDark]}>{title}</Text>
+        <Text style={[s.secTitle, { color: appTheme.text }]}>{title}</Text>
       </View>
       {children}
     </View>
@@ -165,16 +166,19 @@ function Section({ title, children, dark, isService }) {
 // ─────────────────────────────────────────────────────────────────────────────
 // SPEC TABLE
 // ─────────────────────────────────────────────────────────────────────────────
-function SpecTable({ rows, dark }) {
+function SpecTable({ rows, appTheme }) {
   return (
-    <View style={[s.specTable, dark && s.specTableDark]}>
+    <View style={[s.specTable, { borderColor: appTheme.border }]}>
       {rows.filter(Boolean).map((row, i) => (
         <View key={i} style={[
           s.specRow,
-          dark ? (i % 2 === 0 ? s.specRowDarkAlt : s.specRowDark) : (i % 2 === 0 ? s.specRowAlt : null),
+          {
+            backgroundColor: i % 2 === 0 ? appTheme.surfaceAlt : appTheme.surface,
+            borderBottomColor: appTheme.border,
+          },
         ]}>
-          <Text style={[s.specLabel, dark && s.specLabelDark]}>{row.label}</Text>
-          <Text style={[s.specValue, dark && s.specValueDark]}>{row.value}</Text>
+          <Text style={[s.specLabel, { color: appTheme.textMuted }]}>{row.label}</Text>
+          <Text style={[s.specValue, { color: appTheme.text }]}>{row.value}</Text>
         </View>
       ))}
     </View>
@@ -184,13 +188,13 @@ function SpecTable({ rows, dark }) {
 // ─────────────────────────────────────────────────────────────────────────────
 // VENDEUR CARD — premium dark
 // ─────────────────────────────────────────────────────────────────────────────
-function SellerCard({ seller, onPress, isService }) {
+function SellerCard({ seller, onPress, isService, appTheme }) {
   const d = getThemeConfig(isService);
   const { scale, onPressIn, onPressOut } = useSpringPress();
 
   return (
     <TouchableOpacity activeOpacity={1} onPress={onPress} onPressIn={onPressIn} onPressOut={onPressOut}>
-      <Animated.View style={[s.sellerCard, { transform: [{ scale }] }]}>
+      <Animated.View style={[s.sellerCard, { transform: [{ scale }], backgroundColor: appTheme.surfaceAlt, borderColor: appTheme.border }]}> 
 
         {/* Avatar */}
         <View style={s.sellerAvatarWrap}>
@@ -208,16 +212,16 @@ function SellerCard({ seller, onPress, isService }) {
         {/* Infos */}
         <View style={{ flex: 1 }}>
           <View style={s.sellerNameRow}>
-            <Text style={s.sellerName} numberOfLines={1}>{seller.businessName || seller.name}</Text>
+            <Text style={[s.sellerName, { color: appTheme.text }]} numberOfLines={1}>{seller.businessName || seller.name}</Text>
             {seller.businessType === 'professional' && (
               <View style={s.verifiedBadge}><Text style={s.verifiedTxt}>✓</Text></View>
             )}
           </View>
-          <Text style={s.sellerLoc}>📍 {getCityName(seller.location)}</Text>
+          <Text style={[s.sellerLoc, { color: appTheme.textMuted }]}>📍 {getCityName(seller.location)}</Text>
           <View style={s.ratingRow}>
             <Text style={s.ratingStars}>{'★'.repeat(Math.round(seller.sellerStats?.rating || 0))}</Text>
-            <Text style={s.ratingNum}>{seller.sellerStats?.rating?.toFixed(1) || '0.0'}</Text>
-            <Text style={s.ratingCount}>({seller.sellerStats?.totalReviews || 0} avis)</Text>
+            <Text style={[s.ratingNum, { color: appTheme.text }]}>{seller.sellerStats?.rating?.toFixed(1) || '0.0'}</Text>
+            <Text style={[s.ratingCount, { color: appTheme.textMuted }]}>({seller.sellerStats?.totalReviews || 0} avis)</Text>
           </View>
         </View>
 
@@ -265,6 +269,7 @@ function ContactBtn({ icon, label, onPress, variant = 'ghost', isService }) {
 // ─────────────────────────────────────────────────────────────────────────────
 export default function ProductDetailScreen({ route, navigation }) {
   const insets = useSafeAreaInsets();
+  const { isDark, theme: appTheme } = useAppTheme();
   const { user, isAuthenticated } = useAuth();
   const productId = String(route?.params?.productId || '').trim();
   const isValidProductId = /^[a-fA-F0-9]{24}$/.test(productId);
@@ -523,16 +528,16 @@ export default function ProductDetailScreen({ route, navigation }) {
   // ── Loading ────────────────────────────────────────────────────────────────
   if (loading) {
     return (
-      <LinearGradient colors={[P.charcoal, '#0d1420']} style={s.loadScreen}>
-        <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
+      <LinearGradient colors={appTheme.shell} style={s.loadScreen}>
+        <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} backgroundColor="transparent" translucent />
         <View style={s.loadRingWrap}>
           <LinearGradient colors={isService ? d.sellerAvatarGrad : [P.orange500, P.orange700]} style={[s.loadLogoBox, isService && d.loadLogoBox]}>
             <Text style={s.loadLogoTxt}>M</Text>
           </LinearGradient>
           <View style={[s.loadRing, isService && d.loadRing]} />
         </View>
-        <Text style={s.loadBrand}>MarketHub</Text>
-        <Text style={s.loadSub}>Chargement de l'annonce…</Text>
+        <Text style={[s.loadBrand, { color: appTheme.text }]}>MarketHub</Text>
+        <Text style={[s.loadSub, { color: appTheme.textMuted }]}>Chargement de l'annonce…</Text>
         <ActivityIndicator size="large" color={isService ? P.blue100 : P.amber} style={{ marginTop: 36 }} />
       </LinearGradient>
     );
@@ -541,11 +546,11 @@ export default function ProductDetailScreen({ route, navigation }) {
   // ── Not found ──────────────────────────────────────────────────────────────
   if (!product) {
     return (
-      <LinearGradient colors={[P.charcoal, '#0d1420']} style={s.notFound}>
-        <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
+      <LinearGradient colors={appTheme.shell} style={s.notFound}>
+        <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} backgroundColor="transparent" translucent />
         <Text style={{ fontSize: 64 }}>😕</Text>
-        <Text style={s.notFoundTitle}>Annonce introuvable</Text>
-        <Text style={s.notFoundSub}>Cette annonce a peut-être été supprimée.</Text>
+        <Text style={[s.notFoundTitle, { color: appTheme.text }]}>Annonce introuvable</Text>
+        <Text style={[s.notFoundSub, { color: appTheme.textMuted }]}>Cette annonce a peut-être été supprimée.</Text>
         <TouchableOpacity style={s.notFoundBtn} onPress={() => navigation.goBack()} activeOpacity={0.85}>
           <LinearGradient colors={isService ? d.sellerAvatarGrad : [P.orange500, P.orange700]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={[s.notFoundBtnGrad, isService && d.notFoundBtn]}>
             <Text style={s.notFoundBtnTxt}>← Retourner</Text>
@@ -578,35 +583,35 @@ export default function ProductDetailScreen({ route, navigation }) {
 
   // ── Rendu ──────────────────────────────────────────────────────────────────
   return (
-    <View style={s.screen}>
-      <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
+    <View style={[s.screen, { backgroundColor: appTheme.screen }]}>
+      <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} backgroundColor="transparent" translucent />
 
       {/* ══ HEADER FLOTTANT ══════════════════════════════════════════════ */}
       <View style={[s.header, { paddingTop: (insets.top || 0) + 8 }]} pointerEvents="box-none">
         {/* Fond qui apparaît au scroll */}
-        <Animated.View style={[StyleSheet.absoluteFill, s.headerBg, isService && d.headerBg, { opacity: headerOpacity }]} />
+        <Animated.View style={[StyleSheet.absoluteFill, s.headerBg, { backgroundColor: appTheme.surface, borderBottomColor: appTheme.border }, isService && d.headerBg, { opacity: headerOpacity }]} />
 
         {/* Bouton retour */}
         <TouchableOpacity style={s.hBtn} onPress={() => navigation.goBack()} activeOpacity={0.85}>
-          <BlurView intensity={30} tint="dark" style={s.hBtnBlur}>
-            <Text style={s.hBtnTxt}>←</Text>
+          <BlurView intensity={30} tint={isDark ? 'dark' : 'light'} style={s.hBtnBlur}>
+            <Text style={[s.hBtnTxt, { color: appTheme.text }]}>←</Text>
           </BlurView>
         </TouchableOpacity>
 
         {/* Titre au scroll */}
-        <Animated.Text style={[s.hTitle, { opacity: headerOpacity }]} numberOfLines={1}>
+        <Animated.Text style={[s.hTitle, { opacity: headerOpacity, color: appTheme.text }]} numberOfLines={1}>
           {product.title}
         </Animated.Text>
 
         {/* Actions droite */}
         <View style={s.hRight}>
           <TouchableOpacity style={s.hBtn} onPress={handleShare} activeOpacity={0.85}>
-            <BlurView intensity={30} tint="dark" style={s.hBtnBlur}>
-              <Text style={s.hBtnTxt}>↗</Text>
+            <BlurView intensity={30} tint={isDark ? 'dark' : 'light'} style={s.hBtnBlur}>
+              <Text style={[s.hBtnTxt, { color: appTheme.text }]}>↗</Text>
             </BlurView>
           </TouchableOpacity>
           <TouchableOpacity style={s.hBtn} onPress={handleToggleFavorite} activeOpacity={0.85}>
-            <BlurView intensity={30} tint="dark" style={[s.hBtnBlur, isFavorite && s.hBtnFavBlur]}>
+            <BlurView intensity={30} tint={isDark ? 'dark' : 'light'} style={[s.hBtnBlur, isFavorite && s.hBtnFavBlur]}>
               <Text style={[s.hBtnTxt, isFavorite && s.hBtnFavTxt]}>
                 {isFavorite ? '♥' : '♡'}
               </Text>
@@ -633,6 +638,7 @@ export default function ProductDetailScreen({ route, navigation }) {
         {/* ── BLOC TITRE — chevauchement hero ─────────────────────────── */}
         <Animated.View style={[
           s.titleBlock,
+          { backgroundColor: appTheme.surface, borderColor: appTheme.border, shadowColor: appTheme.shadow },
           {
             opacity: enters[0],
             transform: [{ translateY: enters[0].interpolate({ inputRange: [0, 1], outputRange: [24, 0] }) }],
@@ -643,7 +649,7 @@ export default function ProductDetailScreen({ route, navigation }) {
             <Text style={s.typeBadgeTxt}>{isService ? '🛠 Service' : '📦 Produit'}</Text>
           </View>
 
-          <Text style={s.heroTitle}>{product.title}</Text>
+          <Text style={[s.heroTitle, { color: appTheme.text }]}>{product.title}</Text>
 
           {/* Localisation + date */}
           <View style={s.heroMeta}>
@@ -651,13 +657,14 @@ export default function ProductDetailScreen({ route, navigation }) {
               <Text style={[s.heroLocDot, isService ? d.heroLocDot : d.heroLocDotProduct]}>●</Text>
               <Text style={[s.heroLocTxt, isService ? d.heroLocTxt : d.heroLocTxtProduct]}>{getCityName(product.location)}</Text>
             </View>
-            <Text style={s.heroDate}>Publié le {postDate}</Text>
+            <Text style={[s.heroDate, { color: appTheme.textMuted }]}>Publié le {postDate}</Text>
           </View>
         </Animated.View>
 
         {/* ── PRIX + STATS — fond sombre ──────────────────────────────── */}
         <Animated.View style={[
           s.priceBlock,
+          { backgroundColor: appTheme.surface, borderColor: appTheme.border, shadowColor: appTheme.shadow },
           {
             opacity: enters[1],
             transform: [{ translateY: enters[1].interpolate({ inputRange: [0, 1], outputRange: [20, 0] }) }],
@@ -665,14 +672,14 @@ export default function ProductDetailScreen({ route, navigation }) {
         ]}>
           <View style={s.priceRow}>
             <View>
-              <Text style={s.priceMeta}>Prix demandé</Text>
+              <Text style={[s.priceMeta, { color: appTheme.textMuted }]}>Prix demandé</Text>
               {product.price ? (
                 <View style={s.priceAmountRow}>
                   <Text style={[s.priceAmount, isService && d.priceAmount]}>{parseInt(product.price).toLocaleString('fr-FR')}</Text>
-                  <Text style={s.priceCurrency}> FCFA</Text>
+                  <Text style={[s.priceCurrency, { color: appTheme.textMuted }]}> FCFA</Text>
                 </View>
               ) : (
-                <Text style={s.priceNego}>Prix à discuter</Text>
+                <Text style={[s.priceNego, { color: appTheme.textMuted }]}>Prix à discuter</Text>
               )}
             </View>
 
@@ -680,11 +687,11 @@ export default function ProductDetailScreen({ route, navigation }) {
             <View style={s.miniStats}>
               <View style={s.miniStat}>
                 <Text style={s.miniStatIcon}>👁</Text>
-                <Text style={s.miniStatVal}>{product.views || 0}</Text>
+                <Text style={[s.miniStatVal, { color: appTheme.textMuted }]}>{product.views || 0}</Text>
               </View>
               <View style={s.miniStat}>
                 <Text style={s.miniStatIcon}>♡</Text>
-                <Text style={s.miniStatVal}>{product.favorites || 0}</Text>
+                <Text style={[s.miniStatVal, { color: appTheme.textMuted }]}>{product.favorites || 0}</Text>
               </View>
             </View>
           </View>
@@ -703,11 +710,12 @@ export default function ProductDetailScreen({ route, navigation }) {
             opacity: enters[2],
             transform: [{ translateY: enters[2].interpolate({ inputRange: [0, 1], outputRange: [20, 0] }) }],
           }}>
-            <Section title="Annonceur" isService={isService}>
+            <Section title="Annonceur" isService={isService} appTheme={appTheme}>
               <SellerCard
                 seller={product.seller}
                 onPress={() => navigation.navigate('SellerProfile', { sellerId: product.seller.id })}
                 isService={isService}
+                appTheme={appTheme}
               />
             </Section>
           </Animated.View>
@@ -718,9 +726,9 @@ export default function ProductDetailScreen({ route, navigation }) {
           opacity: enters[3],
           transform: [{ translateY: enters[3].interpolate({ inputRange: [0, 1], outputRange: [20, 0] }) }],
         }}>
-          <Section title="Description" isService={isService}>
-            <View style={s.descCard}>
-              <Text style={s.descText}>{product.description}</Text>
+          <Section title="Description" isService={isService} appTheme={appTheme}>
+            <View style={[s.descCard, { backgroundColor: appTheme.surfaceAlt, borderColor: appTheme.border }]}>
+              <Text style={[s.descText, { color: appTheme.text }]}>{product.description}</Text>
             </View>
           </Section>
         </Animated.View>
@@ -730,8 +738,8 @@ export default function ProductDetailScreen({ route, navigation }) {
           opacity: enters[4],
           transform: [{ translateY: enters[4].interpolate({ inputRange: [0, 1], outputRange: [20, 0] }) }],
         }}>
-          <Section title="Détails" isService={isService}>
-            <SpecTable rows={specRows} />
+          <Section title="Détails" isService={isService} appTheme={appTheme}>
+            <SpecTable rows={specRows} appTheme={appTheme} />
           </Section>
         </Animated.View>
 
@@ -741,8 +749,8 @@ export default function ProductDetailScreen({ route, navigation }) {
             opacity: enters[5],
             transform: [{ translateY: enters[5].interpolate({ inputRange: [0, 1], outputRange: [20, 0] }) }],
           }}>
-            <Section title="Caractéristiques" isService={isService}>
-              <SpecTable rows={Object.entries(product.specifications).map(([k, v]) => ({ label: k, value: v }))} />
+            <Section title="Caractéristiques" isService={isService} appTheme={appTheme}>
+              <SpecTable rows={Object.entries(product.specifications).map(([k, v]) => ({ label: k, value: v }))} appTheme={appTheme} />
             </Section>
           </Animated.View>
         )}
@@ -753,18 +761,18 @@ export default function ProductDetailScreen({ route, navigation }) {
             opacity: enters[5],
             transform: [{ translateY: enters[5].interpolate({ inputRange: [0, 1], outputRange: [20, 0] }) }],
           }}>
-            <Section title="Disponibilité" isService={isService}>
-              <View style={s.availCard}>
+            <Section title="Disponibilité" isService={isService} appTheme={appTheme}>
+              <View style={[s.availCard, { backgroundColor: appTheme.surfaceAlt, borderColor: appTheme.border }]}>
                 {product.availability.days?.length > 0 && (
                   <View style={s.availRow}>
                     <Text style={s.availIcon}>📅</Text>
-                    <Text style={s.availTxt}>{product.availability.days.join(' · ')}</Text>
+                    <Text style={[s.availTxt, { color: appTheme.text }]}>{product.availability.days.join(' · ')}</Text>
                   </View>
                 )}
                 {product.availability.openingTime && (
                   <View style={s.availRow}>
                     <Text style={s.availIcon}>🕐</Text>
-                    <Text style={s.availTxt}>{product.availability.openingTime} — {product.availability.closingTime}</Text>
+                    <Text style={[s.availTxt, { color: appTheme.text }]}>{product.availability.openingTime} — {product.availability.closingTime}</Text>
                   </View>
                 )}
               </View>
@@ -777,20 +785,20 @@ export default function ProductDetailScreen({ route, navigation }) {
           opacity: enters[6],
           transform: [{ translateY: enters[6].interpolate({ inputRange: [0, 1], outputRange: [20, 0] }) }],
         }}>
-          <Section title="Avis & évaluations" isService={isService}>
-            <View style={s.reviewHeaderCard}>
+          <Section title="Avis & évaluations" isService={isService} appTheme={appTheme}>
+            <View style={[s.reviewHeaderCard, { backgroundColor: appTheme.surfaceAlt, borderColor: appTheme.border }]}> 
               <View style={s.reviewHeaderLeft}>
-                <Text style={s.reviewHeaderScore}>{(product.rating || 0).toFixed(1)}</Text>
-                <Text style={s.reviewHeaderCount}>{product.totalReviews || 0} avis</Text>
+                <Text style={[s.reviewHeaderScore, { color: appTheme.text }]}>{(product.rating || 0).toFixed(1)}</Text>
+                <Text style={[s.reviewHeaderCount, { color: appTheme.textMuted }]}>{product.totalReviews || 0} avis</Text>
               </View>
               <View style={s.reviewHeaderRight}>
                 <Text style={s.reviewHeaderStars}>{'★'.repeat(Math.round(product.rating || 0)) || '☆☆☆☆☆'}</Text>
-                <Text style={s.reviewHeaderSub}>Ce que pensent les clients de cet annonceur</Text>
+                <Text style={[s.reviewHeaderSub, { color: appTheme.textMuted }]}>Ce que pensent les clients de cet annonceur</Text>
               </View>
             </View>
 
-            <View style={s.reviewFormCard}>
-              <Text style={s.reviewFormTitle}>Donnez votre note</Text>
+            <View style={[s.reviewFormCard, { backgroundColor: appTheme.surfaceAlt, borderColor: appTheme.border }]}> 
+              <Text style={[s.reviewFormTitle, { color: appTheme.text }]}>Donnez votre note</Text>
               <View style={s.reviewStarsRow}>
                 {[1, 2, 3, 4, 5].map((star) => (
                   <TouchableOpacity
@@ -809,13 +817,13 @@ export default function ProductDetailScreen({ route, navigation }) {
                 value={reviewComment}
                 onChangeText={setReviewComment}
                 placeholder="Partagez votre expérience avec cet annonceur..."
-                placeholderTextColor={P.muted}
+                placeholderTextColor={appTheme.inputPlaceholder}
                 multiline
                 maxLength={1000}
                 editable={!submittingReview}
-                style={s.reviewInput}
+                style={[s.reviewInput, { color: appTheme.inputText, backgroundColor: appTheme.inputBg, borderColor: appTheme.border }]}
               />
-              <Text style={s.reviewCounter}>{reviewComment.length}/1000</Text>
+              <Text style={[s.reviewCounter, { color: appTheme.textMuted }]}>{reviewComment.length}/1000</Text>
 
               <TouchableOpacity
                 activeOpacity={0.88}
@@ -841,13 +849,13 @@ export default function ProductDetailScreen({ route, navigation }) {
             {loadingReviews ? (
               <View style={s.reviewLoadingWrap}>
                 <ActivityIndicator size="small" color={isService ? P.blue100 : P.terra} />
-                <Text style={s.reviewLoadingTxt}>Chargement des avis...</Text>
+                <Text style={[s.reviewLoadingTxt, { color: appTheme.textMuted }]}>Chargement des avis...</Text>
               </View>
             ) : reviews.length > 0 ? (
               <View style={s.reviewListWrap}>
-                <Text style={s.reviewListTitle}>Avis récents</Text>
+                <Text style={[s.reviewListTitle, { color: appTheme.text }]}>Avis récents</Text>
                 {reviews.slice(0, 5).map((review) => (
-                  <View key={review.id} style={s.reviewItemCard}>
+                  <View key={review.id} style={[s.reviewItemCard, { backgroundColor: appTheme.surfaceAlt, borderColor: appTheme.border }]}>
                     <View style={s.reviewItemHead}>
                       <View style={s.reviewUserWrap}>
                         {review.userAvatar ? (
@@ -858,23 +866,23 @@ export default function ProductDetailScreen({ route, navigation }) {
                           </View>
                         )}
                         <View style={{ flex: 1 }}>
-                          <Text style={s.reviewItemUser} numberOfLines={1}>{review.userName}</Text>
-                          <Text style={s.reviewItemDate}>{formatRelativeDate(review.date)}</Text>
+                          <Text style={[s.reviewItemUser, { color: appTheme.text }]} numberOfLines={1}>{review.userName}</Text>
+                          <Text style={[s.reviewItemDate, { color: appTheme.textMuted }]}>{formatRelativeDate(review.date)}</Text>
                         </View>
                         <Text style={s.reviewItemStars}>{'★'.repeat(review.rating)}{'☆'.repeat(5 - review.rating)}</Text>
                       </View>
                     </View>
-                    <Text style={s.reviewItemComment} numberOfLines={2}>{review.comment}</Text>
-                    <TouchableOpacity onPress={() => handleMarkHelpful(review.id)} style={s.reviewHelpfulBtn}>
-                      <Text style={s.reviewHelpfulTxt}>👍 Utile{review.helpful > 0 ? ` (${review.helpful})` : ''}</Text>
+                    <Text style={[s.reviewItemComment, { color: appTheme.text }]} numberOfLines={2}>{review.comment}</Text>
+                    <TouchableOpacity onPress={() => handleMarkHelpful(review.id)} style={[s.reviewHelpfulBtn, { backgroundColor: appTheme.surface, borderColor: appTheme.border }]}> 
+                      <Text style={[s.reviewHelpfulTxt, { color: appTheme.textMuted }]}>👍 Utile{review.helpful > 0 ? ` (${review.helpful})` : ''}</Text>
                     </TouchableOpacity>
                   </View>
                 ))}
               </View>
             ) : (
-              <View style={s.reviewEmptyCard}>
-                <Text style={s.reviewEmptyTitle}>Aucun avis pour le moment</Text>
-                <Text style={s.reviewEmptyTxt}>Soyez le premier à évaluer cet annonceur.</Text>
+              <View style={[s.reviewEmptyCard, { backgroundColor: appTheme.surfaceAlt, borderColor: appTheme.border }]}>
+                <Text style={[s.reviewEmptyTitle, { color: appTheme.text }]}>Aucun avis pour le moment</Text>
+                <Text style={[s.reviewEmptyTxt, { color: appTheme.textMuted }]}>Soyez le premier à évaluer cet annonceur.</Text>
               </View>
             )}
           </Section>
@@ -893,8 +901,8 @@ export default function ProductDetailScreen({ route, navigation }) {
             <View style={[s.meetupAccent, isService && d.meetupAccent]} />
             <Text style={s.meetupIcon}>🤝</Text>
             <View style={{ flex: 1 }}>
-              <Text style={s.meetupTitle}>Mise en relation directe</Text>
-              <Text style={s.meetupSub}>Contactez l'annonceur et convenez d'un lieu entre vous.</Text>
+              <Text style={[s.meetupTitle, { color: appTheme.text }]}>Mise en relation directe</Text>
+              <Text style={[s.meetupSub, { color: appTheme.textMuted }]}>Contactez l'annonceur et convenez d'un lieu entre vous.</Text>
             </View>
           </View>
         </Animated.View>
@@ -905,11 +913,11 @@ export default function ProductDetailScreen({ route, navigation }) {
       <View style={[s.footer, { paddingBottom: Math.max(insets.bottom + 10, 18) }]}>
         {/* Fondu blanc vers le haut */}
         <LinearGradient
-          colors={['rgba(249,250,251,0)', P.surface]}
+          colors={isDark ? ['rgba(17,24,39,0)', appTheme.surface] : ['rgba(249,250,251,0)', appTheme.surface]}
           style={s.footerFade}
           pointerEvents="none"
         />
-        <View style={s.footerContent}>
+        <View style={[s.footerContent, { backgroundColor: appTheme.surface, borderTopColor: appTheme.border }]}> 
           <ContactBtn icon="✉️" label="Envoyer un message" variant="main" onPress={() => handleContact('message')} isService={isService} />
         </View>
       </View>

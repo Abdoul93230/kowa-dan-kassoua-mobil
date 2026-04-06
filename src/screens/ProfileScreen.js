@@ -12,6 +12,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from 'expo-blur';
 import * as ImagePicker from 'expo-image-picker';
 import { useAuth } from '../contexts/AuthContext';
+import { useAppTheme } from '../contexts/ThemeContext';
 import { MOBILE_COLORS as P } from '../theme/colors';
 import AlertModal from '../components/AlertModal';
 import CustomBottomSheet from '../components/CustomBottomSheet';
@@ -36,6 +37,7 @@ const COUNTRIES = [
 // ─────────────────────────────────────────────────────────────────────────────
 export default function ProfileScreen({ navigation }) {
   const { user, isAuthenticated, logout, updateUserProfile } = useAuth();
+  const { isDark, theme, themePreference, setThemePreference } = useAppTheme();
   const insets = useSafeAreaInsets();
 
   const [alert, setAlert] = useState({
@@ -48,6 +50,7 @@ export default function ProfileScreen({ navigation }) {
   const [securitySheet, setSecuritySheet] = useState(false);
   const [citySheet,     setCitySheet]     = useState(false);
   const [countrySheet,  setCountrySheet]  = useState(false);
+  const [themeSheet,    setThemeSheet]    = useState(false);
 
   // Loaders
   const [loggingOut,       setLoggingOut]       = useState(false);
@@ -182,11 +185,11 @@ export default function ProfileScreen({ navigation }) {
   // ─────────────────────────────────────────────────────────────────────────
   if (!isAuthenticated) {
     return (
-      <View style={s.container}>
-        <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
-        <LinearGradient colors={[P.brown, P.charcoal]} style={[s.header, { paddingTop: (insets.top || 0) + 6 }]}>
+      <View style={[s.container, { backgroundColor: theme.screen }]}>
+        <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} backgroundColor="transparent" translucent />
+        <LinearGradient colors={isDark ? [P.brown, P.charcoal] : theme.header} style={[s.header, { paddingTop: (insets.top || 0) + 6 }]}>
           <View style={s.headerAccent} />
-          <Text style={s.headerTitle}>Profil</Text>
+          <Text style={[s.headerTitle, { color: isDark ? P.white : theme.text }]}>Profil</Text>
         </LinearGradient>
         <ScrollView style={s.content}>
           <View style={s.notAuthBox}>
@@ -213,8 +216,8 @@ export default function ProfileScreen({ navigation }) {
   // RENDER PRINCIPAL
   // ─────────────────────────────────────────────────────────────────────────
   return (
-    <View style={s.container}>
-      <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
+    <View style={[s.container, { backgroundColor: theme.screen }]}>
+      <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} backgroundColor="transparent" translucent />
 
       {/* Bannière MDP */}
       {user?.needsPasswordChange && (
@@ -227,10 +230,10 @@ export default function ProfileScreen({ navigation }) {
       )}
 
       {/* Header gradient */}
-      <LinearGradient colors={[P.brown, P.charcoal]} style={[s.header, { paddingTop: (insets.top || 0) + 6 }]}>
+      <LinearGradient colors={isDark ? [P.brown, P.charcoal] : theme.header} style={[s.header, { paddingTop: (insets.top || 0) + 6 }]}>
         <View style={s.headerAccent} />
         <Animated.View style={{ opacity: headerAnim, transform: [{ translateY: headerAnim.interpolate({ inputRange: [0,1], outputRange: [-10, 0] }) }] }}>
-          <Text style={s.headerTitle}>Mon Profil</Text>
+          <Text style={[s.headerTitle, { color: isDark ? P.white : theme.text }]}>Mon Profil</Text>
         </Animated.View>
       </LinearGradient>
 
@@ -276,6 +279,7 @@ export default function ProfileScreen({ navigation }) {
         {/* Menu items */}
         <View style={s.menuSection}>
           <MenuItem icon="🔐" label="Sécurité et Connexion" onPress={() => setSecuritySheet(true)} />
+          <MenuItem icon="🌗" label={`Apparence : ${themePreference === 'system' ? 'Système' : themePreference === 'dark' ? 'Sombre' : 'Clair'}`} onPress={() => setThemeSheet(true)} />
           <MenuItem icon="📦" label="Mes annonces"          onPress={() => navigation.navigate('MyListings')} />
         </View>
 
@@ -314,6 +318,49 @@ export default function ProfileScreen({ navigation }) {
       {/* ═══════════════════════════════════════════════════════════════════ */}
       {/* SHEET : ÉDITER LE PROFIL                                           */}
       {/* ═══════════════════════════════════════════════════════════════════ */}
+      <CustomBottomSheet
+        visible={themeSheet}
+        onClose={() => setThemeSheet(false)}
+        title="Apparence"
+        avoidKeyboard={false}
+      >
+        <Text style={{ fontSize: 14, color: theme.textMuted, marginBottom: 16, lineHeight: 20 }}>
+          Choisissez le mode d'affichage de l'app. Le mode système suit automatiquement le réglage du téléphone.
+        </Text>
+
+        {[
+          { value: 'system', label: 'Système', icon: '📱' },
+          { value: 'light', label: 'Clair', icon: '☀️' },
+          { value: 'dark', label: 'Sombre', icon: '🌙' },
+        ].map((option) => {
+          const active = themePreference === option.value;
+
+          return (
+            <TouchableOpacity
+              key={option.value}
+              style={[
+                s.themeOption,
+                active && s.themeOptionActive,
+                active && { borderColor: P.terra, backgroundColor: P.peachSoft },
+              ]}
+              onPress={() => setThemePreference(option.value)}
+              activeOpacity={0.8}
+            >
+              <Text style={s.themeOptionIcon}>{option.icon}</Text>
+              <View style={{ flex: 1 }}>
+                <Text style={[s.themeOptionLabel, active && { color: P.terra }]}>{option.label}</Text>
+                <Text style={s.themeOptionSub}>
+                  {option.value === 'system' && 'Suit automatiquement le thème du téléphone'}
+                  {option.value === 'light' && 'Interface claire et lumineuse'}
+                  {option.value === 'dark' && 'Interface sombre et contrastée'}
+                </Text>
+              </View>
+              {active && <Text style={{ fontSize: 18, color: P.terra }}>✓</Text>}
+            </TouchableOpacity>
+          );
+        })}
+      </CustomBottomSheet>
+
       <CustomBottomSheet
         visible={editSheet}
         onClose={() => setEditSheet(false)}
@@ -646,6 +693,12 @@ const s = StyleSheet.create({
   menuItemIcon: { fontSize: 22, width: 28 },
   menuItemLabel: { flex: 1, fontSize: 15, fontWeight: '700', color: P.charcoal },
   menuItemArrow: { fontSize: 22, color: P.terra },
+
+  themeOption: { flexDirection: 'row', alignItems: 'center', padding: 14, borderRadius: 14, borderWidth: 1, borderColor: P.sand, backgroundColor: P.white, marginBottom: 10, gap: 12 },
+  themeOptionActive: { borderWidth: 1.5 },
+  themeOptionIcon: { fontSize: 22 },
+  themeOptionLabel: { fontSize: 15, fontWeight: '700', color: P.charcoal, marginBottom: 2 },
+  themeOptionSub: { fontSize: 12, color: P.muted, lineHeight: 17 },
 
   // Logout
   logoutBtn: { marginHorizontal: 6, marginBottom: 20, borderRadius: 16, overflow: 'hidden', backgroundColor: P.white, borderWidth: 1, borderColor: P.error + '35', elevation: 4 },

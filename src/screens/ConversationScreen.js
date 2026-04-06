@@ -5,6 +5,7 @@ import {
   Image,
   KeyboardAvoidingView,
   Platform,
+  StatusBar,
   StyleSheet,
   Text,
   TextInput,
@@ -18,6 +19,7 @@ import { useHeaderHeight } from '@react-navigation/elements';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useAuth } from '../contexts/AuthContext';
+import { useAppTheme } from '../contexts/ThemeContext';
 import AlertModal from '../components/AlertModal';
 import {
   getConversationById,
@@ -102,6 +104,7 @@ export default function ConversationScreen({ route, navigation }) {
   const headerHeight = useHeaderHeight();
   const { conversationId } = route.params || {};
   const { user, token, isAuthenticated } = useAuth();
+  const { isDark, theme } = useAppTheme();
 
   const [conversation, setConversation] = useState(null);
   const [messages, setMessages] = useState([]);
@@ -142,6 +145,7 @@ export default function ConversationScreen({ route, navigation }) {
   const playingSoundRef = useRef(null);
   const playingMessageIdRef = useRef('');
   const initialScrollDoneRef = useRef(false);
+  const styles = useMemo(() => createStyles(theme, isDark), [theme, isDark]);
 
   const {
     isConnected,
@@ -174,14 +178,6 @@ export default function ConversationScreen({ route, navigation }) {
 
       setConversation(loadedConversation);
       setMessages(loadedMessages);
-
-      const peer = getOtherParticipant(loadedConversation, currentUserId);
-      navigation.setOptions({
-        headerShown: true,
-        headerTitle: peer?.businessName || peer?.name || 'Conversation',
-        headerStyle: { backgroundColor: P.charcoal },
-        headerTintColor: '#fff',
-      });
 
       await markConversationAsRead(conversationId);
 
@@ -543,6 +539,20 @@ useEffect(() => {
     return `${mm}:${ss}`;
   }, []);
 
+  const peer = getOtherParticipant(conversation, currentUserId);
+
+  useEffect(() => {
+    navigation.setOptions({
+      headerShown: true,
+      headerTitle: peer?.businessName || peer?.name || 'Conversation',
+      headerStyle: {
+        backgroundColor: theme.surface,
+        shadowColor: theme.shadow,
+      },
+      headerTintColor: theme.text,
+    });
+  }, [navigation, peer?.businessName, peer?.name, theme]);
+
   const onPressAudioMessage = useCallback(
     async (message) => {
       const audioUrl = message?.attachments?.[0];
@@ -666,7 +676,6 @@ useEffect(() => {
   );
 
   const typingLabel = Object.values(typingUsers)[0] || '';
-  const peer = getOtherParticipant(conversation, currentUserId);
   const peerId = peer?.id || peer?._id;
   const peerIsOnline = peerId ? isUserOnline(String(peerId)) : false;
   const hasText = text.trim().length > 0;
@@ -804,7 +813,8 @@ useEffect(() => {
 
   if (loading) {
     return (
-      <LinearGradient colors={[P.charcoal, '#0d1420']} style={styles.container}>
+      <LinearGradient colors={theme.shell} style={styles.container}>
+        <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} backgroundColor="transparent" translucent />
         <View style={styles.center}>
           <ActivityIndicator size="large" color={P.amber} />
         </View>
@@ -813,14 +823,13 @@ useEffect(() => {
   }
 
   return (
-    <LinearGradient colors={[P.charcoal, '#0d1420']} style={styles.container}>
-     <KeyboardAvoidingView
-  style={styles.container}
-  behavior={Platform.OS === 'ios' ? 'padding' : 'padding'} // 'padding' sur les deux
-  keyboardVerticalOffset={
-    Platform.OS === 'ios' ? headerHeight : headerHeight + 24 // offset Android
-  }
->
+    <LinearGradient colors={theme.shell} style={styles.container}>
+      <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} backgroundColor="transparent" translucent />
+      <KeyboardAvoidingView
+        style={styles.container}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'padding'}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? headerHeight : headerHeight + 24}
+      >
         <View style={styles.connectionBannerWrap}>
           <Text style={styles.connectionBannerText}>
             {isConnected ? (peerIsOnline ? 'Correspondant en ligne' : 'Correspondant hors ligne') : 'Connexion en cours...'}
@@ -837,12 +846,11 @@ useEffect(() => {
           keyboardShouldPersistTaps="always"
           keyboardDismissMode="none"
           onContentSizeChange={() => {
-    flatListRef.current?.scrollToEnd({ animated: false });
-  }}
-  // ✅ Scroll au premier rendu
-  onLayout={() => {
-    flatListRef.current?.scrollToEnd({ animated: false });
-  }}
+            flatListRef.current?.scrollToEnd({ animated: false });
+          }}
+          onLayout={() => {
+            flatListRef.current?.scrollToEnd({ animated: false });
+          }}
           ListHeaderComponent={
             conversationItem ? (
               <TouchableOpacity
@@ -879,7 +887,6 @@ useEffect(() => {
               </View>
             ) : null
           }
-          
         />
 
         <View style={[styles.composerWrap, { paddingBottom: Math.max(insets.bottom, 8) }]}> 
@@ -889,7 +896,7 @@ useEffect(() => {
               onChangeText={onComposerChange}
               onFocus={onComposerFocus}
               placeholder="Ecrivez un message..."
-              placeholderTextColor="rgba(255,255,255,0.45)"
+              placeholderTextColor={theme.textMuted}
               style={styles.input}
               multiline
               maxLength={2000}
@@ -906,7 +913,7 @@ useEffect(() => {
                 (sending || sendingVoice || hasText) && styles.sendBtnDisabled,
               ]}
             >
-              <Ionicons name={isRecording ? 'square' : 'mic'} size={18} color="#fff" />
+              <Ionicons name={isRecording ? 'square' : 'mic'} size={18} color={theme.surface} />
             </TouchableOpacity>
             {hasText ? (
               <TouchableOpacity
@@ -916,9 +923,9 @@ useEffect(() => {
                 style={[styles.sendBtn, (sending || sendingVoice || isRecording) && styles.sendBtnDisabled]}
               >
                 {sending ? (
-                  <ActivityIndicator size="small" color="#fff" />
+                  <ActivityIndicator size="small" color={theme.surface} />
                 ) : (
-                  <Ionicons name="send" size={17} color="#fff" />
+                  <Ionicons name="send" size={17} color={theme.surface} />
                 )}
               </TouchableOpacity>
             ) : null}
@@ -938,9 +945,9 @@ useEffect(() => {
                 style={[styles.recordSendBtn, sendingVoice && styles.sendBtnDisabled]}
               >
                 {sendingVoice ? (
-                  <ActivityIndicator size="small" color="#fff" />
+                  <ActivityIndicator size="small" color={theme.surface} />
                 ) : (
-                  <Ionicons name="send" size={16} color="#fff" />
+                  <Ionicons name="send" size={16} color={theme.surface} />
                 )}
               </TouchableOpacity>
             </View>
@@ -960,363 +967,368 @@ useEffect(() => {
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-  },
-  center: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  connectionBannerWrap: {
-    paddingHorizontal: 14,
-    paddingTop: 8,
-  },
-  connectionBannerText: {
-    color: 'rgba(255,255,255,0.62)',
-    fontSize: 12,
-    textAlign: 'center',
-  },
-  errorText: {
-    color: '#fca5a5',
-    fontSize: 12,
-    textAlign: 'center',
-    marginTop: 4,
-  },
-  itemCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    backgroundColor: 'rgba(255,255,255,0.08)',
-    borderRadius: 14,
-    padding: 10,
-    marginBottom: 10,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.14)',
-  },
-  itemCardDisabled: {
-    opacity: 0.72,
-  },
-  itemImage: {
-    width: 56,
-    height: 56,
-    borderRadius: 10,
-    backgroundColor: 'rgba(255,255,255,0.12)',
-  },
-  itemMeta: {
-    flex: 1,
-    minWidth: 0,
-  },
-  itemOverline: {
-    fontSize: 11,
-    color: 'rgba(255,255,255,0.62)',
-    marginBottom: 2,
-  },
-  itemTitle: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: '#ffffff',
-  },
-  itemPrice: {
-    marginTop: 4,
-    fontSize: 14,
-    fontWeight: '800',
-    color: P.orange500,
-  },
-  itemActionBtn: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'rgba(236,90,19,0.2)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.2)',
-  },
-  messagesContainer: {
-    paddingHorizontal: 12,
-    paddingTop: 10,
-    gap: 8,
-  },
-  messageRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-    gap: 8,
-    width: '100%',
-  },
-  messageRowMine: {
-    justifyContent: 'flex-start',
-    flexDirection: 'row-reverse',
-  },
-  messageRowOther: {
-    justifyContent: 'flex-start',
-    flexDirection: 'row',
-  },
-  avatarSlot: {
-    width: 30,
-    alignItems: 'center',
-    justifyContent: 'flex-end',
-  },
-  peerAvatar: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    marginBottom: 2,
-  },
-  peerAvatarFallback: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    marginBottom: 2,
-    backgroundColor: 'rgba(255,255,255,0.15)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  peerAvatarFallbackText: {
-    color: '#fff',
-    fontWeight: '700',
-    fontSize: 12,
-  },
-  bubble: {
-    maxWidth: '78%',
-    borderRadius: 16,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderWidth: 1,
-  },
-  bubbleMine: {
-    backgroundColor: P.orange500,
-    borderColor: 'rgba(255,255,255,0.12)',
-    borderBottomRightRadius: 4,
-  },
-  bubbleOther: {
-    backgroundColor: 'rgba(255,255,255,0.08)',
-    borderColor: 'rgba(255,255,255,0.13)',
-    borderBottomLeftRadius: 4,
-  },
-  messageText: {
-    fontSize: 15,
-    lineHeight: 21,
-  },
-  audioWrap: {
-    minWidth: 230,
-    maxWidth: 280,
-    gap: 6,
-  },
-  audioPlayBtn: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'rgba(255,255,255,0.16)',
-  },
-  audioTrack: {
-    height: 24,
-    borderRadius: 12,
-    overflow: 'hidden',
-    backgroundColor: 'rgba(255,255,255,0.14)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.18)',
-    paddingHorizontal: 8,
-    justifyContent: 'center',
-  },
-  audioWaveRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 2,
-  },
-  audioWaveBar: {
-    width: 3,
-    borderRadius: 2,
-  },
-  audioWaveBarInactive: {
-    backgroundColor: 'rgba(255,255,255,0.35)',
-  },
-  audioTrackHead: {
-    position: 'absolute',
-    top: 5,
-    width: 3,
-    height: 14,
-    borderRadius: 2,
-    marginLeft: -1,
-  },
-  audioTrackProgress: {
-    height: '100%',
-    borderRadius: 99,
-  },
-  audioMessageBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  audioMessageBtnIcon: {
-    fontSize: 13,
-    fontWeight: '800',
-  },
-  audioMessageBtnText: {
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  audioTimeText: {
-    fontSize: 10,
-    fontWeight: '600',
-    opacity: 0.85,
-  },
-  audioMetaRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-  messageTextMine: {
-    color: '#ffffff',
-  },
-  messageTextOther: {
-    color: 'rgba(255,255,255,0.95)',
-  },
-  metaRow: {
-    marginTop: 4,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'flex-end',
-    gap: 8,
-  },
-  timeText: {
-    fontSize: 11,
-  },
-  timeTextMine: {
-    color: 'rgba(255,255,255,0.75)',
-  },
-  timeTextOther: {
-    color: 'rgba(255,255,255,0.55)',
-  },
-  readIconRead: {
-    color: '#bbf7d0',
-  },
-  readIconPending: {
-    color: 'rgba(255,255,255,0.72)',
-  },
-  typingWrap: {
-    marginTop: 10,
-    marginLeft: 8,
-  },
-  typingText: {
-    color: 'rgba(255,255,255,0.65)',
-    fontSize: 13,
-    fontStyle: 'italic',
-  },
-  composerWrap: {
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(255,255,255,0.1)',
-    backgroundColor: 'rgba(17,24,39,0.95)',
-    paddingTop: 8,
-    paddingHorizontal: 10,
-  },
-  composerInner: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-    gap: 8,
-  },
-  input: {
-    flex: 1,
-    minHeight: 44,
-    maxHeight: 110,
-    color: '#fff',
-    fontSize: 15,
-    borderRadius: 14,
-    paddingHorizontal: 12,
-    paddingTop: 10,
-    paddingBottom: 10,
-    backgroundColor: 'rgba(255,255,255,0.08)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.12)',
-  },
-  voiceBtn: {
-    height: 46,
-    width: 46,
-    borderRadius: 23,
-    backgroundColor: 'rgba(255,255,255,0.12)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.18)',
-  },
-  voiceBtnMain: {
-    backgroundColor: P.orange500,
-    borderColor: 'rgba(255,255,255,0.22)',
-  },
-  voiceBtnActive: {
-    backgroundColor: '#dc2626',
-    borderColor: 'rgba(255,255,255,0.22)',
-  },
-  sendBtn: {
-    height: 46,
-    width: 46,
-    borderRadius: 23,
-    backgroundColor: P.orange500,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  sendBtnDisabled: {
-    opacity: 0.6,
-  },
-  sendBtnText: {
-    color: '#fff',
-    fontSize: 14,
-    fontWeight: '800',
-  },
-  recordRow: {
-    marginTop: 8,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'flex-start',
-    gap: 8,
-    backgroundColor: 'rgba(255,255,255,0.06)',
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.12)',
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-  },
-  recordStatusWrap: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    flex: 1,
-  },
-  recordDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: '#ef4444',
-  },
-  recordTimerText: {
-    color: '#fff',
-    fontSize: 13,
-    fontWeight: '700',
-  },
-  recordCancelBtn: {
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-  },
-  recordCancelText: {
-    color: '#fca5a5',
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  recordSendBtn: {
-    backgroundColor: P.orange500,
-    borderRadius: 18,
-    width: 36,
-    height: 36,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  recordSendText: {
-    color: '#fff',
-    fontSize: 12,
-    fontWeight: '800',
-  },
-});
+function createStyles(theme, isDark) {
+  const mineBubbleColor = isDark ? P.orange300 : P.orange500;
+
+  return StyleSheet.create({
+    container: {
+      flex: 1,
+    },
+    center: {
+      flex: 1,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    connectionBannerWrap: {
+      paddingHorizontal: 14,
+      paddingTop: 8,
+    },
+    connectionBannerText: {
+      color: theme.textMuted,
+      fontSize: 12,
+      textAlign: 'center',
+    },
+    errorText: {
+      color: '#dc2626',
+      fontSize: 12,
+      textAlign: 'center',
+      marginTop: 4,
+    },
+    itemCard: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 10,
+      backgroundColor: theme.cardSoft,
+      borderRadius: 14,
+      padding: 10,
+      marginBottom: 10,
+      borderWidth: 1,
+      borderColor: theme.border,
+    },
+    itemCardDisabled: {
+      opacity: 0.72,
+    },
+    itemImage: {
+      width: 56,
+      height: 56,
+      borderRadius: 10,
+      backgroundColor: theme.surfaceAlt,
+    },
+    itemMeta: {
+      flex: 1,
+      minWidth: 0,
+    },
+    itemOverline: {
+      fontSize: 11,
+      color: theme.textMuted,
+      marginBottom: 2,
+    },
+    itemTitle: {
+      fontSize: 13,
+      fontWeight: '700',
+      color: theme.text,
+    },
+    itemPrice: {
+      marginTop: 4,
+      fontSize: 14,
+      fontWeight: '800',
+      color: P.orange500,
+    },
+    itemActionBtn: {
+      width: 30,
+      height: 30,
+      borderRadius: 15,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: theme.overlay,
+      borderWidth: 1,
+      borderColor: theme.border,
+    },
+    messagesContainer: {
+      paddingHorizontal: 12,
+      paddingTop: 10,
+      gap: 8,
+    },
+    messageRow: {
+      flexDirection: 'row',
+      alignItems: 'flex-end',
+      gap: 8,
+      width: '100%',
+    },
+    messageRowMine: {
+      justifyContent: 'flex-start',
+      flexDirection: 'row-reverse',
+    },
+    messageRowOther: {
+      justifyContent: 'flex-start',
+      flexDirection: 'row',
+    },
+    avatarSlot: {
+      width: 30,
+      alignItems: 'center',
+      justifyContent: 'flex-end',
+    },
+    peerAvatar: {
+      width: 28,
+      height: 28,
+      borderRadius: 14,
+      marginBottom: 2,
+    },
+    peerAvatarFallback: {
+      width: 28,
+      height: 28,
+      borderRadius: 14,
+      marginBottom: 2,
+      backgroundColor: theme.overlay,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    peerAvatarFallbackText: {
+      color: theme.text,
+      fontWeight: '700',
+      fontSize: 12,
+    },
+    bubble: {
+      maxWidth: '78%',
+      borderRadius: 16,
+      paddingHorizontal: 12,
+      paddingVertical: 8,
+      borderWidth: 1,
+    },
+    bubbleMine: {
+      backgroundColor: mineBubbleColor,
+      borderColor: theme.surface,
+      borderBottomRightRadius: 4,
+    },
+    bubbleOther: {
+      backgroundColor: theme.cardSoft,
+      borderColor: theme.border,
+      borderBottomLeftRadius: 4,
+    },
+    messageText: {
+      fontSize: 15,
+      lineHeight: 21,
+    },
+    audioWrap: {
+      minWidth: 230,
+      maxWidth: 280,
+      gap: 6,
+    },
+    audioPlayBtn: {
+      width: 32,
+      height: 32,
+      borderRadius: 16,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: theme.overlay,
+    },
+    audioTrack: {
+      height: 24,
+      borderRadius: 12,
+      overflow: 'hidden',
+      backgroundColor: theme.overlay,
+      borderWidth: 1,
+      borderColor: theme.border,
+      paddingHorizontal: 8,
+      justifyContent: 'center',
+    },
+    audioWaveRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: 2,
+    },
+    audioWaveBar: {
+      width: 3,
+      borderRadius: 2,
+    },
+    audioWaveBarInactive: {
+      backgroundColor: theme.textMuted,
+      opacity: 0.35,
+    },
+    audioTrackHead: {
+      position: 'absolute',
+      top: 5,
+      width: 3,
+      height: 14,
+      borderRadius: 2,
+      marginLeft: -1,
+    },
+    audioTrackProgress: {
+      height: '100%',
+      borderRadius: 99,
+    },
+    audioMessageBtn: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+    },
+    audioMessageBtnIcon: {
+      fontSize: 13,
+      fontWeight: '800',
+    },
+    audioMessageBtnText: {
+      fontSize: 14,
+      fontWeight: '700',
+    },
+    audioTimeText: {
+      fontSize: 10,
+      fontWeight: '600',
+      opacity: 0.85,
+    },
+    audioMetaRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 4,
+    },
+    messageTextMine: {
+      color: theme.surface,
+    },
+    messageTextOther: {
+      color: theme.text,
+    },
+    metaRow: {
+      marginTop: 4,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'flex-end',
+      gap: 8,
+    },
+    timeText: {
+      fontSize: 11,
+    },
+    timeTextMine: {
+      color: theme.surfaceAlt,
+    },
+    timeTextOther: {
+      color: theme.textMuted,
+    },
+    readIconRead: {
+      color: '#22c55e',
+    },
+    readIconPending: {
+      color: theme.textMuted,
+    },
+    typingWrap: {
+      marginTop: 10,
+      marginLeft: 8,
+    },
+    typingText: {
+      color: theme.textMuted,
+      fontSize: 13,
+      fontStyle: 'italic',
+    },
+    composerWrap: {
+      borderTopWidth: 1,
+      borderTopColor: theme.border,
+      backgroundColor: theme.surface,
+      paddingTop: 8,
+      paddingHorizontal: 10,
+    },
+    composerInner: {
+      flexDirection: 'row',
+      alignItems: 'flex-end',
+      gap: 8,
+    },
+    input: {
+      flex: 1,
+      minHeight: 44,
+      maxHeight: 110,
+      color: theme.text,
+      fontSize: 15,
+      borderRadius: 14,
+      paddingHorizontal: 12,
+      paddingTop: 10,
+      paddingBottom: 10,
+      backgroundColor: theme.surfaceAlt,
+      borderWidth: 1,
+      borderColor: theme.border,
+    },
+    voiceBtn: {
+      height: 46,
+      width: 46,
+      borderRadius: 23,
+      backgroundColor: theme.surfaceAlt,
+      alignItems: 'center',
+      justifyContent: 'center',
+      borderWidth: 1,
+      borderColor: theme.border,
+    },
+    voiceBtnMain: {
+      backgroundColor: P.orange500,
+      borderColor: theme.surface,
+    },
+    voiceBtnActive: {
+      backgroundColor: '#dc2626',
+      borderColor: theme.surface,
+    },
+    sendBtn: {
+      height: 46,
+      width: 46,
+      borderRadius: 23,
+      backgroundColor: P.orange500,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    sendBtnDisabled: {
+      opacity: 0.6,
+    },
+    sendBtnText: {
+      color: theme.surface,
+      fontSize: 14,
+      fontWeight: '800',
+    },
+    recordRow: {
+      marginTop: 8,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'flex-start',
+      gap: 8,
+      backgroundColor: theme.surfaceAlt,
+      borderRadius: 14,
+      borderWidth: 1,
+      borderColor: theme.border,
+      paddingHorizontal: 10,
+      paddingVertical: 8,
+    },
+    recordStatusWrap: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+      flex: 1,
+    },
+    recordDot: {
+      width: 8,
+      height: 8,
+      borderRadius: 4,
+      backgroundColor: '#ef4444',
+    },
+    recordTimerText: {
+      color: theme.text,
+      fontSize: 13,
+      fontWeight: '700',
+    },
+    recordCancelBtn: {
+      paddingHorizontal: 10,
+      paddingVertical: 6,
+    },
+    recordCancelText: {
+      color: theme.textMuted,
+      fontSize: 12,
+      fontWeight: '700',
+    },
+    recordSendBtn: {
+      backgroundColor: P.orange500,
+      borderRadius: 18,
+      width: 36,
+      height: 36,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    recordSendText: {
+      color: theme.surface,
+      fontSize: 12,
+      fontWeight: '800',
+    },
+  });
+}

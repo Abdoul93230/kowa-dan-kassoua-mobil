@@ -11,6 +11,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { resetPassword } from '../api/auth';
+import { useAppTheme } from '../contexts/ThemeContext';
 import { MOBILE_COLORS as P } from '../theme/colors';
 import AlertModal from '../components/AlertModal';
 
@@ -18,6 +19,7 @@ import AlertModal from '../components/AlertModal';
 export default function ResetPasswordScreen({ navigation, route }) {
   const { identifier, code } = route.params || {};
   const insets = useSafeAreaInsets();
+  const { isDark, theme } = useAppTheme();
 
   const [newPassword,      setNewPassword]      = useState('');
   const [confirmPassword,  setConfirmPassword]  = useState('');
@@ -121,39 +123,39 @@ export default function ResetPasswordScreen({ navigation, route }) {
 
   return (
     <KeyboardAvoidingView
-      style={s.container}
+      style={[s.container, { backgroundColor: theme.screen }]}
       behavior={Platform.OS === 'ios' ? 'padding' : 'padding'}
     >
-      <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
+      <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} backgroundColor="transparent" translucent />
 
       {/* ── HEADER ardoise ── identique Login/Register ───────────────── */}
       <LinearGradient
-        colors={[P.brown, P.charcoal]}
+        colors={theme.header}
         style={[s.header, { paddingTop: (insets.top || 0) + 6 }]}
       >
         <View style={s.headerAccent} />
 
         <View style={s.headerRow}>
           <TouchableOpacity
-            style={s.backBtn}
+            style={[s.backBtn, { backgroundColor: theme.glass }]}
             onPress={() => navigation.goBack()}
             activeOpacity={0.8}
           >
-            <Text style={s.backBtnTxt}>←</Text>
+            <Text style={[s.backBtnTxt, { color: theme.text }]}>←</Text>
           </TouchableOpacity>
 
           <View style={s.headerCenter}>
             <LinearGradient colors={[P.orange500, P.orange700]} style={s.logoMini}>
               <Text style={s.logoMiniTxt}>M</Text>
             </LinearGradient>
-            <Text style={s.headerBrand}>MarketHub</Text>
+            <Text style={[s.headerBrand, { color: theme.text }]}>MarketHub</Text>
           </View>
 
           <View style={{ width: 38 }} />
         </View>
 
         <LinearGradient
-          colors={[P.charcoal, P.terra, P.charcoal]}
+          colors={[theme.divider, P.terra, theme.divider]}
           start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
           style={s.headerGlow}
         />
@@ -177,18 +179,18 @@ export default function ResetPasswordScreen({ navigation, route }) {
               </LinearGradient>
               <View style={s.heroRing} />
             </View>
-            <Text style={s.heroTitle}>Nouveau mot de passe</Text>
-            <Text style={s.heroSub}>Choisissez un mot de passe sécurisé</Text>
+            <Text style={[s.heroTitle, { color: theme.text }]}>Nouveau mot de passe</Text>
+            <Text style={[s.heroSub, { color: theme.textMuted }]}>Choisissez un mot de passe sécurisé</Text>
           </View>
 
           {/* ── Nouveau mot de passe ── */}
           <View style={s.fieldZone}>
-            <Text style={s.fieldLabel}>Nouveau mot de passe</Text>
+            <Text style={[s.fieldLabel, { color: theme.textMuted }]}>Nouveau mot de passe</Text>
             <View style={s.pwdWrap}>
               <TextInput
-                style={s.pwdInput}
+                style={[s.pwdInput, { color: theme.text }]}
                 placeholder="Minimum 6 caractères"
-                placeholderTextColor={P.muted}
+                placeholderTextColor={theme.inputPlaceholder}
                 value={newPassword}
                 onChangeText={v => { setNewPassword(v); setError(''); }}
                 secureTextEntry={!showNewPwd}
@@ -243,12 +245,12 @@ export default function ResetPasswordScreen({ navigation, route }) {
 
           {/* ── Confirmation mot de passe ── */}
           <View style={s.fieldZone}>
-            <Text style={s.fieldLabel}>Confirmer le mot de passe</Text>
+            <Text style={[s.fieldLabel, { color: theme.textMuted }]}>Confirmer le mot de passe</Text>
             <View style={s.pwdWrap}>
               <TextInput
-                style={s.pwdInput}
+                style={[s.pwdInput, { color: theme.text }]}
                 placeholder="Retapez votre mot de passe"
-                placeholderTextColor={P.muted}
+                placeholderTextColor={theme.inputPlaceholder}
                 value={confirmPassword}
                 onChangeText={v => { setConfirmPassword(v); setError(''); }}
                 secureTextEntry={!showConfirmPwd}
@@ -285,7 +287,7 @@ export default function ResetPasswordScreen({ navigation, route }) {
 
           {/* ── Lien connexion ── */}
           <View style={s.loginRow}>
-            <Text style={s.loginRowTxt}>Vous vous souvenez ? </Text>
+            <Text style={[s.loginRowTxt, { color: theme.textMuted }]}>Vous vous souvenez ? </Text>
             <TouchableOpacity onPress={() => navigation.replace('Login')} activeOpacity={0.7}>
               <Text style={s.loginRowLink}>Se connecter</Text>
             </TouchableOpacity>
@@ -295,7 +297,7 @@ export default function ResetPasswordScreen({ navigation, route }) {
       </ScrollView>
 
       {/* ── FOOTER bouton ── identique tous les écrans ───────────────── */}
-      <View style={[s.footer, { paddingBottom: Math.max(insets.bottom, 12) + 4 }]}>
+      <View style={[s.footer, { backgroundColor: theme.screen, borderTopColor: theme.divider, paddingBottom: Math.max(insets.bottom, 12) + 4 }]}>
         <TouchableOpacity
           onPress={handleReset}
           disabled={loading}

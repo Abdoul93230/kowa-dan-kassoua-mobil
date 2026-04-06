@@ -13,6 +13,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
 import { useAuth } from '../contexts/AuthContext';
+import { useAppTheme } from '../contexts/ThemeContext';
 import AlertModal from '../components/AlertModal';
 import { MOBILE_COLORS as P } from '../theme/colors';
 
@@ -36,6 +37,7 @@ const STEPS = [
 export default function RegisterStep2Screen({ navigation, route }) {
   const { phone, verified, formData: step1Data } = route.params || {};
   const { register } = useAuth();
+  const { isDark, theme } = useAppTheme();
   const insets = useSafeAreaInsets();
 
   const [stepIndex,     setStepIndex]     = useState(0);
@@ -317,30 +319,30 @@ export default function RegisterStep2Screen({ navigation, route }) {
         return (
           <View style={s.typeRow}>
             <TouchableOpacity
-              style={[s.typeCard, form.businessType === 'individual' && s.typeCardActive]}
+              style={[s.typeCard, { backgroundColor: theme.surface, borderColor: theme.border }, form.businessType === 'individual' && [s.typeCardActive, { backgroundColor: theme.surfaceAlt }]]}
               onPress={() => { set('businessType', 'individual'); }}
               activeOpacity={0.85}
             >
               <Text style={s.typeCardEmoji}>👤</Text>
-              <Text style={[s.typeCardTitle, form.businessType === 'individual' && s.typeCardTitleActive]}>
+              <Text style={[s.typeCardTitle, { color: theme.text }, form.businessType === 'individual' && s.typeCardTitleActive]}>
                 Particulier
               </Text>
-              <Text style={s.typeCardSub}>Vendre vos biens personnels</Text>
+              <Text style={[s.typeCardSub, { color: theme.textMuted }]}>Vendre vos biens personnels</Text>
               {form.businessType === 'individual' && (
                 <View style={s.typeCardCheck}><Text style={{ color: P.terra, fontSize: 14, fontWeight: '900' }}>✓</Text></View>
               )}
             </TouchableOpacity>
 
             <TouchableOpacity
-              style={[s.typeCard, form.businessType === 'professional' && s.typeCardActive]}
+              style={[s.typeCard, { backgroundColor: theme.surface, borderColor: theme.border }, form.businessType === 'professional' && [s.typeCardActive, { backgroundColor: theme.surfaceAlt }]]}
               onPress={() => { set('businessType', 'professional'); }}
               activeOpacity={0.85}
             >
               <Text style={s.typeCardEmoji}>💼</Text>
-              <Text style={[s.typeCardTitle, form.businessType === 'professional' && s.typeCardTitleActive]}>
+              <Text style={[s.typeCardTitle, { color: theme.text }, form.businessType === 'professional' && s.typeCardTitleActive]}>
                 Professionnel
               </Text>
-              <Text style={s.typeCardSub}>Gérer votre activité commerciale</Text>
+              <Text style={[s.typeCardSub, { color: theme.textMuted }]}>Gérer votre activité commerciale</Text>
               {form.businessType === 'professional' && (
                 <View style={s.typeCardCheck}><Text style={{ color: P.terra, fontSize: 14, fontWeight: '900' }}>✓</Text></View>
               )}
@@ -351,9 +353,9 @@ export default function RegisterStep2Screen({ navigation, route }) {
       case 'businessName':
         return (
           <TextInput
-            style={s.mainInput}
+            style={[s.mainInput, { color: theme.text }]}
             placeholder="Ex: Boutique Amadou"
-            placeholderTextColor="rgba(107,114,128,0.6)"
+            placeholderTextColor={theme.inputPlaceholder}
             value={form.businessName}
             onChangeText={v => set('businessName', v)}
             autoCapitalize="words"
@@ -364,9 +366,9 @@ export default function RegisterStep2Screen({ navigation, route }) {
         return (
           <View>
             <TextInput
-              style={[s.mainInput, s.textarea]}
+              style={[s.mainInput, s.textarea, { color: theme.text, backgroundColor: theme.surface, borderColor: theme.border }]}
               placeholder="Décrivez votre activité, vos produits ou services…"
-              placeholderTextColor="rgba(107,114,128,0.6)"
+              placeholderTextColor={theme.inputPlaceholder}
               value={form.description}
               onChangeText={v => set('description', v)}
               multiline
@@ -375,6 +377,7 @@ export default function RegisterStep2Screen({ navigation, route }) {
             />
             <Text style={[
               s.charCount,
+              { color: theme.textMuted },
               form.description.length >= 20 && { color: P.green },
             ]}>
               {form.description.length} / 20 min
@@ -388,22 +391,22 @@ export default function RegisterStep2Screen({ navigation, route }) {
           <View>
             {!isCustomLoc ? (
               <TouchableOpacity
-                style={s.locationBtn}
+                style={[s.locationBtn, { backgroundColor: theme.surface, borderColor: theme.border }]}
                 onPress={() => setShowCityModal(true)}
                 activeOpacity={0.85}
               >
                 <Text style={s.locationBtnFlag}>📍</Text>
-                <Text style={[s.locationBtnTxt, !form.location && s.locationBtnPlaceholder]}>
+                <Text style={[s.locationBtnTxt, { color: theme.text }, !form.location && [s.locationBtnPlaceholder, { color: theme.textMuted }]]}>
                   {form.location || 'Sélectionner votre ville…'}
                 </Text>
-                <Text style={s.locationBtnArrow}>▾</Text>
+                <Text style={[s.locationBtnArrow, { color: theme.textMuted }]}>▾</Text>
               </TouchableOpacity>
             ) : (
               <View>
                 <TextInput
-                  style={s.mainInput}
+                  style={[s.mainInput, { color: theme.text }]}
                   placeholder="Entrez votre localisation"
-                  placeholderTextColor="rgba(107,114,128,0.6)"
+                  placeholderTextColor={theme.inputPlaceholder}
                   value={form.location}
                   onChangeText={v => set('location', v)}
                 />
@@ -431,9 +434,9 @@ export default function RegisterStep2Screen({ navigation, route }) {
                     resizeMode="cover"
                   />
                 ) : (
-                  <View style={s.avatarEmpty}>
+                  <View style={[s.avatarEmpty, { backgroundColor: theme.surfaceAlt }]}>
                     <Text style={{ fontSize: 40 }}>📷</Text>
-                    <Text style={s.avatarEmptyTxt}>Appuyer pour choisir</Text>
+                    <Text style={[s.avatarEmptyTxt, { color: theme.textMuted }]}>Appuyer pour choisir</Text>
                   </View>
                 )}
               </TouchableOpacity>
@@ -448,7 +451,7 @@ export default function RegisterStep2Screen({ navigation, route }) {
             <Text style={[s.avatarHint, { color: avatarUri ? P.green : P.muted }]}>
               {avatarUri ? '✓ Photo sélectionnée' : 'JPG ou PNG · Max 2MB'}
             </Text>
-            <Text style={s.avatarSubHint}>
+            <Text style={[s.avatarSubHint, { color: theme.textMuted }]}>
               {avatarUri
                 ? 'Photo recadrée et prête à l\'envoi'
                 : 'Un éditeur de recadrage s\'ouvrira pour ajuster'}
@@ -465,35 +468,35 @@ export default function RegisterStep2Screen({ navigation, route }) {
 
   return (
     <KeyboardAvoidingView
-      style={s.container}
+      style={[s.container, { backgroundColor: theme.screen }]}
       behavior={Platform.OS === 'ios' ? 'padding' : 'padding'}
     >
-      <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
+      <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} backgroundColor="transparent" translucent />
 
       {/* ── HEADER ardoise ─────────────────────────────────────────────── */}
       <LinearGradient
-        colors={['#2d3748', '#374151']}
+        colors={theme.header}
         style={[s.header, { paddingTop: (insets.top || 0) + 6 }]}
       >
         <View style={s.headerAccent} />
         <View style={s.headerRow}>
           <TouchableOpacity
-            style={s.backBtn}
+            style={[s.backBtn, { backgroundColor: theme.glass }]}
             onPress={stepIndex > 0 ? goPrev : () => navigation.goBack()}
             activeOpacity={0.8}
           >
-            <Text style={s.backBtnTxt}>←</Text>
+            <Text style={[s.backBtnTxt, { color: theme.text }]}>←</Text>
           </TouchableOpacity>
 
           <View style={s.headerCenter}>
             <LinearGradient colors={[P.orange500, P.orange700]} style={s.logoMini}>
               <Text style={s.logoMiniTxt}>M</Text>
             </LinearGradient>
-            <Text style={s.headerBrand}>MarketHub</Text>
+            <Text style={[s.headerBrand, { color: theme.text }]}>MarketHub</Text>
           </View>
 
-          <TouchableOpacity onPress={() => navigation.navigate('Login')} style={s.loginLink}>
-            <Text style={s.loginLinkTxt}>Connexion</Text>
+          <TouchableOpacity onPress={() => navigation.navigate('Login')} style={[s.loginLink, { borderColor: theme.border, backgroundColor: theme.glass }]}>
+            <Text style={[s.loginLinkTxt, { color: theme.text }]}>Connexion</Text>
           </TouchableOpacity>
         </View>
 
@@ -502,15 +505,16 @@ export default function RegisterStep2Screen({ navigation, route }) {
           {visibleSteps.map((_, i) => (
             <View key={i} style={[
               s.progSeg,
+              { backgroundColor: theme.divider },
               i < stepIndex  && s.progSegDone,
               i === stepIndex && s.progSegActive,
             ]} />
           ))}
         </View>
-        <Text style={s.stepCount}>{stepIndex + 1} / {visibleSteps.length}</Text>
+        <Text style={[s.stepCount, { color: theme.textSoft }]}>{stepIndex + 1} / {visibleSteps.length}</Text>
 
         <LinearGradient
-          colors={['transparent', P.terra, 'transparent']}
+          colors={[theme.divider, P.terra, theme.divider]}
           start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
           style={s.headerGlow}
         />
@@ -529,8 +533,8 @@ export default function RegisterStep2Screen({ navigation, route }) {
           {/* Question */}
           <View style={s.questionZone}>
             <Text style={s.stepIcon}>{step.icon}</Text>
-            <Text style={s.question}>{step.label}</Text>
-            {step.hint ? <Text style={s.questionHint}>{step.hint}</Text> : null}
+            <Text style={[s.question, { color: theme.text }]}>{step.label}</Text>
+            {step.hint ? <Text style={[s.questionHint, { color: theme.textMuted }]}>{step.hint}</Text> : null}
           </View>
 
           {/* Input */}
@@ -547,14 +551,14 @@ export default function RegisterStep2Screen({ navigation, route }) {
 
           {/* Bénéfices — affiché à la dernière étape */}
           {isLast && (
-            <View style={s.benefitsCard}>
+            <View style={[s.benefitsCard, { backgroundColor: theme.surface, borderColor: theme.border }] }>
               <View style={s.benefitsHead}>
                 <View style={s.benefitsIcon}>
                   <LinearGradient colors={[P.orange500, P.orange700]} style={s.benefitsIconGrad}>
                     <Text style={{ fontSize: 20 }}>🎉</Text>
                   </LinearGradient>
                 </View>
-                <Text style={s.benefitsTitle}>Vous êtes prêt à commencer !</Text>
+                <Text style={[s.benefitsTitle, { color: theme.text }]}>Vous êtes prêt à commencer !</Text>
               </View>
               {[
                 'Publiez des annonces illimitées gratuitement',
@@ -564,7 +568,7 @@ export default function RegisterStep2Screen({ navigation, route }) {
               ].map((b, i) => (
                 <View key={i} style={s.benefitItem}>
                   <Text style={s.benefitDot}>●</Text>
-                  <Text style={s.benefitTxt}>{b}</Text>
+                  <Text style={[s.benefitTxt, { color: theme.textMuted }]}>{b}</Text>
                 </View>
               ))}
             </View>
@@ -574,7 +578,7 @@ export default function RegisterStep2Screen({ navigation, route }) {
       </ScrollView>
 
       {/* ── FOOTER ─────────────────────────────────────────────────────── */}
-      <View style={[s.footer, { paddingBottom: Math.max(insets.bottom, 12) + 4 }]}>
+      <View style={[s.footer, { backgroundColor: theme.screen, borderTopColor: theme.divider, paddingBottom: Math.max(insets.bottom, 12) + 4 }]}>
         <TouchableOpacity
           onPress={goNext}
           disabled={loading}
@@ -608,13 +612,13 @@ export default function RegisterStep2Screen({ navigation, route }) {
         animationType="slide"
         onRequestClose={() => setShowCityModal(false)}
       >
-        <View style={s.modalOverlay}>
-          <View style={s.modal}>
-            <View style={s.modalHandle} />
-            <View style={s.modalHead}>
-              <Text style={s.modalTitle}>Sélectionner votre ville</Text>
-              <TouchableOpacity onPress={() => setShowCityModal(false)} style={s.modalClose}>
-                <Text style={s.modalCloseTxt}>✕</Text>
+        <View style={[s.modalOverlay, { backgroundColor: theme.overlay }]}>
+          <View style={[s.modal, { backgroundColor: theme.surface }]}>
+            <View style={[s.modalHandle, { backgroundColor: theme.divider }]} />
+            <View style={[s.modalHead, { borderBottomColor: theme.border }]}>
+              <Text style={[s.modalTitle, { color: theme.text }]}>Sélectionner votre ville</Text>
+              <TouchableOpacity onPress={() => setShowCityModal(false)} style={[s.modalClose, { backgroundColor: theme.surfaceAlt }]}>
+                <Text style={[s.modalCloseTxt, { color: theme.textMuted }]}>✕</Text>
               </TouchableOpacity>
             </View>
             <FlatList
@@ -624,7 +628,8 @@ export default function RegisterStep2Screen({ navigation, route }) {
                 <TouchableOpacity
                   style={[
                     s.cityRow,
-                    form.location === `${item}, Niger` && s.cityRowActive,
+                    { borderBottomColor: theme.border },
+                    form.location === `${item}, Niger` && [s.cityRowActive, { backgroundColor: theme.surfaceAlt }],
                   ]}
                   onPress={() => handleSelectCity(item)}
                   activeOpacity={0.8}
@@ -634,6 +639,7 @@ export default function RegisterStep2Screen({ navigation, route }) {
                   </Text>
                   <Text style={[
                     s.cityRowTxt,
+                    { color: theme.text },
                     form.location === `${item}, Niger` && { color: P.terra, fontWeight: '800' },
                     item === 'Autre...' && { color: P.amber },
                   ]}>

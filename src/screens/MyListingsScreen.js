@@ -11,6 +11,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Feather } from '@expo/vector-icons';
 import { useAuth } from '../contexts/AuthContext';
+import { useAppTheme } from '../contexts/ThemeContext';
 import { getMyProducts, getMyStats, deleteProduct, toggleProductStatus } from '../api/products';
 import AlertModal from '../components/AlertModal';
 import { MOBILE_COLORS as P } from '../theme/colors';
@@ -32,7 +33,7 @@ const getDistanceKm = (itemId) => {
 // ─────────────────────────────────────────────────────────────────────────────
 // STAT CARD
 // ─────────────────────────────────────────────────────────────────────────────
-function StatCard({ icon, value, label, accent, index }) {
+function StatCard({ icon, value, label, accent, index, theme, isDark }) {
   const anim = useRef(new Animated.Value(0)).current;
   useEffect(() => {
     Animated.spring(anim, {
@@ -49,13 +50,17 @@ function StatCard({ icon, value, label, accent, index }) {
       },
     ]}>
       <LinearGradient
-        colors={accent ? [P.orange500 + '22', P.orange300 + '11'] : ['rgba(255,255,255,0.06)', 'rgba(255,255,255,0.02)']}
-        style={s.statCardGrad}
+        colors={
+          accent
+            ? [P.orange500 + '22', P.orange300 + '11']
+            : (isDark ? ['rgba(255,255,255,0.06)', 'rgba(255,255,255,0.02)'] : ['rgba(17,24,39,0.06)', 'rgba(17,24,39,0.02)'])
+        }
+        style={[s.statCardGrad, !isDark && { borderColor: theme.border }]}
       >
         {accent && <View style={s.statCardAccent} />}
         <Text style={s.statIcon}>{icon}</Text>
-        <Text style={[s.statValue, accent && { color: P.amber }]}>{value}</Text>
-        <Text style={s.statLabel}>{label}</Text>
+        <Text style={[s.statValue, accent && { color: P.amber }, !accent && !isDark && { color: theme.text }]}>{value}</Text>
+        <Text style={[s.statLabel, !isDark && { color: theme.textMuted }]}>{label}</Text>
       </LinearGradient>
     </Animated.View>
   );
@@ -331,6 +336,7 @@ function ListingsFilterSheet({
 // ─────────────────────────────────────────────────────────────────────────────
 export default function MyListingsScreen({ navigation }) {
   const { user } = useAuth();
+  const { isDark, theme } = useAppTheme();
   const insets = useSafeAreaInsets();
 
   const [listings, setListings] = useState([]);
@@ -445,11 +451,11 @@ export default function MyListingsScreen({ navigation }) {
   // ── Loading ──────────────────────────────────────────────────────────────
   if (loading) {
     return (
-      <View style={s.container}>
-        <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
-        <LinearGradient colors={['#2d3748', '#374151']} style={[s.header, { paddingTop: (insets.top || 0) + 6 }]}>
+      <View style={[s.container, { backgroundColor: theme.screen }]}> 
+        <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} backgroundColor="transparent" translucent />
+        <LinearGradient colors={theme.header} style={[s.header, { paddingTop: (insets.top || 0) + 6 }]}>
           <View style={s.headerAccentLine} />
-          <Text style={s.headerTitle}>Mes Annonces</Text>
+          <Text style={[s.headerTitle, { color: theme.text }]}>Mes Annonces</Text>
         </LinearGradient>
         <View style={s.loadingContainer}>
           <ActivityIndicator size="large" color={P.terra} />
@@ -461,8 +467,8 @@ export default function MyListingsScreen({ navigation }) {
 
   // ── Rendu ────────────────────────────────────────────────────────────────
   return (
-    <View style={s.container}>
-      <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
+    <View style={[s.container, { backgroundColor: theme.screen }]}> 
+      <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} backgroundColor="transparent" translucent />
 
       {/* ══ HEADER ══════════════════════════════════════════════════════ */}
       <Animated.View style={{
@@ -470,7 +476,7 @@ export default function MyListingsScreen({ navigation }) {
         transform: [{ translateY: headerAnim.interpolate({ inputRange: [0, 1], outputRange: [-16, 0] }) }],
       }}>
         <LinearGradient
-          colors={['#2d3748', '#374151']}
+          colors={theme.header}
           start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
           style={[s.header, { paddingTop: (insets.top || 0) + 6 }]}
         >
@@ -479,8 +485,8 @@ export default function MyListingsScreen({ navigation }) {
           {/* Top row */}
           <View style={s.headerTop}>
             <View>
-              <Text style={s.headerEyebrow}>MarketHub Niger</Text>
-              <Text style={s.headerTitle}>Mes Annonces</Text>
+              <Text style={[s.headerEyebrow, { color: isDark ? P.amber : theme.textMuted }]}>MarketHub Niger</Text>
+              <Text style={[s.headerTitle, { color: theme.text }]}>Mes Annonces</Text>
             </View>
             <TouchableOpacity
               style={s.publishBtn}
@@ -495,9 +501,9 @@ export default function MyListingsScreen({ navigation }) {
 
           {/* Stats cards */}
           <View style={s.statsRow}>
-            <StatCard icon="📦" value={stats.totalActive} label="Actives" accent index={0} />
-            <StatCard icon="👁" value={stats.totalViews} label="Vues" index={1} />
-            <StatCard icon="♥" value={stats.totalFavorites} label="Favoris" index={2} />
+            <StatCard icon="📦" value={stats.totalActive} label="Actives" accent index={0} theme={theme} isDark={isDark} />
+            <StatCard icon="👁" value={stats.totalViews} label="Vues" index={1} theme={theme} isDark={isDark} />
+            <StatCard icon="♥" value={stats.totalFavorites} label="Favoris" index={2} theme={theme} isDark={isDark} />
           </View>
 
           {/* Bottom glow line */}
@@ -511,27 +517,27 @@ export default function MyListingsScreen({ navigation }) {
 
       {/* ══ RECHERCHE + FILTRES ══════════════════════════════════════════ */}
       <View style={s.searchSection}>
-        <View style={s.searchBar}>
+        <View style={[s.searchBar, { backgroundColor: theme.surface, borderColor: theme.border }]}>
           <Text style={s.searchIcon}>🔍</Text>
           <TextInput
-            style={s.searchInput}
+            style={[s.searchInput, { color: theme.text }]}
             placeholder="Rechercher dans mes annonces…"
-            placeholderTextColor={P.muted}
+            placeholderTextColor={theme.textMuted}
             value={searchQuery}
             onChangeText={setSearchQuery}
           />
           {searchQuery.length > 0 && (
             <TouchableOpacity onPress={() => setSearchQuery('')} style={s.searchClear}>
-              <Text style={s.searchClearTxt}>✕</Text>
+              <Text style={[s.searchClearTxt, { color: theme.textMuted }]}>✕</Text>
             </TouchableOpacity>
           )}
         </View>
         <TouchableOpacity
-          style={[s.filterBtn, hasFilters && s.filterBtnActive]}
+          style={[s.filterBtn, { backgroundColor: theme.surface, borderColor: theme.border }, hasFilters && s.filterBtnActive]}
           onPress={() => setShowFilterModal(true)}
           activeOpacity={0.8}
         >
-          <Text style={[s.filterBtnTxt, hasFilters && s.filterBtnTxtActive]}>
+          <Text style={[s.filterBtnTxt, { color: theme.textMuted }, hasFilters && s.filterBtnTxtActive]}>
             {hasFilters ? '● Filtres' : 'Filtres'}
           </Text>
         </TouchableOpacity>

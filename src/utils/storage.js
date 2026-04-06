@@ -9,6 +9,7 @@ const STORAGE_KEYS = {
   ACCESS_TOKEN: 'accessToken',
   REFRESH_TOKEN: 'refreshToken',
   USER_DATA: 'userData',
+  THEME_PREFERENCE: 'themePreference',
 };
 
 /**
@@ -91,5 +92,28 @@ export const clearAllData = async () => {
     await SecureStore.deleteItemAsync(STORAGE_KEYS.USER_DATA);
   } catch (error) {
     console.error('❌ Erreur suppression données:', error);
+  }
+};
+
+/**
+ * Sauvegarder la préférence de thème
+ */
+export const saveThemePreference = async (themePreference) => {
+  try {
+    await SecureStore.setItemAsync(STORAGE_KEYS.THEME_PREFERENCE, themePreference);
+  } catch (error) {
+    console.error('❌ Erreur sauvegarde theme preference:', error);
+  }
+};
+
+/**
+ * Récupérer la préférence de thème
+ */
+export const getThemePreference = async () => {
+  try {
+    return await SecureStore.getItemAsync(STORAGE_KEYS.THEME_PREFERENCE);
+  } catch (error) {
+    console.error('❌ Erreur récupération theme preference:', error);
+    return null;
   }
 };
