@@ -6,7 +6,7 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import {
-  View, Text, StyleSheet, TextInput, TouchableOpacity,
+  View, Text, StyleSheet, TextInput, TouchableOpacity, Image,
   ScrollView, StatusBar, Animated, KeyboardAvoidingView,
   Platform, ActivityIndicator, Modal,
 } from 'react-native';
@@ -79,6 +79,8 @@ export default function QuickAuthScreen({ navigation, route }) {
   const pendingAction = route.params?.pendingAction;
   const returnScreen = route.params?.returnScreen;
   const returnParams = route.params?.returnParams;
+  const publishDraft = pendingAction?.type === 'publish_submit' ? pendingAction?.params?.draftSummary : null;
+  const isPublishFlow = pendingAction?.type === 'publish_submit';
 
   const [step, setStep] = useState(STEP_PHONE);
   const [country, setCountry] = useState(COUNTRIES[0]);
@@ -136,7 +138,7 @@ export default function QuickAuthScreen({ navigation, route }) {
       const result = await checkPhone(fmtPhone);
       
       if (result.data?.exists) {
-        // Numéro connu → afficher login
+        // Numéro connu → étape login dans QuickAuth (ne pas sauter d'étape)
         animateTransition(true);
         setStep(STEP_LOGIN);
       } else {
@@ -267,6 +269,15 @@ export default function QuickAuthScreen({ navigation, route }) {
 
   // ── Titre et sous-titre dynamiques ──
   const getTitle = () => {
+    if (isPublishFlow) {
+      switch (step) {
+        case STEP_PHONE: return 'Finaliser la publication';
+        case STEP_LOGIN: return 'Publier maintenant';
+        case STEP_REGISTER: return 'Validation rapide';
+        default: return '';
+      }
+    }
+
     switch (step) {
       case STEP_PHONE: return 'Votre numéro';
       case STEP_LOGIN: return 'Bon retour ! 👋';
@@ -276,6 +287,15 @@ export default function QuickAuthScreen({ navigation, route }) {
   };
 
   const getSubtitle = () => {
+    if (isPublishFlow) {
+      switch (step) {
+        case STEP_PHONE: return 'Connexion requise pour terminer';
+        case STEP_LOGIN: return 'Encore une étape et c\'est publié';
+        case STEP_REGISTER: return 'Vérifiez votre numéro pour publier';
+        default: return '';
+      }
+    }
+
     switch (step) {
       case STEP_PHONE: return 'Saisissez votre numéro pour un accès express';
       case STEP_LOGIN: return 'Votre mot de passe pour continuer';
@@ -333,11 +353,44 @@ export default function QuickAuthScreen({ navigation, route }) {
         keyboardDismissMode="interactive"
       >
         <Animated.View style={{ opacity: fadeAnim, transform: [{ translateX: slideAnim }] }}>
+          {publishDraft ? (
+            <View style={[s.publishDraftCard, { backgroundColor: theme.surface, borderColor: theme.border, shadowColor: theme.shadow }]}>
+              <View style={[s.publishDraftThumb, { backgroundColor: theme.surfaceAlt, borderColor: theme.border }]}>
+                {publishDraft.firstImage ? (
+                  <Image source={{ uri: publishDraft.firstImage }} style={s.publishDraftThumbImg} />
+                ) : (
+                  <Text style={[s.publishDraftMiniTxt, { color: theme.textMuted }]}>Aperçu</Text>
+                )}
+              </View>
+              <View style={s.publishDraftBody}>
+                <Text style={[s.publishDraftLabel, { color: theme.textMuted }]}>Annonce en attente</Text>
+                <Text style={[s.publishDraftTitle, { color: theme.text }]} numberOfLines={2}>
+                  {publishDraft.title || 'Votre annonce'}
+                </Text>
+                <Text style={[s.publishDraftMeta, { color: theme.textMuted }]} numberOfLines={1}>
+                  {publishDraft.categoryName || 'Catégorie'}{publishDraft.subcategory ? ` • ${publishDraft.subcategory}` : ''}
+                </Text>
+                <View style={s.publishDraftRow}>
+                  {publishDraft.price ? (
+                    <View style={[s.publishDraftChip, { backgroundColor: theme.surfaceAlt, borderColor: theme.border }]}>
+                      <Text style={[s.publishDraftChipTxt, { color: theme.text }]}>{parseInt(publishDraft.price, 10).toLocaleString('fr-FR')} FCFA</Text>
+                    </View>
+                  ) : null}
+                  <View style={[s.publishDraftChip, { backgroundColor: theme.surfaceAlt, borderColor: theme.border }]}>
+                    <Text style={[s.publishDraftChipTxt, { color: theme.text }]}>{publishDraft.imagesCount || 0} photo{(publishDraft.imagesCount || 0) > 1 ? 's' : ''}</Text>
+                  </View>
+                </View>
+              </View>
+            </View>
+          ) : null}
+
           {/* Hero */}
           <View style={s.hero}>
-            <Text style={s.heroIcon}>
-              {step === STEP_PHONE ? '📱' : step === STEP_LOGIN ? '🔐' : '✨'}
-            </Text>
+            {!isPublishFlow ? (
+              <Text style={s.heroIcon}>
+                {step === STEP_PHONE ? '📱' : step === STEP_LOGIN ? '🔐' : '✨'}
+              </Text>
+            ) : null}
             <Text style={[s.heroTitle, { color: theme.text }]}>{getTitle()}</Text>
             <Text style={[s.heroSub, { color: theme.textMuted }]}>{getSubtitle()}</Text>
           </View>
@@ -489,9 +542,11 @@ export default function QuickAuthScreen({ navigation, route }) {
               <ActivityIndicator color={P.white} />
             ) : (
               <Text style={s.submitBtnTxt}>
-                {step === STEP_PHONE ? 'Continuer →' :
-                 step === STEP_LOGIN ? 'Se connecter →' :
-                 'Vérifier mon numéro →'}
+                {step === STEP_PHONE
+                  ? (isPublishFlow ? 'Continuer vers la publication →' : 'Continuer →')
+                  : step === STEP_LOGIN
+                    ? (isPublishFlow ? 'Se connecter et publier →' : 'Se connecter →')
+                    : (isPublishFlow ? 'Vérifier mon numéro et publier →' : 'Vérifier mon numéro →')}
               </Text>
             )}
           </LinearGradient>
@@ -573,12 +628,80 @@ const s = StyleSheet.create({
   // ── Scroll ──
   scrollContent: { paddingHorizontal: 24, paddingTop: 28, paddingBottom: 16 },
 
+  publishDraftCard: {
+    flexDirection: 'row',
+    gap: 12,
+    borderWidth: 1,
+    borderRadius: 18,
+    padding: 12,
+    marginBottom: 18,
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.12,
+    shadowRadius: 16,
+    elevation: 3,
+  },
+  publishDraftThumb: {
+    width: 74,
+    height: 74,
+    borderRadius: 16,
+    overflow: 'hidden',
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  publishDraftThumbEmoji: {
+    fontSize: 30,
+  },
+  publishDraftThumbImg: {
+    width: '100%',
+    height: '100%',
+  },
+  publishDraftMiniTxt: {
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  publishDraftBody: {
+    flex: 1,
+    justifyContent: 'center',
+  },
+  publishDraftLabel: {
+    fontSize: 11,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+    letterSpacing: 0.7,
+    marginBottom: 4,
+  },
+  publishDraftTitle: {
+    fontSize: 16,
+    fontWeight: '800',
+    marginBottom: 4,
+  },
+  publishDraftMeta: {
+    fontSize: 12,
+    fontWeight: '600',
+    marginBottom: 8,
+  },
+  publishDraftRow: {
+    flexDirection: 'row',
+    gap: 8,
+    flexWrap: 'wrap',
+  },
+  publishDraftChip: {
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+  },
+  publishDraftChipTxt: {
+    fontSize: 12,
+    fontWeight: '700',
+  },
+
   // ── Hero ──
   hero:      { alignItems: 'center', marginBottom: 32 },
   heroIcon:  { fontSize: 48, marginBottom: 12 },
   heroTitle: { fontSize: 24, fontWeight: '900', color: P.charcoal, letterSpacing: -0.5, marginBottom: 6, textAlign: 'center' },
   heroSub:   { fontSize: 14, color: P.muted, textAlign: 'center' },
-
   // ── Fields ──
   fieldZone:  { marginBottom: 24 },
   fieldLabel: { fontSize: 12, fontWeight: '700', color: P.muted, marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.5 },

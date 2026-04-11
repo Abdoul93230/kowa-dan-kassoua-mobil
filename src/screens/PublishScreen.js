@@ -45,6 +45,24 @@ const normalizeSubcategoryValue = (value) => {
 
 const isRemoteImageUrl = (value) => /^https?:\/\//i.test(String(value || ''));
 
+const buildPublishSummary = (form, categories, editItemId = '') => {
+  const selectedCategory = categories.find((cat) => String(cat?._id || '') === String(form.category || ''));
+  const firstImage = Array.isArray(form.images) && form.images.length > 0 ? form.images[0] : '';
+
+  return {
+    editItemId,
+    type: form.type,
+    title: form.title,
+    price: form.price,
+    categoryName: selectedCategory?.name || '',
+    subcategory: form.subcategory || '',
+    condition: form.type === 'product' ? form.condition : '',
+    imagesCount: Array.isArray(form.images) ? form.images.length : 0,
+    hasDelivery: Boolean(form.delivery),
+    firstImage,
+  };
+};
+
 // ─── COMPOSANTS RÉUTILISABLES ─────────────────────────────────────────────────
 
 // Variable globale pour stocker le brouillon temporaire pendant l'authentification
@@ -453,14 +471,16 @@ export default function PublishScreen({ navigation, route }) {
     
     if (!isAuthenticated) {
       // Sauvegarder le brouillon dans le store global
-      temporaryDraftStore = { form: { ...form, editItemId: isEditing ? editItemId : '' }, step };
+      const draftSummary = buildPublishSummary(form, categories, isEditing ? editItemId : '');
+      temporaryDraftStore = { form: { ...form, editItemId: isEditing ? editItemId : '' }, step, draftSummary };
 
       navigation.navigate('QuickAuth', {
         pendingAction: { 
           type: 'publish_submit',
-          params: { autoSubmit: true }
+          params: { autoSubmit: true, draftSummary }
         },
-        returnScreen: 'Publish'
+        returnScreen: 'Publish',
+        returnParams: { autoSubmit: true }
       });
       return;
     }

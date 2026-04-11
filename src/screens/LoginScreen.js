@@ -6,7 +6,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import {
   View, Text, StyleSheet, TextInput, TouchableOpacity,
   ScrollView, StatusBar, Animated, KeyboardAvoidingView,
-  Platform, ActivityIndicator, Modal,
+  Platform, ActivityIndicator, Modal, Image,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -64,10 +64,15 @@ const validatePhoneForCountry = (country, digits) => {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-export default function LoginScreen({ navigation }) {
+export default function LoginScreen({ navigation, route }) {
   const insets = useSafeAreaInsets();
   const { isDark, theme } = useAppTheme();
   const { login } = useAuth();
+
+  const publishDraft = route?.params?.draftSummary || route?.params?.pendingAction?.params?.draftSummary || null;
+  const presetPhone = route?.params?.phone || '';
+  const presetCountryCode = route?.params?.countryCode || '';
+  const shouldResumePublish = route?.params?.pendingAction?.type === 'publish_submit' || route?.params?.returnScreen === 'Publish';
 
   const [loginType,  setLoginType]  = useState('phone');
   const [country,    setCountry]    = useState(COUNTRIES[0]);
@@ -91,6 +96,19 @@ export default function LoginScreen({ navigation }) {
     ]).start();
     loadSaved();
   }, []);
+
+  useEffect(() => {
+    if (presetPhone) {
+      setPhone(presetPhone);
+      setLoginType('phone');
+    }
+  }, [presetPhone]);
+
+  useEffect(() => {
+    if (!presetCountryCode) return;
+    const matched = COUNTRIES.find((c) => c.code === presetCountryCode);
+    if (matched) setCountry(matched);
+  }, [presetCountryCode]);
 
   useEffect(() => {
     const maxDigits = country?.nationalLength || 8;
@@ -165,6 +183,18 @@ export default function LoginScreen({ navigation }) {
       // Stopper le loader avant navigation pour éviter un état visuel bloqué.
       setLoading(false);
 
+      if (shouldResumePublish) {
+        navigation.navigate({
+          name: 'MainTabs',
+          params: {
+            screen: 'Publish',
+            params: { autoSubmit: true },
+          },
+          merge: true,
+        });
+        return;
+      }
+
       // Navigation robuste: fonctionne même si Login n'a pas d'écran précédent.
       navigation.reset({
         index: 0,
@@ -231,6 +261,37 @@ export default function LoginScreen({ navigation }) {
         keyboardDismissMode="interactive"
       >
         <Animated.View style={{ opacity: fadeAnim, transform: [{ translateY: slideAnim }] }}>
+
+          {publishDraft ? (
+            <View style={[s.publishDraftCard, { backgroundColor: theme.surface, borderColor: theme.border, shadowColor: theme.shadow }]}>
+              <View style={[s.publishDraftThumb, { backgroundColor: theme.surfaceAlt, borderColor: theme.border }]}>
+                {publishDraft.firstImage ? (
+                  <Image source={{ uri: publishDraft.firstImage }} style={s.publishDraftThumbImg} />
+                ) : (
+                  <Text style={s.publishDraftThumbEmoji}>{publishDraft.type === 'service' ? '🛠️' : '📦'}</Text>
+                )}
+              </View>
+              <View style={s.publishDraftBody}>
+                <Text style={[s.publishDraftLabel, { color: theme.textMuted }]}>Annonce à publier</Text>
+                <Text style={[s.publishDraftTitle, { color: theme.text }]} numberOfLines={2}>
+                  {publishDraft.title || 'Votre annonce'}
+                </Text>
+                <Text style={[s.publishDraftMeta, { color: theme.textMuted }]} numberOfLines={1}>
+                  {publishDraft.categoryName || 'Catégorie'}{publishDraft.subcategory ? ` • ${publishDraft.subcategory}` : ''}
+                </Text>
+                <View style={s.publishDraftRow}>
+                  {publishDraft.price ? (
+                    <View style={[s.publishDraftChip, { backgroundColor: theme.surfaceAlt, borderColor: theme.border }]}>
+                      <Text style={[s.publishDraftChipTxt, { color: theme.text }]}>{parseInt(publishDraft.price, 10).toLocaleString('fr-FR')} FCFA</Text>
+                    </View>
+                  ) : null}
+                  <View style={[s.publishDraftChip, { backgroundColor: theme.surfaceAlt, borderColor: theme.border }]}>
+                    <Text style={[s.publishDraftChipTxt, { color: theme.text }]}>{publishDraft.imagesCount || 0} photo{(publishDraft.imagesCount || 0) > 1 ? 's' : ''}</Text>
+                  </View>
+                </View>
+              </View>
+            </View>
+          ) : null}
 
           {/* Hero */}
           <View style={s.hero}>
@@ -461,6 +522,71 @@ const s = StyleSheet.create({
 
   // ── Scroll ──
   scrollContent: { paddingHorizontal: 24, paddingTop: 28, paddingBottom: 16 },
+
+  publishDraftCard: {
+    flexDirection: 'row',
+    gap: 12,
+    borderWidth: 1,
+    borderRadius: 18,
+    padding: 12,
+    marginBottom: 20,
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.12,
+    shadowRadius: 16,
+    elevation: 3,
+  },
+  publishDraftThumb: {
+    width: 74,
+    height: 74,
+    borderRadius: 16,
+    overflow: 'hidden',
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  publishDraftThumbImg: {
+    width: '100%',
+    height: '100%',
+  },
+  publishDraftThumbEmoji: {
+    fontSize: 30,
+  },
+  publishDraftBody: {
+    flex: 1,
+    justifyContent: 'center',
+  },
+  publishDraftLabel: {
+    fontSize: 11,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+    letterSpacing: 0.7,
+    marginBottom: 4,
+  },
+  publishDraftTitle: {
+    fontSize: 16,
+    fontWeight: '800',
+    marginBottom: 4,
+  },
+  publishDraftMeta: {
+    fontSize: 12,
+    fontWeight: '600',
+    marginBottom: 8,
+  },
+  publishDraftRow: {
+    flexDirection: 'row',
+    gap: 8,
+    flexWrap: 'wrap',
+  },
+  publishDraftChip: {
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+  },
+  publishDraftChipTxt: {
+    fontSize: 12,
+    fontWeight: '700',
+  },
 
   // ── Hero ──
   hero:         { alignItems: 'center', marginBottom: 28 },
