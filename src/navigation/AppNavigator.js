@@ -37,6 +37,7 @@ import { useSocket } from '../hooks/useSocket';
 const Stack = createStackNavigator();
 const Tab = createBottomTabNavigator();
 const MessagesStack = createStackNavigator();
+const ProfileStack = createStackNavigator();
 const BASE_TAB_BAR_STYLE = {
   position: 'absolute',
   bottom: 0,
@@ -94,6 +95,22 @@ function MessagesNavigator() {
         options={{ headerShown: true }}
       />
     </MessagesStack.Navigator>
+  );
+}
+
+function ProfileNavigator() {
+  const { theme } = useAppTheme();
+
+  return (
+    <ProfileStack.Navigator
+      screenOptions={{
+        headerShown: false,
+        cardStyle: { backgroundColor: theme.screen },
+      }}
+    >
+      <ProfileStack.Screen name="ProfileHome" component={ProfileScreen} />
+      <ProfileStack.Screen name="MyListingsTab" component={MyListingsScreen} />
+    </ProfileStack.Navigator>
   );
 }
 
@@ -339,7 +356,7 @@ function MainTabs() {
       />
       <Tab.Screen
         name="Profile"
-        component={ProfileScreen}
+        component={ProfileNavigator}
         options={{
           tabBarIcon: ({ focused, color }) => (
             <TabBarIcon name="profile" focused={focused} color={color} />
@@ -396,7 +413,6 @@ export default function AppNavigator() {
           <Stack.Screen name="AllProducts" component={AllProductsScreen} options={{ headerShown: false }} />
           <Stack.Screen name="ProductDetail" component={ProductDetailScreen} options={{ headerShown: false }} />
           <Stack.Screen name="SellerProfile" component={SellerProfileScreen} options={{ headerShown: false }} />
-          <Stack.Screen name="MyListings" component={MyListingsScreen} options={{ headerShown: false }} />
           <Stack.Screen name="Login" component={LoginScreen} options={{ presentation: Platform.OS === 'ios' ? 'modal' : 'card', headerShown: false }} />
           <Stack.Screen name="Register" component={RegisterScreen} options={{ presentation: Platform.OS === 'ios' ? 'modal' : 'card', headerShown: false }} />
           <Stack.Screen name="RegisterStep2" component={RegisterStep2Screen} options={{ presentation: Platform.OS === 'ios' ? 'modal' : 'card', headerShown: false }} />

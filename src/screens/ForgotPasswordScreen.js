@@ -6,7 +6,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import {
   View, Text, StyleSheet, TextInput, TouchableOpacity,
   ScrollView, StatusBar, Animated, KeyboardAvoidingView,
-  Platform, ActivityIndicator,
+  Platform, ActivityIndicator, Modal,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -14,14 +14,68 @@ import { forgotPassword } from '../api/auth';
 import { useAppTheme } from '../contexts/ThemeContext';
 import { MOBILE_COLORS as P } from '../theme/colors';
 
+const COUNTRIES = [
+  { code: 'NE', name: 'Niger',         dialCode: '+227', flag: '🇳🇪', nationalLength: 8, phoneGroups: [2, 2, 2, 2], sample: '90 12 34 56' },
+  { code: 'SN', name: 'Sénégal',       dialCode: '+221', flag: '🇸🇳', nationalLength: 9, phoneGroups: [2, 3, 2, 2], sample: '77 123 45 67' },
+  { code: 'CI', name: "Côte d'Ivoire", dialCode: '+225', flag: '🇨🇮', nationalLength: 10, phoneGroups: [2, 2, 2, 2, 2], sample: '07 12 34 56 78' },
+  { code: 'BF', name: 'Burkina Faso',  dialCode: '+226', flag: '🇧🇫', nationalLength: 8, phoneGroups: [2, 2, 2, 2], sample: '70 12 34 56' },
+  { code: 'ML', name: 'Mali',          dialCode: '+223', flag: '🇲🇱', nationalLength: 8, phoneGroups: [2, 2, 2, 2], sample: '60 12 34 56' },
+  { code: 'TG', name: 'Togo',          dialCode: '+228', flag: '🇹🇬', nationalLength: 8, phoneGroups: [2, 2, 2, 2], sample: '90 12 34 56' },
+  { code: 'BJ', name: 'Bénin',         dialCode: '+229', flag: '🇧🇯', nationalLength: 8, phoneGroups: [2, 2, 2, 2], sample: '90 12 34 56' },
+];
+
+const normalizePhoneDigits = (value = '') =>
+  String(value)
+    .replace(/\D/g, '')
+    .replace(/^0+/, '');
+
+const formatNationalPhone = (country, digits) => {
+  const chunks = [];
+  let cursor = 0;
+  const groups = country?.phoneGroups || [];
+
+  groups.forEach((size) => {
+    if (cursor >= digits.length) return;
+    const part = digits.slice(cursor, cursor + size);
+    if (part) chunks.push(part);
+    cursor += size;
+  });
+
+  if (cursor < digits.length) {
+    chunks.push(digits.slice(cursor));
+  }
+
+  return chunks.join(' ').trim();
+};
+
+const validatePhoneForCountry = (country, digits) => {
+  const maxLen = country?.nationalLength || 8;
+
+  if (!digits) return 'Numéro requis';
+  if (digits.length !== maxLen) {
+    return `Le numéro doit contenir ${maxLen} chiffres pour ${country?.name}.`;
+  }
+  if (/^(\d)\1+$/.test(digits)) {
+    return 'Numéro invalide';
+  }
+
+  return '';
+};
+
 // ─────────────────────────────────────────────────────────────────────────────
-export default function ForgotPasswordScreen({ navigation }) {
+export default function ForgotPasswordScreen({ navigation, route }) {
   const insets = useSafeAreaInsets();
   const { isDark, theme } = useAppTheme();
 
-  const [identifier, setIdentifier] = useState('');
-  const [loading,    setLoading]    = useState(false);
-  const [error,      setError]      = useState('');
+  const [recoveryType, setRecoveryType] = useState(route?.params?.presetType === 'email' ? 'email' : 'phone');
+  const [country, setCountry] = useState(COUNTRIES[0]);
+  const [showPicker, setShowPicker] = useState(false);
+  const [phone, setPhone] = useState('');
+  const [email, setEmail] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+
+  const tabAnim = useRef(new Animated.Value(route?.params?.presetType === 'email' ? 1 : 0)).current;
 
   // Animations — même pattern que Login/Register
   const fadeAnim  = useRef(new Animated.Value(0)).current;
@@ -34,15 +88,62 @@ export default function ForgotPasswordScreen({ navigation }) {
     ]).start();
   }, []);
 
+  useEffect(() => {
+    const presetCountryCode = route?.params?.presetCountryCode;
+    if (!presetCountryCode) return;
+    const matched = COUNTRIES.find((c) => c.code === presetCountryCode);
+    if (matched) setCountry(matched);
+  }, [route?.params?.presetCountryCode]);
+
+  useEffect(() => {
+    if (route?.params?.presetPhone) {
+      setPhone(route.params.presetPhone);
+      setRecoveryType('phone');
+      tabAnim.setValue(0);
+    }
+    if (route?.params?.presetEmail) {
+      setEmail(route.params.presetEmail);
+      if (!route?.params?.presetPhone) {
+        setRecoveryType('email');
+        tabAnim.setValue(1);
+      }
+    }
+  }, [route?.params?.presetEmail, route?.params?.presetPhone, tabAnim]);
+
+  useEffect(() => {
+    const maxDigits = country?.nationalLength || 8;
+    const currentDigits = normalizePhoneDigits(phone).slice(0, maxDigits);
+    setPhone(formatNationalPhone(country, currentDigits));
+  }, [country]);
+
+  const handlePhoneChange = (rawValue) => {
+    const maxDigits = country?.nationalLength || 8;
+    const digits = normalizePhoneDigits(rawValue).slice(0, maxDigits);
+    setPhone(formatNationalPhone(country, digits));
+    setError('');
+  };
+
+  const switchTab = (type) => {
+    if (type === recoveryType) return;
+    Animated.timing(tabAnim, {
+      toValue: type === 'phone' ? 0 : 1,
+      duration: 220,
+      useNativeDriver: false,
+    }).start();
+    setRecoveryType(type);
+    setError('');
+  };
+
   // ── Validation ──────────────────────────────────────────────────────────────
   const validate = () => {
-    const trimmed = identifier.trim();
-    if (!trimmed)
-      return 'Veuillez entrer votre email ou numéro de téléphone';
-    const isEmail = trimmed.includes('@');
-    const isPhone = /^\+?\d[\d\s]{6,}$/.test(trimmed);
-    if (!isEmail && !isPhone)
-      return 'Format invalide. Entrez un email ou un numéro de téléphone';
+    if (recoveryType === 'phone') {
+      const phoneErr = validatePhoneForCountry(country, normalizePhoneDigits(phone));
+      if (phoneErr) return phoneErr;
+    } else {
+      if (!email.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        return 'Adresse email invalide';
+      }
+    }
     return null;
   };
 
@@ -53,10 +154,15 @@ export default function ForgotPasswordScreen({ navigation }) {
     setLoading(true);
     setError('');
     try {
-      const result = await forgotPassword(identifier.trim());
+      const phoneDigits = normalizePhoneDigits(phone);
+      const identifier = recoveryType === 'phone'
+        ? `${country.dialCode} ${phoneDigits}`
+        : email.trim().toLowerCase();
+
+      const result = await forgotPassword(identifier);
       if (result.success) {
         navigation.navigate('VerifyOTP', {
-          identifier: identifier.trim(),
+          identifier,
           type: 'resetPassword',
           devCode: result.devCode,
         });
@@ -129,25 +235,76 @@ export default function ForgotPasswordScreen({ navigation }) {
             </View>
             <Text style={[s.heroTitle, { color: theme.text }]}>Mot de passe oublié ?</Text>
             <Text style={[s.heroSub, { color: theme.textMuted }]}>
-              Entrez votre email ou numéro de téléphone.{'\n'}
+              Choisissez email ou téléphone.{'\n'}
               Nous vous enverrons un code de réinitialisation.
             </Text>
           </View>
 
+          <View style={[s.tabWrap, { backgroundColor: theme.surfaceAlt, borderColor: theme.border }]}>
+            <Animated.View
+              style={[
+                s.tabCursor,
+                { backgroundColor: theme.surface },
+                {
+                  left: tabAnim.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: ['2%', '51%'],
+                  }),
+                },
+              ]}
+            />
+            <TouchableOpacity style={s.tabBtn} onPress={() => switchTab('phone')} activeOpacity={0.8}>
+              <Text style={[s.tabTxt, { color: theme.textMuted }, recoveryType === 'phone' && s.tabTxtActive]}>📱 Téléphone</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={s.tabBtn} onPress={() => switchTab('email')} activeOpacity={0.8}>
+              <Text style={[s.tabTxt, { color: theme.textMuted }, recoveryType === 'email' && s.tabTxtActive]}>✉️ Email</Text>
+            </TouchableOpacity>
+          </View>
+
           {/* ── Champ identifiant ── style underline Register ── */}
           <View style={s.fieldZone}>
-            <Text style={[s.fieldLabel, { color: theme.textMuted }]}>Email ou Téléphone</Text>
-            <TextInput
-              style={[s.mainInput, { color: theme.text }]}
-              placeholder="exemple@email.com ou +227 12345678"
-              placeholderTextColor={theme.inputPlaceholder}
-              value={identifier}
-              onChangeText={v => { setIdentifier(v); setError(''); }}
-              keyboardType="default"
-              autoCapitalize="none"
-              autoFocus
-              editable={!loading}
-            />
+            <Text style={[s.fieldLabel, { color: theme.textMuted }]}>
+              {recoveryType === 'phone' ? 'Numéro de téléphone' : 'Adresse email'}
+            </Text>
+
+            {recoveryType === 'phone' ? (
+              <View style={s.phoneWrap}>
+                <TouchableOpacity
+                  style={[s.dialBadge, { backgroundColor: theme.surfaceAlt, borderColor: theme.border }]}
+                  onPress={() => setShowPicker(true)}
+                  activeOpacity={0.85}
+                  disabled={loading}
+                >
+                  <Text style={s.dialFlag}>{country.flag}</Text>
+                  <Text style={[s.dialCode, { color: theme.text }]}>{country.dialCode}</Text>
+                  <Text style={[s.dialArrow, { color: theme.textMuted }]}>▾</Text>
+                </TouchableOpacity>
+                <TextInput
+                  style={[s.phoneInput, { color: theme.text }]}
+                  placeholder={country.sample}
+                  placeholderTextColor={theme.inputPlaceholder}
+                  value={phone}
+                  onChangeText={handlePhoneChange}
+                  keyboardType="phone-pad"
+                  maxLength={(country?.nationalLength || 8) + ((country?.phoneGroups?.length || 1) - 1)}
+                  autoComplete="tel"
+                  autoFocus
+                  editable={!loading}
+                />
+              </View>
+            ) : (
+              <TextInput
+                style={[s.mainInput, { color: theme.text }]}
+                placeholder="exemple@email.com"
+                placeholderTextColor={theme.inputPlaceholder}
+                value={email}
+                onChangeText={v => { setEmail(v); setError(''); }}
+                keyboardType="email-address"
+                autoCapitalize="none"
+                autoFocus
+                editable={!loading}
+              />
+            )}
           </View>
 
           {/* ── Erreur ── */}
@@ -189,6 +346,36 @@ export default function ForgotPasswordScreen({ navigation }) {
         </TouchableOpacity>
       </View>
 
+      <Modal visible={showPicker} transparent animationType="fade" onRequestClose={() => setShowPicker(false)}>
+        <View style={s.modalOverlay}>
+          <TouchableOpacity style={StyleSheet.absoluteFill} onPress={() => setShowPicker(false)} activeOpacity={1} />
+          <View style={[s.pickerCard, { backgroundColor: theme.surface, borderColor: theme.border }]}> 
+            <Text style={[s.pickerTitle, { color: theme.text }]}>Choisissez votre pays</Text>
+            <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: 320 }}>
+              {COUNTRIES.map((c) => (
+                <TouchableOpacity
+                  key={c.code}
+                  style={[s.countryRow, { borderBottomColor: theme.divider }, c.code === country.code && s.countryRowActive]}
+                  onPress={() => {
+                    setCountry(c);
+                    setShowPicker(false);
+                    setError('');
+                  }}
+                  activeOpacity={0.85}
+                >
+                  <Text style={s.countryFlag}>{c.flag}</Text>
+                  <View style={{ flex: 1 }}>
+                    <Text style={[s.countryName, { color: theme.text }]}>{c.name}</Text>
+                    <Text style={[s.countryCode, { color: theme.textMuted }]}>{c.dialCode}</Text>
+                  </View>
+                  {c.code === country.code ? <Text style={s.countryCheck}>✓</Text> : null}
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
     </KeyboardAvoidingView>
   );
 }
@@ -229,6 +416,28 @@ const s = StyleSheet.create({
   heroTitle:   { fontSize: 26, fontWeight: '900', color: P.charcoal, letterSpacing: -0.5, marginBottom: 10, textAlign: 'center' },
   heroSub:     { fontSize: 14, color: P.muted, textAlign: 'center', lineHeight: 22 },
 
+  // ── Tabs ──
+  tabWrap: {
+    height: 48,
+    borderRadius: 14,
+    borderWidth: 1,
+    marginBottom: 22,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 4,
+    position: 'relative',
+  },
+  tabCursor: {
+    position: 'absolute',
+    top: 4,
+    width: '47%',
+    height: 38,
+    borderRadius: 11,
+  },
+  tabBtn: { flex: 1, alignItems: 'center', justifyContent: 'center', zIndex: 2 },
+  tabTxt: { fontSize: 13, fontWeight: '700' },
+  tabTxtActive: { color: P.terra },
+
   // ── Champ underline ──
   fieldZone:  { marginBottom: 24 },
   fieldLabel: {
@@ -240,6 +449,67 @@ const s = StyleSheet.create({
     borderBottomWidth: 2.5, borderBottomColor: P.terra,
     paddingVertical: 10, backgroundColor: 'transparent',
   },
+  phoneWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  dialBadge: {
+    borderWidth: 1,
+    borderColor: P.dim,
+    borderRadius: 12,
+    paddingHorizontal: 10,
+    height: 48,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  dialFlag: { fontSize: 18 },
+  dialCode: { fontSize: 14, fontWeight: '700' },
+  dialArrow: { fontSize: 12, fontWeight: '700' },
+  phoneInput: {
+    flex: 1,
+    fontSize: 18,
+    fontWeight: '600',
+    borderBottomWidth: 2.5,
+    borderBottomColor: P.terra,
+    paddingVertical: 10,
+  },
+
+  // ── Country picker ──
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: P.glassBlack50,
+    justifyContent: 'center',
+    paddingHorizontal: 18,
+  },
+  pickerCard: {
+    borderRadius: 18,
+    borderWidth: 1,
+    padding: 14,
+    maxHeight: '70%',
+  },
+  pickerTitle: {
+    fontSize: 16,
+    fontWeight: '800',
+    marginBottom: 10,
+  },
+  countryRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+  },
+  countryRowActive: {
+    backgroundColor: P.peachSoft,
+    borderRadius: 10,
+    paddingHorizontal: 8,
+  },
+  countryFlag: { fontSize: 20 },
+  countryName: { fontSize: 14, fontWeight: '700' },
+  countryCode: { fontSize: 12, fontWeight: '600' },
+  countryCheck: { fontSize: 15, fontWeight: '900', color: P.terra },
 
   // ── Erreur ──
   errorWrap: {

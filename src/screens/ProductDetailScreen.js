@@ -13,6 +13,7 @@ import { BlurView } from 'expo-blur';
 import { apiClient } from '../api/auth';
 import { checkFavorite, toggleFavorite } from '../api/favorites';
 import { createReview, getProductReviews, markReviewHelpful } from '../api/reviews';
+import { toggleProductStatus } from '../api/products';
 import { useAuth } from '../contexts/AuthContext';
 import { useAppTheme } from '../contexts/ThemeContext';
 import AlertModal from '../components/AlertModal';
@@ -301,6 +302,7 @@ export default function ProductDetailScreen({ route, navigation }) {
   const [reviews, setReviews] = useState([]);
   const [loadingReviews, setLoadingReviews] = useState(false);
   const [submittingReview, setSubmittingReview] = useState(false);
+  const [ownerActionLoading, setOwnerActionLoading] = useState(false);
   const [reviewRating, setReviewRating] = useState(0);
   const [reviewComment, setReviewComment] = useState('');
 
@@ -525,6 +527,58 @@ export default function ProductDetailScreen({ route, navigation }) {
     }
   };
 
+  const handleOwnerEdit = () => {
+    navigation.navigate('MainTabs', {
+      screen: 'Publish',
+      params: {
+        editItem: product,
+      },
+    });
+  };
+
+  const handleOwnerToggleStatus = async () => {
+    if (!productId || ownerActionLoading) return;
+    try {
+      setOwnerActionLoading(true);
+      const wasActive = product?.status === 'active';
+      await toggleProductStatus(productId);
+
+      if (wasActive) {
+        setAlert({
+          visible: true,
+          type: 'success',
+          title: 'Annonce désactivée',
+          message: 'Votre annonce a été désactivée. Vous allez revenir à l\'accueil.',
+          buttons: [{
+            text: 'Aller à l\'accueil',
+            onPress: () => {
+              navigation.navigate('MainTabs', { screen: 'Home' });
+            },
+          }],
+        });
+      } else {
+        await fetchProduct();
+        setAlert({
+          visible: true,
+          type: 'success',
+          title: 'Statut mis à jour',
+          message: 'Le statut de votre annonce a été mis à jour.',
+          buttons: [{ text: 'OK', onPress: () => {} }],
+        });
+      }
+    } catch (error) {
+      setAlert({
+        visible: true,
+        type: 'error',
+        title: 'Erreur',
+        message: error?.message || 'Impossible de changer le statut.',
+        buttons: [{ text: 'Fermer', onPress: () => {} }],
+      });
+    } finally {
+      setOwnerActionLoading(false);
+    }
+  };
+
   // ── Loading ────────────────────────────────────────────────────────────────
   if (loading) {
     return (
@@ -565,6 +619,10 @@ export default function ProductDetailScreen({ route, navigation }) {
     ? product.images
     : [product.mainImage].filter(Boolean);
   if (!images.length) images.push(null);
+
+  const sellerId = String(product?.seller?.id || product?.seller?._id || '');
+  const currentUserId = String(user?.id || '');
+  const isOwnListing = Boolean(isAuthenticated && sellerId && currentUserId && sellerId === currentUserId);
 
   const specRows = [
     { label: 'Type',        value: isService ? 'Service' : 'Produit' },
@@ -797,54 +855,56 @@ export default function ProductDetailScreen({ route, navigation }) {
               </View>
             </View>
 
-            <View style={[s.reviewFormCard, { backgroundColor: appTheme.surfaceAlt, borderColor: appTheme.border }]}> 
-              <Text style={[s.reviewFormTitle, { color: appTheme.text }]}>Donnez votre note</Text>
-              <View style={s.reviewStarsRow}>
-                {[1, 2, 3, 4, 5].map((star) => (
-                  <TouchableOpacity
-                    key={star}
-                    onPress={() => setReviewRating(star)}
-                    disabled={submittingReview}
-                    style={s.reviewStarBtn}
-                  >
-                    <Text style={[s.reviewStar, star <= reviewRating && s.reviewStarActive]}>★</Text>
-                  </TouchableOpacity>
-                ))}
-                {reviewRating > 0 && <Text style={s.reviewStarLabel}>{reviewRating}/5</Text>}
-              </View>
+            {!isOwnListing ? (
+              <View style={[s.reviewFormCard, { backgroundColor: appTheme.surfaceAlt, borderColor: appTheme.border }]}> 
+                <Text style={[s.reviewFormTitle, { color: appTheme.text }]}>Donnez votre note</Text>
+                <View style={s.reviewStarsRow}>
+                  {[1, 2, 3, 4, 5].map((star) => (
+                    <TouchableOpacity
+                      key={star}
+                      onPress={() => setReviewRating(star)}
+                      disabled={submittingReview}
+                      style={s.reviewStarBtn}
+                    >
+                      <Text style={[s.reviewStar, star <= reviewRating && s.reviewStarActive]}>★</Text>
+                    </TouchableOpacity>
+                  ))}
+                  {reviewRating > 0 && <Text style={s.reviewStarLabel}>{reviewRating}/5</Text>}
+                </View>
 
-              <TextInput
-                value={reviewComment}
-                onChangeText={setReviewComment}
-                placeholder="Partagez votre expérience avec cet annonceur..."
-                placeholderTextColor={appTheme.inputPlaceholder}
-                multiline
-                maxLength={1000}
-                editable={!submittingReview}
-                style={[s.reviewInput, { color: appTheme.inputText, backgroundColor: appTheme.inputBg, borderColor: appTheme.border }]}
-              />
-              <Text style={[s.reviewCounter, { color: appTheme.textMuted }]}>{reviewComment.length}/1000</Text>
+                <TextInput
+                  value={reviewComment}
+                  onChangeText={setReviewComment}
+                  placeholder="Partagez votre expérience avec cet annonceur..."
+                  placeholderTextColor={appTheme.inputPlaceholder}
+                  multiline
+                  maxLength={1000}
+                  editable={!submittingReview}
+                  style={[s.reviewInput, { color: appTheme.inputText, backgroundColor: appTheme.inputBg, borderColor: appTheme.border }]}
+                />
+                <Text style={[s.reviewCounter, { color: appTheme.textMuted }]}>{reviewComment.length}/1000</Text>
 
-              <TouchableOpacity
-                activeOpacity={0.88}
-                onPress={handleSubmitReview}
-                disabled={submittingReview}
-                style={[s.reviewSubmitBtn, submittingReview && s.reviewSubmitBtnDisabled]}
-              >
-                <LinearGradient
-                  colors={isService ? d.sellerAvatarGrad : [P.orange500, P.orange700]}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 1, y: 0 }}
-                  style={s.reviewSubmitBtnGrad}
+                <TouchableOpacity
+                  activeOpacity={0.88}
+                  onPress={handleSubmitReview}
+                  disabled={submittingReview}
+                  style={[s.reviewSubmitBtn, submittingReview && s.reviewSubmitBtnDisabled]}
                 >
-                  {submittingReview ? (
-                    <ActivityIndicator size="small" color={P.white} />
-                  ) : (
-                    <Text style={s.reviewSubmitBtnTxt}>Publier mon avis</Text>
-                  )}
-                </LinearGradient>
-              </TouchableOpacity>
-            </View>
+                  <LinearGradient
+                    colors={isService ? d.sellerAvatarGrad : [P.orange500, P.orange700]}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 0 }}
+                    style={s.reviewSubmitBtnGrad}
+                  >
+                    {submittingReview ? (
+                      <ActivityIndicator size="small" color={P.white} />
+                    ) : (
+                      <Text style={s.reviewSubmitBtnTxt}>Publier mon avis</Text>
+                    )}
+                  </LinearGradient>
+                </TouchableOpacity>
+              </View>
+            ) : null}
 
             {loadingReviews ? (
               <View style={s.reviewLoadingWrap}>
@@ -918,7 +978,32 @@ export default function ProductDetailScreen({ route, navigation }) {
           pointerEvents="none"
         />
         <View style={[s.footerContent, { backgroundColor: appTheme.surface, borderTopColor: appTheme.border }]}> 
-          <ContactBtn icon="✉️" label="Envoyer un message" variant="main" onPress={() => handleContact('message')} isService={isService} />
+          {isOwnListing ? (
+            <View style={s.ownerActionsRow}>
+              <TouchableOpacity
+                style={[s.ownerActionGhost, { backgroundColor: appTheme.surfaceAlt, borderColor: appTheme.border }]}
+                onPress={handleOwnerEdit}
+                activeOpacity={0.75}
+              >
+                <Text style={[s.ownerActionGhostTxt, { color: appTheme.text }]}>Modifier</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[s.ownerActionToggle, product.status === 'active' ? s.ownerActionToggleOff : s.ownerActionToggleOn]}
+                onPress={handleOwnerToggleStatus}
+                disabled={ownerActionLoading || product.status === 'sold'}
+                activeOpacity={0.75}
+              >
+                {ownerActionLoading ? (
+                  <ActivityIndicator size="small" color={P.white} />
+                ) : (
+                  <Text style={s.ownerActionToggleTxt}>{product.status === 'active' ? 'Désactiver' : 'Activer'}</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          ) : (
+            <ContactBtn icon="✉️" label="Envoyer un message" variant="main" onPress={() => handleContact('message')} isService={isService} />
+          )}
         </View>
       </View>
 
@@ -1118,6 +1203,27 @@ const s = StyleSheet.create({
   footerFade:   { position: 'absolute', top: -40, left: 0, right: 0, height: 40 },
   footerContent:{ paddingHorizontal: 16, paddingTop: 10, backgroundColor: P.surface, borderTopWidth: 1, borderTopColor: P.dim },
   footerRow:    { flexDirection: 'row', gap: 10 },
+
+  ownerActionsRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  ownerActionGhost: {
+    flex: 1,
+    height: 46,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+  },
+  ownerActionGhostTxt: { fontSize: 13, fontWeight: '800' },
+  ownerActionToggle: {
+    flex: 1,
+    height: 46,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  ownerActionToggleOff: { backgroundColor: 'rgba(239,68,68,0.92)' },
+  ownerActionToggleOn: { backgroundColor: 'rgba(34,197,94,0.92)' },
+  ownerActionToggleTxt: { fontSize: 13, fontWeight: '800', color: P.white },
 
   // Boutons contact
   cBtn:         { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 13, borderRadius: 14, gap: 7 },

@@ -14,6 +14,7 @@ import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
 import { useAuth } from '../contexts/AuthContext';
 import { useAppTheme } from '../contexts/ThemeContext';
+import { imageToBase64 } from '../api/products';
 import AlertModal from '../components/AlertModal';
 import { MOBILE_COLORS as P } from '../theme/colors';
 
@@ -279,6 +280,11 @@ export default function RegisterStep2Screen({ navigation, route }) {
   const handleSubmit = async () => {
     setLoading(true);
     try {
+      let avatar = undefined;
+      if (avatarUri) {
+        avatar = await imageToBase64(avatarUri);
+      }
+
       const userData = {
         name:         step1Data.name,
         phone:        step1Data.phone,
@@ -289,6 +295,7 @@ export default function RegisterStep2Screen({ navigation, route }) {
         businessName: form.businessType === 'professional' ? form.businessName.trim() : step1Data.name,
         description:  form.businessType === 'professional' ? form.description.trim() : '',
         location:     form.location.trim(),
+        avatar,
       };
       await register(userData);
       setAlert({

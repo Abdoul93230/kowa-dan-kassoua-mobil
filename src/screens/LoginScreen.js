@@ -398,7 +398,15 @@ export default function LoginScreen({ navigation, route }) {
               <Text style={[s.rememberTxt, { color: theme.text }]}>Se souvenir de moi</Text>
             </TouchableOpacity>
 
-            <TouchableOpacity onPress={() => navigation.navigate('ForgotPassword')} activeOpacity={0.7}>
+            <TouchableOpacity
+              onPress={() => navigation.navigate('ForgotPassword', {
+                presetType: loginType,
+                presetPhone: loginType === 'phone' ? phone : '',
+                presetCountryCode: country?.code,
+                presetEmail: loginType === 'email' ? email : '',
+              })}
+              activeOpacity={0.7}
+            >
               <Text style={s.forgotTxt}>Mot de passe oublié ?</Text>
             </TouchableOpacity>
           </View>

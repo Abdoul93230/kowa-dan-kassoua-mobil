@@ -249,6 +249,9 @@ export default function ProfileScreen({ navigation }) {
                   ? <Image source={{ uri: user.avatar }} style={s.avatarImg} />
                   : <View style={[s.avatarImg, s.avatarFallback]}><Text style={s.avatarInitials}>{getInitials()}</Text></View>
                 }
+                <View style={s.verifiedMiniBadge}>
+                  <Text style={s.verifiedMiniTxt}>✓✓</Text>
+                </View>
                 <TouchableOpacity style={s.avatarEdit} onPress={() => setEditSheet(true)} activeOpacity={0.75}>
                   <Text style={{ fontSize: 15 }}>✏️</Text>
                 </TouchableOpacity>
@@ -256,7 +259,6 @@ export default function ProfileScreen({ navigation }) {
               <View style={{ alignItems: 'center' }}>
                 <Text style={s.userName}>{user?.name || 'Utilisateur'}</Text>
                 <Text style={s.userEmail}>{user?.email || ''}</Text>
-                <View style={s.badge}><Text style={s.badgeTxt}>✓ Compte vérifié</Text></View>
               </View>
             </View>
 
@@ -280,7 +282,7 @@ export default function ProfileScreen({ navigation }) {
         <View style={s.menuSection}>
           <MenuItem icon="🔐" label="Sécurité et Connexion" onPress={() => setSecuritySheet(true)} />
           <MenuItem icon="🌗" label={`Apparence : ${themePreference === 'system' ? 'Système' : themePreference === 'dark' ? 'Sombre' : 'Clair'}`} onPress={() => setThemeSheet(true)} />
-          <MenuItem icon="📦" label="Mes annonces"          onPress={() => navigation.navigate('MyListings')} />
+          <MenuItem icon="📦" label="Mes annonces"          onPress={() => navigation.navigate('MyListingsTab')} />
         </View>
 
         {/* Logout */}
@@ -634,9 +636,9 @@ function MenuItem({ icon, label, onPress }) {
 const s = StyleSheet.create({
   container: { flex: 1, backgroundColor: P.sand },
 
-  header: { paddingHorizontal: 18, paddingBottom: 14, overflow: 'hidden', position: 'relative' },
+  header: { paddingHorizontal: 18, paddingBottom: 8, overflow: 'hidden', position: 'relative' },
   headerAccent: { position: 'absolute', top: 0, left: 0, right: 0, height: 3, backgroundColor: P.terra },
-  headerTitle: { fontSize: 28, fontWeight: '700', color: P.white, marginBottom: 4 },
+  headerTitle: { fontSize: 25, fontWeight: '700', color: P.white, marginBottom: 2 },
 
   pwdBanner: {
     backgroundColor: P.orange100, flexDirection: 'row', alignItems: 'center',
@@ -648,7 +650,7 @@ const s = StyleSheet.create({
   pwdBannerBtnTxt: { color: P.white, fontSize: 12, fontWeight: '700' },
 
   content: { flex: 1 },
-  scrollContent: { paddingTop: 18, paddingHorizontal: 12 },
+  scrollContent: { paddingTop: 10, paddingHorizontal: 12 },
 
   // Non auth
   notAuthBox: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 40 },
@@ -662,34 +664,47 @@ const s = StyleSheet.create({
   registerBtnTxt: { fontSize: 15, fontWeight: '700', color: P.terra },
 
   // Profile card
-  profileCard: { marginHorizontal: 6, marginBottom: 24, borderRadius: 18, overflow: 'hidden' },
+  profileCard: { marginHorizontal: 6, marginBottom: 14, borderRadius: 18, overflow: 'hidden' },
   blurWrapper: { borderRadius: 18, overflow: 'hidden', backgroundColor: P.white, borderWidth: 1, borderColor: 'rgba(255,255,255,0.5)' },
-  avatarSection: { alignItems: 'center', paddingVertical: 24, paddingHorizontal: 16, gap: 14 },
+  avatarSection: { alignItems: 'center', paddingVertical: 16, paddingHorizontal: 14, gap: 8 },
   avatarWrap: { position: 'relative' },
-  avatarImg: { width: 110, height: 110, borderRadius: 55, borderWidth: 3, borderColor: P.terra, backgroundColor: P.sand, alignItems: 'center', justifyContent: 'center' },
+  avatarImg: { width: 94, height: 94, borderRadius: 47, borderWidth: 2.5, borderColor: P.terra, backgroundColor: P.sand, alignItems: 'center', justifyContent: 'center' },
   avatarFallback: { backgroundColor: P.orange500 },
-  avatarInitials: { fontSize: 42, fontWeight: '800', color: P.white },
-  avatarEdit: { position: 'absolute', bottom: -2, right: -2, width: 36, height: 36, borderRadius: 18, backgroundColor: P.terra, alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: P.white },
-  userName: { fontSize: 20, fontWeight: '800', color: P.charcoal, marginBottom: 2 },
-  userEmail: { fontSize: 13, color: P.muted, marginBottom: 10 },
-  badge: { backgroundColor: P.successSoft, paddingVertical: 6, paddingHorizontal: 12, borderRadius: 12, borderWidth: 1, borderColor: P.greenDark + '30' },
-  badgeTxt: { fontSize: 12, fontWeight: '600', color: P.greenDark },
+  avatarInitials: { fontSize: 34, fontWeight: '800', color: P.white },
+  verifiedMiniBadge: {
+    position: 'absolute',
+    top: 2,
+    right: -6,
+    minWidth: 24,
+    height: 20,
+    borderRadius: 10,
+    paddingHorizontal: 5,
+    backgroundColor: P.greenDark,
+    borderWidth: 1.5,
+    borderColor: P.white,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  verifiedMiniTxt: { fontSize: 10, fontWeight: '900', color: P.white, letterSpacing: -0.2 },
+  avatarEdit: { position: 'absolute', bottom: -2, right: -2, width: 32, height: 32, borderRadius: 16, backgroundColor: P.terra, alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: P.white },
+  userName: { fontSize: 18, fontWeight: '800', color: P.charcoal, marginBottom: 1 },
+  userEmail: { fontSize: 12, color: P.muted, marginBottom: 2 },
 
-  infoSection: { paddingVertical: 16, paddingHorizontal: 16 },
-  infoSectionHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
+  infoSection: { paddingVertical: 10, paddingHorizontal: 14 },
+  infoSectionHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
   sectionLabel: { fontSize: 13, fontWeight: '700', color: P.charcoal, textTransform: 'uppercase', letterSpacing: 0.5 },
   editChip: { flexDirection: 'row', alignItems: 'center', backgroundColor: P.orange50, paddingVertical: 6, paddingHorizontal: 10, borderRadius: 8, gap: 4, borderWidth: 1, borderColor: P.terra },
   editChipIcon: { fontSize: 13 },
   editChipTxt: { fontSize: 12, fontWeight: '700', color: P.terra },
 
-  infoRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 10, gap: 12 },
+  infoRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 8, gap: 10 },
   infoRowIcon: { fontSize: 18, width: 28 },
   infoRowLabel: { fontSize: 11, color: P.muted, fontWeight: '600', marginBottom: 2 },
   infoRowValue: { fontSize: 14, fontWeight: '600', color: P.charcoal },
 
   // Menu
-  menuSection: { marginHorizontal: 6, marginBottom: 20, gap: 10 },
-  menuItem: { flexDirection: 'row', alignItems: 'center', backgroundColor: P.white, paddingVertical: 16, paddingHorizontal: 16, borderRadius: 14, borderWidth: 1, borderColor: P.sand, elevation: 2, gap: 12 },
+  menuSection: { marginHorizontal: 6, marginBottom: 16, gap: 8 },
+  menuItem: { flexDirection: 'row', alignItems: 'center', backgroundColor: P.white, paddingVertical: 14, paddingHorizontal: 14, borderRadius: 14, borderWidth: 1, borderColor: P.sand, elevation: 2, gap: 10 },
   menuItemIcon: { fontSize: 22, width: 28 },
   menuItemLabel: { flex: 1, fontSize: 15, fontWeight: '700', color: P.charcoal },
   menuItemArrow: { fontSize: 22, color: P.terra },

@@ -8,6 +8,7 @@ import {
   Image, Modal, Dimensions, Animated, StatusBar,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useFocusEffect } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Feather } from '@expo/vector-icons';
 import { useAuth } from '../contexts/AuthContext';
@@ -387,6 +388,12 @@ export default function MyListingsScreen({ navigation }) {
       setLoading(false);
     }
   };
+
+  useFocusEffect(
+    useCallback(() => {
+      loadData();
+    }, [filterStatus])
+  );
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);

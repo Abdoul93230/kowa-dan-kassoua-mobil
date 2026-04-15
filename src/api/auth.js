@@ -105,8 +105,10 @@ export const register = async (userData) => {
  */
 export const login = async (phoneOrEmail, password) => {
   try {
+    const normalizedIdentifier = String(phoneOrEmail || '').trim();
+
     // Déterminer si c'est un email ou un téléphone
-    const isEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(phoneOrEmail);
+    const isEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedIdentifier);
     
     const payload = {
       loginType: isEmail ? 'email' : 'phone',
@@ -114,9 +116,9 @@ export const login = async (phoneOrEmail, password) => {
     };
     
     if (isEmail) {
-      payload.email = phoneOrEmail;
+      payload.email = normalizedIdentifier.toLowerCase();
     } else {
-      payload.phone = phoneOrEmail;
+      payload.phone = normalizedIdentifier;
     }
     
     const response = await api.post('/auth/login', payload);

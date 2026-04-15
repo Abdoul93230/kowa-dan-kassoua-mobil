@@ -1,7 +1,7 @@
 // ─── PublishScreen v2 PREMIUM ─ MarketHub Niger ───────────────────────────────
 // Formulaire de publication — design cohérent, épuré, 3 étapes
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
   TextInput, Image, ActivityIndicator, KeyboardAvoidingView,
@@ -9,6 +9,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
+import { useFocusEffect } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as ImagePicker from 'expo-image-picker';
 import { useAuth } from '../contexts/AuthContext';
@@ -365,6 +366,28 @@ export default function PublishScreen({ navigation, route }) {
     navigation.setParams?.({ editItem: undefined });
   };
 
+  useFocusEffect(
+    useCallback(() => {
+      const hasEditItem = Boolean(route?.params?.editItem);
+      const hasAutoSubmit = Boolean(route?.params?.autoSubmit);
+
+      if (!hasEditItem && !hasAutoSubmit) {
+        setErrors({});
+        setSpecKey('');
+        setSpecVal('');
+        setDelArea('');
+        setOriginalImages([]);
+        setDeletedImages([]);
+      }
+
+      return () => {
+        if (hasEditItem) {
+          navigation.setParams?.({ editItem: undefined });
+        }
+      };
+    }, [navigation, route?.params?.autoSubmit, route?.params?.editItem])
+  );
+
   const doSubmit = async () => {
     try {
       setSubmitting(true);
@@ -400,7 +423,10 @@ export default function PublishScreen({ navigation, route }) {
               text: 'OK',
               onPress: () => {
                 resetPublishState();
-                navigation.navigate('MyListings');
+                navigation.navigate('MainTabs', {
+                  screen: 'Profile',
+                  params: { screen: 'MyListingsTab' },
+                });
               }
             }],
           });
@@ -451,7 +477,10 @@ export default function PublishScreen({ navigation, route }) {
           text: 'Super !',
           onPress: () => {
             resetPublishState();
-            navigation.navigate('MyListings');
+            navigation.navigate('MainTabs', {
+              screen: 'Profile',
+              params: { screen: 'MyListingsTab' },
+            });
           }
         }],
       });

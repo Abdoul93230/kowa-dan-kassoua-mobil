@@ -8,6 +8,7 @@ import {
   Dimensions, StatusBar, Animated,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useFocusEffect } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Feather } from '@expo/vector-icons';
 import { CATEGORIES } from '../utils/constants';
@@ -449,6 +450,17 @@ export default function ProductsListScreen({ navigation }) {
     fetchSellers();
     fetchLocations();
   }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      setRefreshing(true);
+      fetchProducts();
+      fetchStats();
+      fetchSellers();
+      fetchLocations();
+      loadUnreadCount();
+    }, [loadUnreadCount])
+  );
 
   // ─── Loading screen ────────────────────────────────────────────────────────
   if (loading) {
