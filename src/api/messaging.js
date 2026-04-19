@@ -22,6 +22,16 @@ export const markConversationAsRead = async (conversationId) => {
   return response.data;
 };
 
+export const updateConversationDeal = async (conversationId, action, reason = '') => {
+  const mappedAction = action === 'reject' ? 'decline' : action;
+  const response = await api.put(`/conversations/${conversationId}/deal`, {
+    action: mappedAction,
+    reason,
+  });
+
+  return response.data;
+};
+
 export const getUnreadCount = async () => {
   const response = await api.get('/conversations/unread/count');
   return response.data;

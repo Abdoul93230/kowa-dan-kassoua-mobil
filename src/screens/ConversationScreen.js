@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  DeviceEventEmitter,
   FlatList,
   Image,
   KeyboardAvoidingView,
@@ -25,6 +26,7 @@ import {
   getConversationById,
   getMessages,
   markConversationAsRead,
+  updateConversationDeal,
   sendMessage,
   sendVoiceMessage,
 } from '../api/messaging';
@@ -99,6 +101,19 @@ function formatPriceFCFA(value) {
   return `${Math.round(numeric).toLocaleString('fr-FR')} FCFA`;
 }
 
+function getDealPresentation(status) {
+  switch (status) {
+    case 'pending_conclusion':
+      return { label: 'En attente de confirmation', tone: 'pending' };
+    case 'concluded':
+      return { label: 'Affaire conclue', tone: 'success' };
+    case 'not_concluded':
+      return { label: 'Non conclue', tone: 'muted' };
+    default:
+      return { label: 'Aucune clôture', tone: 'neutral' };
+  }
+}
+
 export default function ConversationScreen({ route, navigation }) {
   const insets = useSafeAreaInsets();
   const headerHeight = useHeaderHeight();
@@ -112,6 +127,7 @@ export default function ConversationScreen({ route, navigation }) {
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
   const [sendingVoice, setSendingVoice] = useState(false);
+  const [dealActionLoading, setDealActionLoading] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [recordingMs, setRecordingMs] = useState(0);
   const [playingMessageId, setPlayingMessageId] = useState('');
@@ -128,6 +144,7 @@ export default function ConversationScreen({ route, navigation }) {
   });
 
   const currentUserId = useMemo(() => user?.id || user?._id || '', [user]);
+  const currentUserNormalizedId = useMemo(() => normalizeId(user?.id || user?._id), [user]);
   const currentUserIdSet = useMemo(() => {
     const ids = new Set();
     const uid = normalizeId(user?.id);
@@ -180,6 +197,7 @@ export default function ConversationScreen({ route, navigation }) {
       setMessages(loadedMessages);
 
       await markConversationAsRead(conversationId);
+      DeviceEventEmitter.emit('unreadCount:refresh');
 
       loadedMessages
         .filter((msg) => {
@@ -227,7 +245,9 @@ export default function ConversationScreen({ route, navigation }) {
 
       if (!isCurrentUserMessage(message, user, currentUserIdSet)) {
         markMessageAsRead(message.id, conversationId);
-        markConversationAsRead(conversationId).catch(() => {});
+        markConversationAsRead(conversationId)
+          .then(() => DeviceEventEmitter.emit('unreadCount:refresh'))
+          .catch(() => {});
       }
     };
 
@@ -236,7 +256,18 @@ export default function ConversationScreen({ route, navigation }) {
       setMessages((prev) =>
         prev.map((msg) =>
           String(msg.id) === String(messageId)
-            ? { ...msg, read: true, readAt }
+            ? { ...msg, delivered: true, deliveredAt: readAt || msg.deliveredAt, read: true, readAt }
+            : msg
+        )
+      );
+    };
+
+    const onMessageDelivered = ({ conversationId: payloadConversationId, messageId, deliveredAt }) => {
+      if (payloadConversationId !== conversationId) return;
+      setMessages((prev) =>
+        prev.map((msg) =>
+          String(msg.id) === String(messageId)
+            ? { ...msg, delivered: true, deliveredAt: deliveredAt || msg.deliveredAt }
             : msg
         )
       );
@@ -256,17 +287,40 @@ export default function ConversationScreen({ route, navigation }) {
         return next;
       });
     };
+    const onConversationUpdated = (payload) => {
+      const payloadConversationId = String(payload?.conversationId || payload?.id || '');
+      if (payloadConversationId !== String(conversationId || '')) return;
+
+      setConversation((prev) => {
+        if (!prev) return prev;
+
+        return {
+          ...prev,
+          lastMessage: payload?.lastMessage || prev.lastMessage,
+          unreadCount:
+            typeof payload?.unreadCount === 'number'
+              ? payload.unreadCount
+              : prev.unreadCount,
+          status: payload?.status || prev.status,
+          deal: payload?.deal || prev.deal,
+        };
+      });
+    };
 
     on('message:new', onMessage);
+    on('message:delivered', onMessageDelivered);
     on('message:read', onMessageRead);
     on('typing:start', onTypingStart);
     on('typing:stop', onTypingStop);
+    on('conversation:updated', onConversationUpdated);
 
     return () => {
       off('message:new', onMessage);
+      off('message:delivered', onMessageDelivered);
       off('message:read', onMessageRead);
       off('typing:start', onTypingStart);
       off('typing:stop', onTypingStop);
+      off('conversation:updated', onConversationUpdated);
       leaveConversation(conversationId);
     };
   }, [
@@ -540,18 +594,51 @@ useEffect(() => {
   }, []);
 
   const peer = getOtherParticipant(conversation, currentUserId);
+  const headerDealStatus = conversation?.deal?.status || 'open';
+  const headerDealLabel = (getDealPresentation(headerDealStatus) || {}).label || 'Aucune clôture';
 
   useEffect(() => {
     navigation.setOptions({
       headerShown: true,
-      headerTitle: peer?.businessName || peer?.name || 'Conversation',
+      headerTitle: () => (
+        <View style={styles.headerTitleWrap}>
+          <Text style={styles.headerTitleText} numberOfLines={1}>
+            {peer?.businessName || peer?.name || 'Conversation'}
+          </Text>
+          <Text style={styles.headerSubtitleText} numberOfLines={1}>
+            {headerDealLabel}
+          </Text>
+        </View>
+      ),
+      headerRight: () => (
+        <TouchableOpacity
+          activeOpacity={0.85}
+          onPress={openDealActions}
+          style={[
+            styles.headerDealChip,
+            headerDealStatus === 'concluded' && styles.headerDealChipSuccess,
+            headerDealStatus === 'not_concluded' && styles.headerDealChipMuted,
+          ]}
+        >
+          <Text
+            style={[
+              styles.headerDealChipText,
+              headerDealStatus === 'concluded' && styles.headerDealChipTextSuccess,
+              headerDealStatus === 'not_concluded' && styles.headerDealChipTextMuted,
+            ]}
+            numberOfLines={1}
+          >
+            {headerDealLabel}
+          </Text>
+        </TouchableOpacity>
+      ),
       headerStyle: {
         backgroundColor: theme.surface,
         shadowColor: theme.shadow,
       },
       headerTintColor: theme.text,
     });
-  }, [navigation, peer?.businessName, peer?.name, theme]);
+  }, [navigation, peer?.businessName, peer?.name, theme, headerDealLabel, headerDealStatus]);
 
   const onPressAudioMessage = useCallback(
     async (message) => {
@@ -702,6 +789,140 @@ useEffect(() => {
     navigation.navigate('ProductDetail', { productId: productId });
   }, [conversationItemId, navigation]);
 
+  const dealStatus = conversation?.deal?.status || 'open';
+  const dealPresentation = getDealPresentation(dealStatus) || {};
+  const dealLabel = dealPresentation.label || 'Aucune clôture';
+  const dealRequestedBy = conversation?.deal?.requestedBy ? String(conversation.deal.requestedBy) : '';
+  const isDealRequester = Boolean(dealRequestedBy && dealRequestedBy === String(currentUserNormalizedId || ''));
+  const isConversationSeller = Boolean(
+    String(conversation?.participants?.seller?.id || conversation?.participants?.seller?._id || '') ===
+    String(currentUserNormalizedId || '')
+  );
+
+  const openDealActions = () => {
+    const buttons = [];
+
+    if (dealStatus === 'open' && isConversationSeller) {
+      buttons.push({
+        text: 'Marquer comme conclue',
+        onPress: () => handleDealAction('request'),
+      });
+    }
+
+    if (dealStatus === 'pending_conclusion') {
+      if (isDealRequester) {
+        buttons.push({
+          text: 'Annuler la demande',
+          onPress: () => handleDealAction('reopen'),
+        });
+      } else if (!isConversationSeller) {
+        buttons.push({ text: 'Confirmer', onPress: () => handleDealAction('confirm') });
+        buttons.push({ text: 'Non conclue', onPress: () => handleDealAction('reject') });
+      }
+    }
+
+    if ((dealStatus === 'concluded' || dealStatus === 'not_concluded') && isConversationSeller) {
+      buttons.push({
+        text: 'Réouvrir',
+        onPress: () => handleDealAction('reopen'),
+      });
+    }
+
+    buttons.push({ text: 'Fermer', onPress: () => {} });
+
+    setAlert({
+      visible: true,
+      type: dealStatus === 'concluded' ? 'success' : dealStatus === 'not_concluded' ? 'warning' : 'info',
+      title: 'Statut de l\'affaire',
+      message: dealLabel,
+      buttons,
+    });
+  };
+
+  const applyDealTransition = useCallback((currentDeal, action) => {
+    const now = new Date().toISOString();
+    const safeDeal = currentDeal || { status: 'open' };
+
+    if (action === 'request') {
+      return {
+        ...safeDeal,
+        status: 'pending_conclusion',
+        requestedBy: String(currentUserNormalizedId || ''),
+        requestedAt: now,
+      };
+    }
+
+    if (action === 'confirm') {
+      return {
+        ...safeDeal,
+        status: 'concluded',
+        resolvedBy: String(currentUserNormalizedId || ''),
+        resolvedAt: now,
+      };
+    }
+
+    if (action === 'reject' || action === 'decline') {
+      return {
+        ...safeDeal,
+        status: 'not_concluded',
+        resolvedBy: String(currentUserNormalizedId || ''),
+        resolvedAt: now,
+      };
+    }
+
+    return {
+      status: 'open',
+      requestedBy: null,
+      requestedAt: null,
+      resolvedBy: null,
+      resolvedAt: null,
+      note: '',
+    };
+  }, [currentUserNormalizedId]);
+
+  const handleDealAction = useCallback(async (action) => {
+    if (!conversationId || dealActionLoading) return;
+
+    const previousConversation = conversation;
+
+    // Update optimiste pour feedback instantane
+    setConversation((prev) => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        deal: applyDealTransition(prev.deal, action),
+      };
+    });
+
+    try {
+      setDealActionLoading(true);
+      const response = await updateConversationDeal(conversationId, action);
+      const updatedConversation = response?.data?.id
+        ? response.data
+        : response?.id
+          ? response
+          : response?.data || null;
+
+      if (updatedConversation) {
+        setConversation(updatedConversation);
+      } else {
+        const refreshed = await getConversationById(conversationId);
+        if (refreshed?.data) setConversation(refreshed.data);
+      }
+    } catch (e) {
+      setConversation(previousConversation || null);
+      setAlert({
+        visible: true,
+        type: 'error',
+        title: 'Erreur',
+        message: e?.response?.data?.message || 'Impossible de mettre à jour le statut de l\'affaire.',
+        buttons: [{ text: 'OK', onPress: () => {} }],
+      });
+    } finally {
+      setDealActionLoading(false);
+    }
+  }, [applyDealTransition, conversation, conversationId, dealActionLoading]);
+
   const renderMessage = ({ item }) => {
     const mine = isCurrentUserMessage(item, user, currentUserIdSet);
     const isAudio = item?.type === 'audio' && item?.attachments?.[0];
@@ -800,7 +1021,7 @@ useEffect(() => {
             <Text style={[styles.timeText, mine ? styles.timeTextMine : styles.timeTextOther]}>{formatTime(item.timestamp)}</Text>
             {mine ? (
               <Ionicons
-                name={item.read ? 'checkmark-done' : 'checkmark'}
+                name={item.read || item.delivered ? 'checkmark-done' : 'checkmark'}
                 size={14}
                 style={item.read ? styles.readIconRead : styles.readIconPending}
               />
@@ -852,33 +1073,35 @@ useEffect(() => {
             flatListRef.current?.scrollToEnd({ animated: false });
           }}
           ListHeaderComponent={
-            conversationItem ? (
-              <TouchableOpacity
-                activeOpacity={canOpenConversationItem ? 0.88 : 1}
-                style={[styles.itemCard, !canOpenConversationItem && styles.itemCardDisabled]}
-                onPress={openConversationItem}
-                disabled={!canOpenConversationItem}
-              >
-                <Image
-                  source={{
-                    uri:
-                      conversationItem?.image ||
-                      'https://via.placeholder.com/160x160/F5E6C8/C1440E?text=Annonce',
-                  }}
-                  style={styles.itemImage}
-                />
-                <View style={styles.itemMeta}>
-                  <Text style={styles.itemOverline}>A propos de cette annonce</Text>
-                  <Text numberOfLines={2} style={styles.itemTitle}>
-                    {conversationItem?.title || 'Annonce'}
-                  </Text>
-                  <Text style={styles.itemPrice}>{formatPriceFCFA(conversationItem?.price)}</Text>
-                </View>
-                <View style={styles.itemActionBtn}>
-                  <Ionicons name="open-outline" size={16} color={P.orange500} />
-                </View>
-              </TouchableOpacity>
-            ) : null
+            <>
+              {conversationItem ? (
+                <TouchableOpacity
+                  activeOpacity={canOpenConversationItem ? 0.88 : 1}
+                  style={[styles.itemCard, !canOpenConversationItem && styles.itemCardDisabled]}
+                  onPress={openConversationItem}
+                  disabled={!canOpenConversationItem}
+                >
+                  <Image
+                    source={{
+                      uri:
+                        conversationItem?.image ||
+                        'https://via.placeholder.com/160x160/F5E6C8/C1440E?text=Annonce',
+                    }}
+                    style={styles.itemImage}
+                  />
+                  <View style={styles.itemMeta}>
+                    <Text style={styles.itemOverline}>A propos de cette annonce</Text>
+                    <Text numberOfLines={2} style={styles.itemTitle}>
+                      {conversationItem?.title || 'Annonce'}
+                    </Text>
+                    <Text style={styles.itemPrice}>{formatPriceFCFA(conversationItem?.price)}</Text>
+                  </View>
+                  <View style={styles.itemActionBtn}>
+                    <Ionicons name="open-outline" size={16} color={P.orange500} />
+                  </View>
+                </TouchableOpacity>
+              ) : null}
+            </>
           }
           ListFooterComponent={
             typingLabel ? (
@@ -983,6 +1206,53 @@ function createStyles(theme, isDark) {
       paddingHorizontal: 14,
       paddingTop: 8,
     },
+    dealBannerWrap: {
+      paddingHorizontal: 14,
+      paddingTop: 8,
+    },
+    headerTitleWrap: {
+      alignItems: 'flex-start',
+      maxWidth: 180,
+    },
+    headerTitleText: {
+      color: theme.text,
+      fontSize: 15,
+      fontWeight: '800',
+    },
+    headerSubtitleText: {
+      color: theme.textMuted,
+      fontSize: 11,
+      marginTop: 1,
+    },
+    headerDealChip: {
+      maxWidth: 120,
+      paddingHorizontal: 10,
+      paddingVertical: 7,
+      borderRadius: 999,
+      backgroundColor: 'rgba(236,90,19,0.10)',
+      borderWidth: 1,
+      borderColor: 'rgba(236,90,19,0.18)',
+      marginRight: 8,
+    },
+    headerDealChipSuccess: {
+      backgroundColor: 'rgba(34,197,94,0.14)',
+      borderColor: 'rgba(34,197,94,0.20)',
+    },
+    headerDealChipMuted: {
+      backgroundColor: 'rgba(107,114,128,0.14)',
+      borderColor: 'rgba(107,114,128,0.20)',
+    },
+    headerDealChipText: {
+      fontSize: 11,
+      fontWeight: '800',
+      color: P.orange700,
+    },
+    headerDealChipTextSuccess: {
+      color: '#15803d',
+    },
+    headerDealChipTextMuted: {
+      color: '#4b5563',
+    },
     connectionBannerText: {
       color: theme.textMuted,
       fontSize: 12,
@@ -1043,6 +1313,91 @@ function createStyles(theme, isDark) {
       backgroundColor: theme.overlay,
       borderWidth: 1,
       borderColor: theme.border,
+    },
+    dealCard: {
+      backgroundColor: theme.cardSoft,
+      borderRadius: 16,
+      borderWidth: 1,
+      borderColor: theme.border,
+      padding: 14,
+      marginBottom: 12,
+      gap: 10,
+    },
+    dealCardSuccess: {
+      backgroundColor: 'rgba(34,197,94,0.08)',
+      borderColor: 'rgba(34,197,94,0.25)',
+    },
+    dealCardMuted: {
+      backgroundColor: 'rgba(107,114,128,0.08)',
+      borderColor: 'rgba(107,114,128,0.18)',
+    },
+    dealCardHeader: {
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+      justifyContent: 'space-between',
+      gap: 10,
+    },
+    dealCardTitle: {
+      color: theme.text,
+      fontSize: 13,
+      fontWeight: '800',
+    },
+    dealCardSub: {
+      color: theme.textMuted,
+      fontSize: 12,
+      marginTop: 2,
+    },
+    dealChip: {
+      paddingHorizontal: 10,
+      paddingVertical: 5,
+      borderRadius: 999,
+      backgroundColor: 'rgba(236,90,19,0.10)',
+    },
+    dealChipSuccess: {
+      backgroundColor: 'rgba(34,197,94,0.14)',
+    },
+    dealChipMuted: {
+      backgroundColor: 'rgba(107,114,128,0.14)',
+    },
+    dealChipTxt: {
+      fontSize: 11,
+      fontWeight: '800',
+      color: P.orange700,
+    },
+    dealChipTxtSuccess: {
+      color: '#15803d',
+    },
+    dealChipTxtMuted: {
+      color: '#4b5563',
+    },
+    dealPrimaryBtn: {
+      backgroundColor: P.orange500,
+      borderRadius: 12,
+      paddingVertical: 12,
+      alignItems: 'center',
+    },
+    dealPrimaryBtnTxt: {
+      color: '#fff',
+      fontWeight: '800',
+      fontSize: 13,
+    },
+    dealSecondaryBtn: {
+      borderRadius: 12,
+      paddingVertical: 11,
+      alignItems: 'center',
+      borderWidth: 1,
+      borderColor: theme.border,
+      backgroundColor: theme.surface,
+      flex: 1,
+    },
+    dealSecondaryBtnTxt: {
+      color: theme.text,
+      fontWeight: '800',
+      fontSize: 13,
+    },
+    dealActionsRow: {
+      flexDirection: 'row',
+      gap: 10,
     },
     messagesContainer: {
       paddingHorizontal: 12,

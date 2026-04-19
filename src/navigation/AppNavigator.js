@@ -4,7 +4,11 @@ import { createStackNavigator } from '@react-navigation/stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { useAuth } from '../contexts/AuthContext';
 import { useAppTheme } from '../contexts/ThemeContext';
+
+// Global navigation reference for push notifications and deep linking
+export const navigationRef = React.createRef();
 import { ActivityIndicator, View, StyleSheet, Text, TouchableOpacity, Platform, StatusBar } from 'react-native';
+import { DeviceEventEmitter } from 'react-native';
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { COLORS } from '../utils/constants';
@@ -249,6 +253,16 @@ function MainTabs() {
     };
   }, [isConnected, loadUnreadCount, off, on, user?.id]);
 
+  useEffect(() => {
+    const subscription = DeviceEventEmitter.addListener('unreadCount:refresh', () => {
+      loadUnreadCount();
+    });
+
+    return () => {
+      subscription.remove();
+    };
+  }, [loadUnreadCount]);
+
   return (
     <Tab.Navigator
       screenOptions={{
@@ -405,7 +419,7 @@ export default function AppNavigator() {
   return (
     <SafeAreaProvider>
       <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} backgroundColor={theme.screen} />
-      <NavigationContainer theme={navigationTheme}>
+      <NavigationContainer ref={navigationRef} theme={navigationTheme}>
         <Stack.Navigator screenOptions={{ headerShown: false }}>
           <Stack.Screen name="MainTabs" component={MainTabs} />
           <Stack.Screen name="Categories" component={CategoriesScreen} options={{ headerShown: false }} />

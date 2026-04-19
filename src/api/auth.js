@@ -164,6 +164,21 @@ export const updateProfile = async (userData) => {
 };
 
 /**
+ * Enregistrer le token Expo pour les notifications push
+ */
+export const registerPushToken = async (expoPushToken) => {
+  try {
+    const response = await api.post('/auth/push-token', { expoPushToken });
+    return response.data;
+  } catch (error) {
+    console.error('❌ Erreur enregistrement token push:', error);
+    throw new Error(
+      error.response?.data?.message || 'Erreur lors de l\'enregistrement du token push'
+    );
+  }
+};
+
+/**
  * Envoyer code OTP pour inscription
  * @param {string} phone - Numéro de téléphone au format "+227 12345678"
  * @returns {Promise<{success: boolean, data: {attemptsRemaining: number, devOTPCode?: string}}>}

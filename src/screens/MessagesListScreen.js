@@ -93,7 +93,7 @@ export default function MessagesListScreen({ navigation, route }) {
     if (!isAuthenticated) return;
 
     const onConversationUpdated = (payload) => {
-      const payloadConversationId = String(payload?.conversationId || '');
+      const payloadConversationId = String(payload?.conversationId || payload?.id || '');
       if (!payloadConversationId) return;
 
       setConversations((prev) =>
@@ -107,7 +107,9 @@ export default function MessagesListScreen({ navigation, route }) {
               typeof payload?.unreadCount === 'number'
                 ? payload.unreadCount
                 : conv.unreadCount,
-            updatedAt: new Date().toISOString(),
+            status: payload?.status || conv.status,
+            deal: payload?.deal || conv.deal,
+            updatedAt: payload?.updatedAt || new Date().toISOString(),
           };
         })
       );
@@ -137,11 +139,37 @@ export default function MessagesListScreen({ navigation, route }) {
       );
     };
 
+    const onMessageDelivered = (payload) => {
+      const payloadConversationId = String(payload?.conversationId || '');
+      const payloadMessageId = String(payload?.messageId || '');
+      if (!payloadConversationId || !payloadMessageId) return;
+
+      setConversations((prev) =>
+        prev.map((conv) => {
+          if (String(conv.id) !== payloadConversationId) return conv;
+
+          const lastMessageId = String(conv?.lastMessage?.id || '');
+          if (!lastMessageId || lastMessageId !== payloadMessageId) return conv;
+
+          return {
+            ...conv,
+            lastMessage: {
+              ...conv.lastMessage,
+              delivered: true,
+              deliveredAt: payload?.deliveredAt || conv?.lastMessage?.deliveredAt,
+            },
+          };
+        })
+      );
+    };
+
     on('conversation:updated', onConversationUpdated);
+    on('message:delivered', onMessageDelivered);
     on('message:read', onMessageRead);
 
     return () => {
       off('conversation:updated', onConversationUpdated);
+      off('message:delivered', onMessageDelivered);
       off('message:read', onMessageRead);
     };
   }, [isAuthenticated, off, on]);
@@ -213,6 +241,12 @@ export default function MessagesListScreen({ navigation, route }) {
     const itemImage = item?.item?.image || item?.item?.mainImage || null;
     const itemTitle = item?.item?.title || '';
     const showReadIndicator = Boolean(mine && lastMessage?.id);
+    const dealStatus = item?.deal?.status || 'open';
+    const dealLabel = {
+      pending_conclusion: 'En attente de confirmation',
+      concluded: 'Affaire conclue',
+      not_concluded: 'Non conclue',
+    }[dealStatus] || '';
 
     return (
       <TouchableOpacity
@@ -248,6 +282,20 @@ export default function MessagesListScreen({ navigation, route }) {
             </Text>
           ) : null}
 
+          {dealLabel ? (
+            <View style={[
+              styles.dealBadge,
+              dealStatus === 'concluded' && styles.dealBadgeConcluded,
+              dealStatus === 'not_concluded' && styles.dealBadgeNotConcluded,
+            ]}>
+              <Text style={[
+                styles.dealBadgeTxt,
+                dealStatus === 'concluded' && styles.dealBadgeTxtConcluded,
+                dealStatus === 'not_concluded' && styles.dealBadgeTxtNotConcluded,
+              ]}>{dealLabel}</Text>
+            </View>
+          ) : null}
+
           <View style={styles.rowBottom}>
             <Text style={[styles.preview, unread > 0 && styles.previewUnread]} numberOfLines={1}>
               {mine ? 'Vous: ' : ''}
@@ -256,7 +304,7 @@ export default function MessagesListScreen({ navigation, route }) {
             {showReadIndicator ? (
               <View style={styles.deliveryWrap}>
                 <Ionicons
-                  name={lastMessage?.read ? 'checkmark-done' : 'checkmark'}
+                  name={lastMessage?.read || lastMessage?.delivered ? 'checkmark-done' : 'checkmark'}
                   size={14}
                   color={lastMessage?.read ? P.orange500 : 'rgba(255,255,255,0.62)'}
                 />
@@ -452,6 +500,31 @@ function createStyles(theme) {
       marginBottom: 4,
       fontSize: 13,
       fontWeight: '600',
+    },
+    dealBadge: {
+      alignSelf: 'flex-start',
+      marginTop: 4,
+      paddingHorizontal: 10,
+      paddingVertical: 4,
+      borderRadius: 999,
+      backgroundColor: 'rgba(236,90,19,0.10)',
+    },
+    dealBadgeConcluded: {
+      backgroundColor: 'rgba(34,197,94,0.14)',
+    },
+    dealBadgeNotConcluded: {
+      backgroundColor: 'rgba(107,114,128,0.14)',
+    },
+    dealBadgeTxt: {
+      fontSize: 11,
+      fontWeight: '800',
+      color: P.orange700,
+    },
+    dealBadgeTxtConcluded: {
+      color: '#15803d',
+    },
+    dealBadgeTxtNotConcluded: {
+      color: '#4b5563',
     },
     preview: {
       flex: 1,
