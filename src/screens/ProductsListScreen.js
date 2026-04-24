@@ -555,7 +555,7 @@ export default function ProductsListScreen({ navigation }) {
             {/* ── Accroche ── */}
             <View style={s.heroTextWrap}>
                   <Text style={[s.heroH1, { color: theme.text }]}>
-                Trouvez, contactez,{'\n'}
+                Trouvez2222, contactez,{'\n'}
                 <Text style={s.heroH1Accent}>concluez.</Text>
               </Text>
               {/* <Text style={s.heroH2}>

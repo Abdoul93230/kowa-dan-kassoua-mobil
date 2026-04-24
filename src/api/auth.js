@@ -166,9 +166,9 @@ export const updateProfile = async (userData) => {
 /**
  * Enregistrer le token Expo pour les notifications push
  */
-export const registerPushToken = async (expoPushToken) => {
+export const registerPushToken = async (expoPushToken, userId = null) => {
   try {
-    const response = await api.post('/auth/push-token', { expoPushToken });
+    const response = await api.post('/auth/push-token-public', { expoPushToken, userId });
     return response.data;
   } catch (error) {
     console.error('❌ Erreur enregistrement token push:', error);

@@ -1,5 +1,7 @@
 import React, { createContext, useState, useContext, useEffect } from 'react';
-import { login as apiLogin, register as apiRegister, getProfile } from '../api/auth';
+import Constants from 'expo-constants';
+import * as Notifications from 'expo-notifications';
+import { login as apiLogin, register as apiRegister, getProfile, registerPushToken } from '../api/auth';
 import {
   saveAccessToken,
   saveRefreshToken,
@@ -15,6 +17,48 @@ import {
  */
 
 const AuthContext = createContext(null);
+const FALLBACK_EAS_PROJECT_ID = 'c85af018-b333-49ac-9f39-8a3623969b2d';
+
+const syncPushToken = async (userData) => {
+  try {
+    if (!userData?.id) return;
+
+    if (Constants.appOwnership === 'expo') {
+      console.log('ℹ️ Sync push ignorée dans Expo Go (token non fiable pour la prod).');
+      return;
+    }
+
+    const permissions = await Notifications.getPermissionsAsync();
+    let status = permissions.status;
+
+    if (status !== 'granted') {
+      const requested = await Notifications.requestPermissionsAsync();
+      status = requested.status;
+    }
+
+    if (status !== 'granted') return;
+
+    const projectId =
+      Constants?.expoConfig?.extra?.eas?.projectId ||
+      Constants?.easConfig?.projectId ||
+      FALLBACK_EAS_PROJECT_ID;
+
+    console.log('📣 Sync push after auth:', {
+      userId: userData.id,
+      appOwnership: Constants.appOwnership,
+      projectId,
+    });
+    const tokenResponse = await Notifications.getExpoPushTokenAsync({ projectId });
+    const expoPushToken = tokenResponse?.data;
+
+    if (!expoPushToken) return;
+
+    await registerPushToken(expoPushToken, userData.id);
+    console.log('✅ Push token synchronisé après auth:', userData.id);
+  } catch (error) {
+    console.error('❌ Erreur sync push token après auth:', error?.response?.data?.message || error?.message || error);
+  }
+};
 
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
@@ -70,6 +114,8 @@ export const AuthProvider = ({ children }) => {
       setUser(userData);
       setIsAuthenticated(true);
 
+      await syncPushToken(userData);
+
       console.log('✅ Connexion réussie:', userData.name);
       return { success: true };
     } catch (error) {
@@ -102,6 +148,8 @@ export const AuthProvider = ({ children }) => {
       setUser(newUser);
       setIsAuthenticated(true);
 
+      await syncPushToken(newUser);
+
       console.log('✅ Inscription réussie:', newUser.name);
       return { success: true };
     } catch (error) {
@@ -125,6 +173,8 @@ export const AuthProvider = ({ children }) => {
       setToken(accessToken);
       setUser(userData);
       setIsAuthenticated(true);
+
+      await syncPushToken(userData);
       console.log('✅ Auth locale mise à jour:', userData.name);
     } catch (error) {
       console.error('❌ Erreur setAuthData:', error);
