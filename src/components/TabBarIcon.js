@@ -69,9 +69,7 @@ function PublishButton({ focused }) {
 
   return (
     <View style={s.publishWrap}>
-      {/* Wrapper JS pour shadowOpacity */}
       <Animated.View style={[s.publishShadow, { shadowOpacity: shadowAnim }]}>
-        {/* Wrapper natif pour le scale */}
         <Animated.View style={[s.publishOuter, { transform: [{ scale }] }]}>
           <LinearGradient
             colors={focused
@@ -81,8 +79,7 @@ function PublishButton({ focused }) {
             end={{ x: 1, y: 1 }}
             style={s.publishGrad}
           >
-            <View style={s.publishShine} />
-            <Text style={s.publishLabel}>PUBLIER</Text>
+            <Feather name="plus" size={22} color={P.white} style={s.publishIcon} />
           </LinearGradient>
         </Animated.View>
       </Animated.View>
@@ -204,12 +201,12 @@ const s = StyleSheet.create({
   publishWrap: {
     alignItems: 'center',
     justifyContent: 'center',
-    width: 110,
-    height: 56,
-    marginTop: 10
+    width: 54,
+    height: 54,
+    marginTop: 6,
   },
   publishShadow: {
-    borderRadius: 5,
+    borderRadius: 28,
     shadowColor: '#EC5A13',
     shadowOffset: { width: 0, height: 3 },
     shadowOpacity: 0.35,   // valeur initiale, sera animée
@@ -230,30 +227,23 @@ const s = StyleSheet.create({
     elevation: 0,
   },
   publishOuter: {
-    width: 100,
-    height: 38,
-    borderRadius: 10,
+    width: 46,
+    height: 46,
+    borderRadius: 23,
     overflow: 'hidden',
   },
   publishGrad: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
+    borderRadius: 23,
   },
   publishShine: {
-    position: 'absolute',
-    top: 0, left: 0, right: 0,
-    height: '50%',
-    backgroundColor: 'rgba(255,255,255,0.09)',
-    borderBottomLeftRadius: 8,
-    borderBottomRightRadius: 8,
+    display: 'none',
   },
   publishIcon: {
-    fontSize: 30,
-    fontWeight: '300',
-    color: P.white,
-    lineHeight: 34,
-    marginTop: 2,
+    // Feather icon wrapper
+    marginTop: 0,
   },
   publishLabel: {
     color: '#FFFFFF',

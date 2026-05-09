@@ -246,10 +246,16 @@ export default function RegisterStep2Screen({ navigation, route }) {
       const cropped = await ImageManipulator.manipulateAsync(
         resized.uri,
         [{ crop: { originX, originY, width: cropSize, height: cropSize } }],
-        { compress: 0.85, format: ImageManipulator.SaveFormat.JPEG }
+        { compress: 0.72, format: ImageManipulator.SaveFormat.JPEG }
       );
 
-      setAvatarUri(cropped.uri);
+      const optimized = await ImageManipulator.manipulateAsync(
+        cropped.uri,
+        [{ resize: { width: 512, height: 512 } }],
+        { compress: 0.72, format: ImageManipulator.SaveFormat.JPEG }
+      );
+
+      setAvatarUri(optimized.uri);
       setShowEditor(false);
       setRawUri(null);
     } catch (e) {

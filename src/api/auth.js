@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { DeviceEventEmitter } from 'react-native';
 import { API_BASE_URL } from '../utils/constants';
 import { getAccessToken, getRefreshToken, saveAccessToken, clearAllData } from '../utils/storage';
 
@@ -74,9 +75,8 @@ api.interceptors.response.use(
 
       } catch (refreshError) {
         console.error('❌ Erreur refresh token:', refreshError);
-        // Token invalide, déconnecter l'utilisateur
         await clearAllData();
-        // TODO: Naviguer vers l'écran de login
+        DeviceEventEmitter.emit('auth:session_expired');
         return Promise.reject(refreshError);
       }
     }

@@ -12,7 +12,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from 'expo-blur';
 import { apiClient } from '../api/auth';
 import { checkFavorite, toggleFavorite } from '../api/favorites';
-import { createReview, getProductReviews, markReviewHelpful } from '../api/reviews';
+import { createReview, getProductReviews, markReviewHelpful, checkReviewEligibility } from '../api/reviews';
 import { toggleProductStatus } from '../api/products';
 import { useAuth } from '../contexts/AuthContext';
 import { useAppTheme } from '../contexts/ThemeContext';
@@ -291,6 +291,8 @@ export default function ProductDetailScreen({ route, navigation }) {
 
   // Scroll → header opacity
   const scrollY = useRef(new Animated.Value(0)).current;
+  const scrollViewRef = useRef(null);
+  const reviewFormRef = useRef(null);
   const headerOpacity = scrollY.interpolate({
     inputRange: [HERO_H - 100, HERO_H - 30],
     outputRange: [0, 1],
@@ -305,6 +307,8 @@ export default function ProductDetailScreen({ route, navigation }) {
   const [ownerActionLoading, setOwnerActionLoading] = useState(false);
   const [reviewRating, setReviewRating] = useState(0);
   const [reviewComment, setReviewComment] = useState('');
+  const [reviewEligible, setReviewEligible] = useState(false);
+  const [checkingEligibility, setCheckingEligibility] = useState(false);
 
   const runEntrance = useCallback(() => {
     Animated.stagger(70,
@@ -357,8 +361,41 @@ export default function ProductDetailScreen({ route, navigation }) {
     }
   };
 
+  const checkReviewEligibilityStatus = async () => {
+    if (!isValidProductId || !isAuthenticated) {
+      setReviewEligible(false);
+      return;
+    }
+
+    try {
+      setCheckingEligibility(true);
+      const response = await checkReviewEligibility(productId);
+      setReviewEligible(response?.eligible || false);
+    } catch (error) {
+      console.error('❌ Erreur vérification éligibilité:', error);
+      setReviewEligible(false);
+    } finally {
+      setCheckingEligibility(false);
+    }
+  };
+
   useEffect(() => { fetchProduct(); }, [productId, isValidProductId]);
   useEffect(() => { fetchReviews(); }, [productId, isValidProductId]);
+  useEffect(() => { checkReviewEligibilityStatus(); }, [productId, isValidProductId, isAuthenticated]);
+
+  // Scroller vers le formulaire d'avis si demandé
+  useEffect(() => {
+    if (route?.params?.scrollToReviewForm && reviewFormRef.current && scrollViewRef.current) {
+      // Utiliser measure pour obtenir la position exacte du formulaire
+      setTimeout(() => {
+        reviewFormRef.current?.measureInWindow((x, y, width, height) => {
+          if (scrollViewRef.current) {
+            scrollViewRef.current.scrollTo({ y: Math.max(0, y - 100), animated: true });
+          }
+        });
+      }, 300);
+    }
+  }, [route?.params?.scrollToReviewForm, reviewEligible]);
 
   const handleMarkHelpful = async (reviewId) => {
     try {
@@ -680,6 +717,7 @@ export default function ProductDetailScreen({ route, navigation }) {
 
       {/* ══ SCROLL PRINCIPAL ═════════════════════════════════════════════ */}
       <Animated.ScrollView
+        ref={scrollViewRef}
         style={{ flex: 1 }}
         contentContainerStyle={{ paddingBottom: 90 + Math.max(insets.bottom, 16) }}
         showsVerticalScrollIndicator={false}
@@ -855,8 +893,8 @@ export default function ProductDetailScreen({ route, navigation }) {
               </View>
             </View>
 
-            {!isOwnListing ? (
-              <View style={[s.reviewFormCard, { backgroundColor: appTheme.surfaceAlt, borderColor: appTheme.border }]}> 
+            {reviewEligible ? (
+              <View ref={reviewFormRef} style={[s.reviewFormCard, { backgroundColor: appTheme.surfaceAlt, borderColor: appTheme.border }]}> 
                 <Text style={[s.reviewFormTitle, { color: appTheme.text }]}>Donnez votre note</Text>
                 <View style={s.reviewStarsRow}>
                   {[1, 2, 3, 4, 5].map((star) => (

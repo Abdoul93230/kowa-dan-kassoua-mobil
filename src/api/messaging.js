@@ -32,6 +32,16 @@ export const updateConversationDeal = async (conversationId, action, reason = ''
   return response.data;
 };
 
+export const closeConversationByOwner = async (conversationId) => {
+  const response = await api.put(`/conversations/${conversationId}/close-owner`);
+  return response.data;
+};
+
+export const reopenConversationByOwner = async (conversationId) => {
+  const response = await api.put(`/conversations/${conversationId}/reopen-owner`);
+  return response.data;
+};
+
 export const getUnreadCount = async () => {
   const response = await api.get('/conversations/unread/count');
   return response.data;
@@ -44,12 +54,13 @@ export const getMessages = async (conversationId, page = 1, limit = 50) => {
   return response.data;
 };
 
-export const sendMessage = async ({ conversationId, content, type = 'text', attachments = [] }) => {
+export const sendMessage = async ({ conversationId, content, type = 'text', attachments = [], postClosure = false }) => {
   const response = await api.post('/messages', {
     conversationId,
     content,
     type,
     attachments,
+    postClosure,
   });
   return response.data;
 };

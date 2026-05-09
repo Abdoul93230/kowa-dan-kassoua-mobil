@@ -197,14 +197,20 @@ export default function ProfileScreen({ navigation }) {
             <Text style={s.notAuthTitle}>Connectez-vous à votre compte</Text>
             <Text style={s.notAuthText}>Accédez à vos annonces, favoris, messages et bien plus</Text>
             <View style={{ width: '100%', gap: 12 }}>
-              <TouchableOpacity style={s.loginBtn} onPress={() => navigation.navigate('Login')} activeOpacity={0.88}>
+              <TouchableOpacity
+                style={s.loginBtn}
+                onPress={() => navigation.navigate('QuickAuth', { pendingAction: { type: 'profile' }, returnScreen: 'Profile' })}
+                activeOpacity={0.88}
+              >
                 <LinearGradient colors={[P.terra, P.orange700]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={s.loginBtnGrad}>
                   <Text style={s.loginBtnTxt}>Se connecter</Text>
                 </LinearGradient>
               </TouchableOpacity>
+              {/* Bouton standard conservé en dormant — peut être réactivé si besoin
               <TouchableOpacity style={s.registerBtn} onPress={() => navigation.navigate('Register')} activeOpacity={0.88}>
                 <Text style={s.registerBtnTxt}>Créer un compte</Text>
               </TouchableOpacity>
+              */}
             </View>
           </View>
         </ScrollView>

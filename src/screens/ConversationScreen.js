@@ -1,16 +1,22 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Animated,
   DeviceEventEmitter,
+  Dimensions,
   FlatList,
   Image,
   KeyboardAvoidingView,
+  Modal,
+  PanResponder,
   Platform,
+  ScrollView,
   StatusBar,
   StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
+  TouchableWithoutFeedback,
   View,
 } from 'react-native';
 import { Audio } from 'expo-av';
@@ -26,10 +32,13 @@ import {
   getConversationById,
   getMessages,
   markConversationAsRead,
+  closeConversationByOwner,
+  reopenConversationByOwner,
   updateConversationDeal,
   sendMessage,
   sendVoiceMessage,
 } from '../api/messaging';
+import { checkReviewEligibility, createReview } from '../api/reviews';
 import { useSocket } from '../hooks/useSocket';
 import { MOBILE_COLORS as P } from '../theme/colors';
 
@@ -95,6 +104,39 @@ function formatTime(value) {
   return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
 }
 
+function formatDateSeparator(value) {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const yesterday = new Date(today.getTime() - 86400000);
+  const msgDay = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  if (msgDay.getTime() === today.getTime()) return "Aujourd'hui";
+  if (msgDay.getTime() === yesterday.getTime()) return 'Hier';
+  return date.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+}
+
+function isSameDay(a, b) {
+  if (!a || !b) return false;
+  const da = new Date(a);
+  const db = new Date(b);
+  return da.getFullYear() === db.getFullYear() && da.getMonth() === db.getMonth() && da.getDate() === db.getDate();
+}
+
+// Extrait un ObjectId MongoDB valide depuis une string, qu'elle soit déjà propre
+// ("6999bb4e03ca4663075dce09") ou au format JS stringifié ("ObjectId('...')")
+function extractMongoId(raw) {
+  if (!raw) return null;
+  const str = String(raw).trim();
+  // Format propre : 24 caractères hex
+  if (/^[a-fA-F0-9]{24}$/.test(str)) return str;
+  // Format stringifié : ObjectId('...') ou ObjectId("...")
+  const match = str.match(/ObjectId\(['"]?([a-fA-F0-9]{24})['"]?\)/i);
+  if (match) return match[1];
+  return null;
+}
+
 function formatPriceFCFA(value) {
   const numeric = Number(String(value || '').replace(/[^\d.-]/g, ''));
   if (!Number.isFinite(numeric) || numeric <= 0) return 'Prix a discuter';
@@ -114,6 +156,277 @@ function getDealPresentation(status) {
   }
 }
 
+
+const SCREEN_HEIGHT = Dimensions.get('window').height;
+const SHEET_HEIGHT = Math.min(SCREEN_HEIGHT * 0.72, 560);
+
+function ReviewBottomSheet({
+  visible,
+  onClose,
+  theme,
+  item,
+  reviewRating,
+  setReviewRating,
+  reviewComment,
+  setReviewComment,
+  submittingReview,
+  onSubmit,
+  insets,
+}) {
+  const translateY = useRef(new Animated.Value(SHEET_HEIGHT)).current;
+  const backdropOpacity = useRef(new Animated.Value(0)).current;
+
+  const RATING_LABELS = ['', 'Très déçu 😞', 'Déçu 😕', 'Correct 😐', 'Bien 😊', 'Excellent ! 🤩'];
+
+  const openSheet = useCallback(() => {
+    Animated.parallel([
+      Animated.spring(translateY, {
+        toValue: 0,
+        damping: 22,
+        stiffness: 220,
+        mass: 0.8,
+        useNativeDriver: true,
+      }),
+      Animated.timing(backdropOpacity, {
+        toValue: 1,
+        duration: 260,
+        useNativeDriver: true,
+      }),
+    ]).start();
+  }, [translateY, backdropOpacity]);
+
+  const closeSheet = useCallback((callback) => {
+    Animated.parallel([
+      Animated.timing(translateY, {
+        toValue: SHEET_HEIGHT,
+        duration: 260,
+        useNativeDriver: true,
+      }),
+      Animated.timing(backdropOpacity, {
+        toValue: 0,
+        duration: 220,
+        useNativeDriver: true,
+      }),
+    ]).start(() => {
+      if (callback) callback();
+      else onClose();
+    });
+  }, [translateY, backdropOpacity, onClose]);
+
+  useEffect(() => {
+    if (visible) {
+      translateY.setValue(SHEET_HEIGHT);
+      backdropOpacity.setValue(0);
+      openSheet();
+    }
+  }, [visible]);
+
+  const panResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: (_, g) => Math.abs(g.dy) > 6,
+      onPanResponderMove: (_, g) => {
+        if (g.dy > 0) translateY.setValue(g.dy);
+      },
+      onPanResponderRelease: (_, g) => {
+        if (g.dy > 90 || g.vy > 0.6) {
+          closeSheet();
+        } else {
+          Animated.spring(translateY, {
+            toValue: 0,
+            damping: 20,
+            stiffness: 200,
+            useNativeDriver: true,
+          }).start();
+        }
+      },
+    })
+  ).current;
+
+  if (!visible) return null;
+
+  return (
+    <Modal transparent visible animationType="none" onRequestClose={() => closeSheet()}>
+      {/* Backdrop */}
+      <TouchableWithoutFeedback onPress={() => closeSheet()}>
+        <Animated.View
+          style={{
+            ...StyleSheet.absoluteFillObject,
+            backgroundColor: 'rgba(0,0,0,0.5)',
+            opacity: backdropOpacity,
+          }}
+        />
+      </TouchableWithoutFeedback>
+
+      {/* Sheet */}
+      <KeyboardAvoidingView
+        style={{ flex: 1, justifyContent: 'flex-end' }}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        pointerEvents="box-none"
+      >
+        <Animated.View
+          style={{
+            transform: [{ translateY }],
+            backgroundColor: theme.surface,
+            borderTopLeftRadius: 28,
+            borderTopRightRadius: 28,
+            paddingBottom: Math.max(insets?.bottom ?? 0, 20),
+            shadowColor: '#000',
+            shadowOffset: { width: 0, height: -6 },
+            shadowOpacity: 0.18,
+            shadowRadius: 20,
+            elevation: 20,
+          }}
+        >
+          {/* Handle draggable */}
+          <View {...panResponder.panHandlers} style={{ paddingVertical: 14, alignItems: 'center' }}>
+            <View style={{ width: 44, height: 5, borderRadius: 3, backgroundColor: '#d1d5db' }} />
+          </View>
+
+          <View style={{ paddingHorizontal: 24 }}>
+            {/* Titre + fermer */}
+            <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 20 }}>
+              <Text style={{ flex: 1, fontSize: 18, fontWeight: '700', color: theme.text }}>
+                Donner un avis
+              </Text>
+              <TouchableOpacity
+                onPress={() => closeSheet()}
+                style={{ width: 32, height: 32, borderRadius: 16, backgroundColor: 'rgba(0,0,0,0.06)', alignItems: 'center', justifyContent: 'center' }}
+                activeOpacity={0.7}
+              >
+                <Text style={{ fontSize: 18, color: theme.textMuted, lineHeight: 22, marginTop: -1 }}>✕</Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* Produit */}
+            {item && (
+              <View style={{
+                flexDirection: 'row', alignItems: 'center', gap: 12,
+                marginBottom: 24, padding: 14,
+                borderRadius: 16,
+                backgroundColor: 'rgba(236,90,19,0.07)',
+                borderWidth: 1, borderColor: 'rgba(236,90,19,0.15)',
+              }}>
+                <Image
+                  source={{ uri: item.image || 'https://via.placeholder.com/56' }}
+                  style={{ width: 56, height: 56, borderRadius: 12 }}
+                />
+                <View style={{ flex: 1 }}>
+                  <Text style={{ fontSize: 10, color: P.orange500, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 3 }}>
+                    Votre avis sur
+                  </Text>
+                  <Text style={{ fontSize: 14, fontWeight: '600', color: theme.text }} numberOfLines={2}>
+                    {item.title}
+                  </Text>
+                </View>
+              </View>
+            )}
+
+            {/* Question + étoiles */}
+            <Text style={{ fontSize: 14, fontWeight: '600', color: theme.text, textAlign: 'center', marginBottom: 16 }}>
+              Quelle note donnez-vous ?
+            </Text>
+            <View style={{ flexDirection: 'row', justifyContent: 'center', gap: 6, marginBottom: 10 }}>
+              {[1, 2, 3, 4, 5].map((star) => (
+                <TouchableOpacity
+                  key={star}
+                  onPress={() => setReviewRating(star)}
+                  activeOpacity={0.6}
+                  style={{ padding: 4 }}
+                >
+                  <Animated.Text
+                    style={{
+                      fontSize: 46,
+                      color: reviewRating >= star ? '#f59e0b' : (theme.textMuted || '#d1d5db'),
+                      lineHeight: 52,
+                    }}
+                  >
+                    ★
+                  </Animated.Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            {/* Label note */}
+            <View style={{ height: 22, marginBottom: 20, alignItems: 'center' }}>
+              {reviewRating > 0 && (
+                <Text style={{ fontSize: 13, fontWeight: '700', color: '#f59e0b' }}>
+                  {RATING_LABELS[reviewRating]}
+                </Text>
+              )}
+            </View>
+
+            {/* Champ commentaire */}
+            <View style={{
+              borderWidth: 1.5,
+              borderColor: reviewComment.length > 0 ? P.orange500 : (theme.border || '#e5e7eb'),
+              borderRadius: 14,
+              overflow: 'hidden',
+              marginBottom: 6,
+            }}>
+              <TextInput
+                style={{
+                  color: theme.text,
+                  backgroundColor: theme.surfaceAlt || 'rgba(0,0,0,0.03)',
+                  fontSize: 14,
+                  padding: 12,
+                  minHeight: 80,
+                  textAlignVertical: 'top',
+                }}
+                placeholder="Décrivez votre expérience (facultatif)"
+                placeholderTextColor={theme.textMuted}
+                value={reviewComment}
+                onChangeText={setReviewComment}
+                multiline
+                numberOfLines={3}
+                maxLength={500}
+              />
+            </View>
+            <Text style={{ fontSize: 11, color: theme.textMuted, textAlign: 'right', marginBottom: 24 }}>
+              {reviewComment.length}/500
+            </Text>
+
+            {/* Boutons */}
+            <View style={{ flexDirection: 'row', gap: 12 }}>
+              <TouchableOpacity
+                onPress={() => closeSheet()}
+                activeOpacity={0.8}
+                style={{
+                  flex: 1, height: 50, borderRadius: 14,
+                  borderWidth: 1.5, borderColor: theme.border || '#e5e7eb',
+                  alignItems: 'center', justifyContent: 'center',
+                }}
+              >
+                <Text style={{ fontSize: 15, fontWeight: '600', color: theme.textMuted }}>Annuler</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={onSubmit}
+                disabled={reviewRating === 0 || submittingReview}
+                activeOpacity={0.85}
+                style={{
+                  flex: 2, height: 50, borderRadius: 14,
+                  backgroundColor: reviewRating === 0 ? '#d1d5db' : P.orange500,
+                  alignItems: 'center', justifyContent: 'center',
+                  shadowColor: P.orange500,
+                  shadowOffset: { width: 0, height: 4 },
+                  shadowOpacity: reviewRating > 0 ? 0.35 : 0,
+                  shadowRadius: 8,
+                  elevation: reviewRating > 0 ? 4 : 0,
+                }}
+              >
+                {submittingReview
+                  ? <ActivityIndicator size="small" color="#fff" />
+                  : <Text style={{ fontSize: 15, fontWeight: '700', color: '#fff' }}>Publier mon avis</Text>
+                }
+              </TouchableOpacity>
+            </View>
+          </View>
+        </Animated.View>
+      </KeyboardAvoidingView>
+    </Modal>
+  );
+}
+
 export default function ConversationScreen({ route, navigation }) {
   const insets = useSafeAreaInsets();
   const headerHeight = useHeaderHeight();
@@ -124,23 +437,33 @@ export default function ConversationScreen({ route, navigation }) {
   const [conversation, setConversation] = useState(null);
   const [messages, setMessages] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [loadingOlder, setLoadingOlder] = useState(false);
+  const [hasMoreMessages, setHasMoreMessages] = useState(false);
+  const [currentPage, setCurrentPage] = useState(1);
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
   const [sendingVoice, setSendingVoice] = useState(false);
   const [dealActionLoading, setDealActionLoading] = useState(false);
+  const [ownerClosureLoading, setOwnerClosureLoading] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [recordingMs, setRecordingMs] = useState(0);
   const [playingMessageId, setPlayingMessageId] = useState('');
   const [audioStates, setAudioStates] = useState({});
   const [audioTrackWidths, setAudioTrackWidths] = useState({});
   const [typingUsers, setTypingUsers] = useState({});
+  const [reviewEligible, setReviewEligible] = useState(false);
+  const [checkingReviewEligibility, setCheckingReviewEligibility] = useState(false);
+  const [reviewModalVisible, setReviewModalVisible] = useState(false);
+  const [reviewRating, setReviewRating] = useState(0);
+  const [reviewComment, setReviewComment] = useState('');
+  const [submittingReview, setSubmittingReview] = useState(false);
   const [error, setError] = useState('');
   const [alert, setAlert] = useState({
     visible: false,
     type: 'info',
     title: '',
     message: '',
-    buttons: [{ text: 'OK', onPress: () => {} }],
+    buttons: [{ text: 'OK', onPress: () => { } }],
   });
 
   const currentUserId = useMemo(() => user?.id || user?._id || '', [user]);
@@ -195,6 +518,8 @@ export default function ConversationScreen({ route, navigation }) {
 
       setConversation(loadedConversation);
       setMessages(loadedMessages);
+      setCurrentPage(1);
+      setHasMoreMessages(Boolean(messagesResponse?.pagination?.hasMore));
 
       await markConversationAsRead(conversationId);
       DeviceEventEmitter.emit('unreadCount:refresh');
@@ -212,6 +537,31 @@ export default function ConversationScreen({ route, navigation }) {
       setLoading(false);
     }
   }, [conversationId, currentUserIdSet, markMessageAsRead, navigation]);
+
+  const loadOlderMessages = useCallback(async () => {
+    if (!conversationId || loadingOlder || !hasMoreMessages) return;
+    try {
+      setLoadingOlder(true);
+      const nextPage = currentPage + 1;
+      const response = await getMessages(conversationId, nextPage);
+      const older = response?.data || [];
+      if (older.length > 0) {
+        setMessages((prev) => {
+          const existingIds = new Set(prev.map((m) => String(m.id)));
+          const unique = older.filter((m) => !existingIds.has(String(m.id)));
+          return [...unique, ...prev];
+        });
+        setCurrentPage(nextPage);
+        setHasMoreMessages(Boolean(response?.pagination?.hasMore));
+      } else {
+        setHasMoreMessages(false);
+      }
+    } catch (e) {
+      // silently ignore pagination errors
+    } finally {
+      setLoadingOlder(false);
+    }
+  }, [conversationId, currentPage, hasMoreMessages, loadingOlder]);
 
   useFocusEffect(
     useCallback(() => {
@@ -247,7 +597,7 @@ export default function ConversationScreen({ route, navigation }) {
         markMessageAsRead(message.id, conversationId);
         markConversationAsRead(conversationId)
           .then(() => DeviceEventEmitter.emit('unreadCount:refresh'))
-          .catch(() => {});
+          .catch(() => { });
       }
     };
 
@@ -291,10 +641,11 @@ export default function ConversationScreen({ route, navigation }) {
       const payloadConversationId = String(payload?.conversationId || payload?.id || '');
       if (payloadConversationId !== String(conversationId || '')) return;
 
+      // Update conversation state
       setConversation((prev) => {
         if (!prev) return prev;
 
-        return {
+        const next = {
           ...prev,
           lastMessage: payload?.lastMessage || prev.lastMessage,
           unreadCount:
@@ -302,8 +653,16 @@ export default function ConversationScreen({ route, navigation }) {
               ? payload.unreadCount
               : prev.unreadCount,
           status: payload?.status || prev.status,
+          closedByOwner:
+            typeof payload?.closedByOwner === 'boolean'
+              ? payload.closedByOwner
+              : prev.closedByOwner,
+          closedAt: payload?.closedAt || prev.closedAt || null,
+          closedById: payload?.closedById || prev.closedById || null,
           deal: payload?.deal || prev.deal,
         };
+
+        return next;
       });
     };
 
@@ -336,16 +695,51 @@ export default function ConversationScreen({ route, navigation }) {
 
   // Auto-scroll au chargement initial et à chaque nouvel message
 
-useEffect(() => {
-  if (messages.length === 0) return;
-  const timer = setTimeout(() => {
-    if (flatListRef.current && messages.length > 0) {
-      flatListRef.current.scrollToEnd({ animated: false });
-      initialScrollDoneRef.current = true;
+  useEffect(() => {
+    if (messages.length === 0) return;
+    const timer = setTimeout(() => {
+      if (flatListRef.current && messages.length > 0) {
+        flatListRef.current.scrollToEnd({ animated: false });
+        initialScrollDoneRef.current = true;
+      }
+    }, 200);
+    return () => clearTimeout(timer);
+  }, [messages.length]);
+
+  // Auto-scroll quand l'interlocuteur commence à taper
+  useEffect(() => {
+    if (Object.keys(typingUsers).length > 0) {
+      flatListRef.current?.scrollToEnd({ animated: true });
     }
-  }, 200);
-  return () => clearTimeout(timer);
-}, [messages.length]);
+  }, [typingUsers]);
+
+  // Vérifier l'éligibilité à laisser un avis (si conversation fermée par vendeur)
+  useEffect(() => {
+    const checkEligibility = async () => {
+      if (!conversation?.closedByOwner || !conversation?.item?.id) {
+        setReviewEligible(false);
+        return;
+      }
+
+      try {
+        setCheckingReviewEligibility(true);
+        const productId = extractMongoId(conversation.item?.id);
+
+        if (productId) {
+          const response = await checkReviewEligibility(productId);
+          setReviewEligible(response?.eligible || false);
+          // console.log('✅ Éligibilité à laisser un avis:', response);
+        }
+      } catch (error) {
+        console.error('❌ Erreur vérification éligibilité avis:', error);
+        setReviewEligible(false);
+      } finally {
+        setCheckingReviewEligibility(false);
+      }
+    };
+
+    checkEligibility();
+  }, [conversation?.closedByOwner, conversation?.item?.id]);
 
   const stopAudioPlayback = useCallback(async () => {
     const currentId = playingMessageIdRef.current;
@@ -405,7 +799,7 @@ useEffect(() => {
           type: 'warning',
           title: 'Micro requis',
           message: 'Activez le microphone pour envoyer un message vocal.',
-          buttons: [{ text: 'OK', onPress: () => {} }],
+          buttons: [{ text: 'OK', onPress: () => { } }],
         });
         return;
       }
@@ -441,7 +835,7 @@ useEffect(() => {
         type: 'error',
         title: 'Erreur',
         message: 'Impossible de demarrer l\'enregistrement vocal.',
-        buttons: [{ text: 'OK', onPress: () => {} }],
+        buttons: [{ text: 'OK', onPress: () => { } }],
       });
       setIsRecording(false);
       recordingRef.current = null;
@@ -503,7 +897,7 @@ useEffect(() => {
         type: 'error',
         title: 'Erreur',
         message: e?.response?.data?.message || 'Impossible d\'envoyer le message vocal.',
-        buttons: [{ text: 'OK', onPress: () => {} }],
+        buttons: [{ text: 'OK', onPress: () => { } }],
       });
     } finally {
       await Audio.setAudioModeAsync({
@@ -605,32 +999,13 @@ useEffect(() => {
           <Text style={styles.headerTitleText} numberOfLines={1}>
             {peer?.businessName || peer?.name || 'Conversation'}
           </Text>
-          <Text style={styles.headerSubtitleText} numberOfLines={1}>
-            {headerDealLabel}
-          </Text>
+          <View style={styles.headerOnlineRow}>
+            <View style={[styles.headerOnlineDot, peerIsOnline ? styles.headerOnlineDotActive : styles.headerOnlineDotInactive]} />
+            <Text style={[styles.headerOnlineText, peerIsOnline ? styles.headerOnlineTextActive : styles.headerOnlineTextInactive]}>
+              {isConnected ? (peerIsOnline ? 'En ligne' : 'Hors ligne') : 'Connexion...'}
+            </Text>
+          </View>
         </View>
-      ),
-      headerRight: () => (
-        <TouchableOpacity
-          activeOpacity={0.85}
-          onPress={openDealActions}
-          style={[
-            styles.headerDealChip,
-            headerDealStatus === 'concluded' && styles.headerDealChipSuccess,
-            headerDealStatus === 'not_concluded' && styles.headerDealChipMuted,
-          ]}
-        >
-          <Text
-            style={[
-              styles.headerDealChipText,
-              headerDealStatus === 'concluded' && styles.headerDealChipTextSuccess,
-              headerDealStatus === 'not_concluded' && styles.headerDealChipTextMuted,
-            ]}
-            numberOfLines={1}
-          >
-            {headerDealLabel}
-          </Text>
-        </TouchableOpacity>
       ),
       headerStyle: {
         backgroundColor: theme.surface,
@@ -638,7 +1013,7 @@ useEffect(() => {
       },
       headerTintColor: theme.text,
     });
-  }, [navigation, peer?.businessName, peer?.name, theme, headerDealLabel, headerDealStatus]);
+  }, [navigation, peer?.businessName, peer?.name, theme, peerIsOnline, isConnected]);
 
   const onPressAudioMessage = useCallback(
     async (message) => {
@@ -725,7 +1100,7 @@ useEffect(() => {
           type: 'error',
           title: 'Erreur',
           message: 'Impossible de lire ce message vocal.',
-          buttons: [{ text: 'OK', onPress: () => {} }],
+          buttons: [{ text: 'OK', onPress: () => { } }],
         });
         await stopAudioPlayback();
       }
@@ -777,16 +1152,12 @@ useEffect(() => {
         type: 'info',
         title: 'Annonce indisponible',
         message: 'Impossible d\'ouvrir cette annonce pour le moment.',
-        buttons: [{ text: 'OK', onPress: () => {} }],
+        buttons: [{ text: 'OK', onPress: () => { } }],
       });
       return;
     }
-    const raw = conversation?.item?.id;
-
-    const match = raw.match(/ObjectId\('(.+?)'\)/);
-    const productId = match?.[1] ?? null;
-
-    navigation.navigate('ProductDetail', { productId: productId });
+    const productId = extractMongoId(conversation?.item?.id);
+    navigation.navigate('ProductDetail', { productId });
   }, [conversationItemId, navigation]);
 
   const dealStatus = conversation?.deal?.status || 'open';
@@ -798,6 +1169,144 @@ useEffect(() => {
     String(conversation?.participants?.seller?.id || conversation?.participants?.seller?._id || '') ===
     String(currentUserNormalizedId || '')
   );
+  const isOwnerClosureActive = Boolean(conversation?.closedByOwner);
+  const canManageOwnerClosure = isConversationSeller;
+
+  const toggleOwnerClosure = useCallback(async () => {
+    if (!conversationId || ownerClosureLoading || !canManageOwnerClosure) return;
+
+    const previousConversation = conversation;
+    try {
+      setOwnerClosureLoading(true);
+      // optimistic system message (temporary id)
+      const optimisticId = `sys-closure-optimistic-${Date.now()}`;
+      addClosureSystemMessage(true ? !isOwnerClosureActive : isOwnerClosureActive, new Date().toISOString(), optimisticId);
+
+      const response = isOwnerClosureActive
+        ? await reopenConversationByOwner(conversationId)
+        : await closeConversationByOwner(conversationId);
+
+      const updatedConversation = response?.data?.id
+        ? response.data
+        : response?.id
+          ? response
+          : response?.data || null;
+
+      if (updatedConversation) {
+        setConversation(updatedConversation);
+        try {
+          addClosureSystemMessage(Boolean(updatedConversation.closedByOwner), updatedConversation.closedAt || null);
+        } catch (e) {}
+      } else {
+        const refreshed = await getConversationById(conversationId);
+        if (refreshed?.data) {
+          setConversation(refreshed.data);
+          try {
+            addClosureSystemMessage(Boolean(refreshed.data.closedByOwner), refreshed.data.closedAt || null);
+          } catch (e) {}
+        }
+      }
+    } catch (e) {
+      setConversation(previousConversation || null);
+      setAlert({
+        visible: true,
+        type: 'error',
+        title: 'Erreur',
+        message: e?.response?.data?.message || 'Impossible de mettre à jour la clôture de la discussion.',
+        buttons: [{ text: 'OK', onPress: () => { } }],
+      });
+    } finally {
+      setOwnerClosureLoading(false);
+    }
+  }, [canManageOwnerClosure, conversation, conversationId, isOwnerClosureActive, ownerClosureLoading]);
+
+  // Insert a chronological system message for closure/reopen actions (local optimistic updates)
+  const addClosureSystemMessage = useCallback((closed, ts = null, id = null) => {
+    try {
+      const time = ts || new Date().toISOString();
+      const sysId = id || `sys-closure-${time}`;
+      const text = closed ? 'Discussion clôturée' : 'Discussion rouverte';
+
+      setMessages((prevMsgs) => {
+        if (prevMsgs.some((m) => m.systemId === sysId)) return prevMsgs;
+        const sysMsg = {
+          id: sysId,
+          systemId: sysId,
+          content: text,
+          type: 'system',
+          timestamp: time,
+        };
+
+        const idx = prevMsgs.findIndex((m) => {
+          const mt = m?.timestamp || m?.createdAt || null;
+          if (!mt) return false;
+          return new Date(mt).getTime() > new Date(time).getTime();
+        });
+
+        if (idx === -1) return [...prevMsgs, sysMsg];
+        return [...prevMsgs.slice(0, idx), sysMsg, ...prevMsgs.slice(idx)];
+      });
+    } catch (e) {
+      // noop
+    }
+  }, []);
+
+  const replaceOptimisticSystemMessage = useCallback((optimisticId, permanentId, closed, permTs = null) => {
+    try {
+      setMessages((prevMsgs) => {
+        const permExists = prevMsgs.some((m) => m.systemId === permanentId);
+        if (permExists) {
+          return prevMsgs.filter((m) => m.systemId !== optimisticId);
+        }
+
+        const found = prevMsgs.findIndex((m) => m.systemId === optimisticId);
+        if (found === -1) {
+          const time = permTs || new Date().toISOString();
+          const text = closed ? 'Discussion clôturée' : 'Discussion rouverte';
+          const sysMsg = { id: permanentId, systemId: permanentId, content: text, type: 'system', timestamp: time };
+          return [...prevMsgs, sysMsg];
+        }
+
+        const newMsgs = [...prevMsgs];
+        const time = permTs || new Date().toISOString();
+        newMsgs[found] = { ...newMsgs[found], id: permanentId, systemId: permanentId, content: closed ? 'Discussion clôturée' : 'Discussion rouverte', timestamp: time };
+        return newMsgs;
+      });
+    } catch (e) {
+      // noop
+    }
+  }, []);
+
+  const submitReview = useCallback(async () => {
+    if (reviewRating === 0 || submittingReview) return;
+    const productId = extractMongoId(conversation?.item?.id);
+    if (!productId) return;
+    try {
+      setSubmittingReview(true);
+      await createReview({ productId, rating: reviewRating, comment: reviewComment.trim() });
+      setReviewModalVisible(false);
+      setReviewRating(0);
+      setReviewComment('');
+      setReviewEligible(false);
+      setAlert({
+        visible: true,
+        type: 'success',
+        title: 'Merci !',
+        message: 'Votre avis a bien été publié.',
+        buttons: [{ text: 'OK', onPress: () => {} }],
+      });
+    } catch (e) {
+      setAlert({
+        visible: true,
+        type: 'error',
+        title: 'Erreur',
+        message: e?.message || 'Impossible de publier votre avis.',
+        buttons: [{ text: 'OK', onPress: () => {} }],
+      });
+    } finally {
+      setSubmittingReview(false);
+    }
+  }, [reviewRating, reviewComment, submittingReview, conversation?.item?.id]);
 
   const openDealActions = () => {
     const buttons = [];
@@ -828,7 +1337,7 @@ useEffect(() => {
       });
     }
 
-    buttons.push({ text: 'Fermer', onPress: () => {} });
+    buttons.push({ text: 'Fermer', onPress: () => { } });
 
     setAlert({
       visible: true,
@@ -893,7 +1402,6 @@ useEffect(() => {
         deal: applyDealTransition(prev.deal, action),
       };
     });
-
     try {
       setDealActionLoading(true);
       const response = await updateConversationDeal(conversationId, action);
@@ -916,14 +1424,35 @@ useEffect(() => {
         type: 'error',
         title: 'Erreur',
         message: e?.response?.data?.message || 'Impossible de mettre à jour le statut de l\'affaire.',
-        buttons: [{ text: 'OK', onPress: () => {} }],
+        buttons: [{ text: 'OK', onPress: () => { } }],
       });
     } finally {
       setDealActionLoading(false);
     }
-  }, [applyDealTransition, conversation, conversationId, dealActionLoading]);
+  }, [conversationId, dealActionLoading, conversation, applyDealTransition]);
 
-  const renderMessage = ({ item }) => {
+  const renderMessage = ({ item, index }) => {
+    const prevItem = index > 0 ? messages[index - 1] : null;
+    const showDateSeparator = !isSameDay(item?.timestamp, prevItem?.timestamp);
+
+    // Render system messages (closure/reopen) as centered small lines
+    if (item?.type === 'system' || item?.systemId) {
+      return (
+        <View>
+          {showDateSeparator && (
+            <View style={styles.dateSeparatorWrap}>
+              <View style={styles.dateSeparatorLine} />
+              <Text style={styles.dateSeparatorText}>{formatDateSeparator(item.timestamp)}</Text>
+              <View style={styles.dateSeparatorLine} />
+            </View>
+          )}
+          <View style={styles.systemMessageWrap}>
+            <Text style={styles.systemMessageText}>{item.content || ''}</Text>
+          </View>
+        </View>
+      );
+    }
+
     const mine = isCurrentUserMessage(item, user, currentUserIdSet);
     const isAudio = item?.type === 'audio' && item?.attachments?.[0];
     const messageId = String(item.id);
@@ -934,98 +1463,106 @@ useEffect(() => {
     const progressPct = durationMs > 0 ? Math.min(100, (positionMs / durationMs) * 100) : 0;
 
     return (
-      <View style={[styles.messageRow, mine ? styles.messageRowMine : styles.messageRowOther]}>
-        <View style={styles.avatarSlot}>
-          {!mine ? (
-            peer?.avatar ? (
-              <Image source={{ uri: peer.avatar }} style={styles.peerAvatar} />
-            ) : (
-              <View style={styles.peerAvatarFallback}>
-                <Text style={styles.peerAvatarFallbackText}>{(peer?.name || 'U').slice(0, 1).toUpperCase()}</Text>
-              </View>
-            )
-          ) : null}
-        </View>
-
-        <View style={[styles.bubble, mine ? styles.bubbleMine : styles.bubbleOther]}>
-          {isAudio ? (
-            <View style={styles.audioWrap}>
-              <TouchableOpacity
-                onPress={() => onPressAudioMessage(item)}
-                activeOpacity={0.85}
-                style={styles.audioPlayBtn}
-              >
-                <Ionicons
-                  name={isPlayingThis ? 'pause' : 'play'}
-                  size={17}
-                  color={mine ? '#fff' : P.orange500}
-                />
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                activeOpacity={0.9}
-                style={styles.audioTrack}
-                onLayout={(e) => {
-                  const width = e.nativeEvent.layout.width;
-                  setAudioTrackWidths((prev) => ({ ...prev, [messageId]: width }));
-                }}
-                onPress={(e) => onSeekAudioMessage(messageId, e)}
-              >
-                <View style={styles.audioWaveRow}>
-                  {WAVE_BARS.map((bar) => {
-                    const threshold = ((bar + 1) / WAVE_BARS.length) * 100;
-                    const active = progressPct >= threshold;
-
-                    return (
-                      <View
-                        key={bar}
-                        style={[
-                          styles.audioWaveBar,
-                          { height: 6 + ((bar * 5) % 12) },
-                          active
-                            ? { backgroundColor: mine ? 'rgba(255,255,255,0.92)' : P.orange500 }
-                            : styles.audioWaveBarInactive,
-                        ]}
-                      />
-                    );
-                  })}
+      <View>
+        {showDateSeparator && (
+          <View style={styles.dateSeparatorWrap}>
+            <View style={styles.dateSeparatorLine} />
+            <Text style={styles.dateSeparatorText}>{formatDateSeparator(item.timestamp)}</Text>
+            <View style={styles.dateSeparatorLine} />
+          </View>
+        )}
+        <View style={[styles.messageRow, mine ? styles.messageRowMine : styles.messageRowOther]}>
+          <View style={styles.avatarSlot}>
+            {!mine ? (
+              peer?.avatar ? (
+                <Image source={{ uri: peer.avatar }} style={styles.peerAvatar} />
+              ) : (
+                <View style={styles.peerAvatarFallback}>
+                  <Text style={styles.peerAvatarFallbackText}>{(peer?.name || 'U').slice(0, 1).toUpperCase()}</Text>
                 </View>
-                <View
-                  style={[
-                    styles.audioTrackHead,
-                    {
-                      left: `${progressPct}%`,
-                      backgroundColor: mine ? '#fff' : P.orange500,
-                    },
-                  ]}
-                />
-              </TouchableOpacity>
-
-              <View style={styles.audioMetaRow}>
-                <Ionicons
-                  name="mic"
-                  size={11}
-                  color={mine ? 'rgba(255,255,255,0.88)' : 'rgba(255,255,255,0.7)'}
-                />
-                <Text style={[styles.audioTimeText, mine ? styles.messageTextMine : styles.messageTextOther]}>
-                  {formatAudioTime(positionMs)} / {formatAudioTime(durationMs)}
-                </Text>
-              </View>
-            </View>
-          ) : (
-            <Text style={[styles.messageText, mine ? styles.messageTextMine : styles.messageTextOther]}>
-              {item.content || ''}
-            </Text>
-          )}
-          <View style={styles.metaRow}>
-            <Text style={[styles.timeText, mine ? styles.timeTextMine : styles.timeTextOther]}>{formatTime(item.timestamp)}</Text>
-            {mine ? (
-              <Ionicons
-                name={item.read || item.delivered ? 'checkmark-done' : 'checkmark'}
-                size={14}
-                style={item.read ? styles.readIconRead : styles.readIconPending}
-              />
+              )
             ) : null}
+          </View>
+
+          <View style={[styles.bubble, mine ? styles.bubbleMine : styles.bubbleOther]}>
+            {isAudio ? (
+              <View style={styles.audioWrap}>
+                <TouchableOpacity
+                  onPress={() => onPressAudioMessage(item)}
+                  activeOpacity={0.85}
+                  style={styles.audioPlayBtn}
+                >
+                  <Ionicons
+                    name={isPlayingThis ? 'pause' : 'play'}
+                    size={17}
+                    color={mine ? '#fff' : P.orange500}
+                  />
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  activeOpacity={0.9}
+                  style={styles.audioTrack}
+                  onLayout={(e) => {
+                    const width = e.nativeEvent.layout.width;
+                    setAudioTrackWidths((prev) => ({ ...prev, [messageId]: width }));
+                  }}
+                  onPress={(e) => onSeekAudioMessage(messageId, e)}
+                >
+                  <View style={styles.audioWaveRow}>
+                    {WAVE_BARS.map((bar) => {
+                      const threshold = ((bar + 1) / WAVE_BARS.length) * 100;
+                      const active = progressPct >= threshold;
+                      return (
+                        <View
+                          key={bar}
+                          style={[
+                            styles.audioWaveBar,
+                            { height: 6 + ((bar * 5) % 12) },
+                            active
+                              ? { backgroundColor: mine ? 'rgba(255,255,255,0.92)' : P.orange500 }
+                              : styles.audioWaveBarInactive,
+                          ]}
+                        />
+                      );
+                    })}
+                  </View>
+                  <View
+                    style={[
+                      styles.audioTrackHead,
+                      {
+                        left: `${progressPct}%`,
+                        backgroundColor: mine ? '#fff' : P.orange500,
+                      },
+                    ]}
+                  />
+                </TouchableOpacity>
+
+                <View style={styles.audioMetaRow}>
+                  <Ionicons
+                    name="mic"
+                    size={11}
+                    color={mine ? 'rgba(255,255,255,0.88)' : 'rgba(255,255,255,0.7)'}
+                  />
+                  <Text style={[styles.audioTimeText, mine ? styles.messageTextMine : styles.messageTextOther]}>
+                    {formatAudioTime(positionMs)} / {formatAudioTime(durationMs)}
+                  </Text>
+                </View>
+              </View>
+            ) : (
+              <Text style={[styles.messageText, mine ? styles.messageTextMine : styles.messageTextOther]}>
+                {item.content || ''}
+              </Text>
+            )}
+            <View style={styles.metaRow}>
+              <Text style={[styles.timeText, mine ? styles.timeTextMine : styles.timeTextOther]}>{formatTime(item.timestamp)}</Text>
+              {mine ? (
+                <Ionicons
+                  name={item.read ? 'checkmark-done' : item.delivered ? 'checkmark-done' : 'checkmark'}
+                  size={14}
+                  color={item.read ? '#fde68a' : item.delivered ? 'rgba(255,255,255,0.90)' : 'rgba(255,255,255,0.45)'}
+                />
+              ) : null}
+            </View>
           </View>
         </View>
       </View>
@@ -1051,12 +1588,74 @@ useEffect(() => {
         behavior={Platform.OS === 'ios' ? 'padding' : 'padding'}
         keyboardVerticalOffset={Platform.OS === 'ios' ? headerHeight : headerHeight + 24}
       >
-        <View style={styles.connectionBannerWrap}>
-          <Text style={styles.connectionBannerText}>
-            {isConnected ? (peerIsOnline ? 'Correspondant en ligne' : 'Correspondant hors ligne') : 'Connexion en cours...'}
-          </Text>
-          {error ? <Text style={styles.errorText}>{error}</Text> : null}
-        </View>
+        {error ? (
+          <View style={styles.connectionBannerWrap}>
+            <Text style={styles.errorText}>{error}</Text>
+          </View>
+        ) : null}
+
+        {/* Carte produit fixe — hors de la zone scrollable */}
+        {conversationItem ? (
+          <TouchableOpacity
+            activeOpacity={canOpenConversationItem ? 0.88 : 1}
+            style={[styles.itemCard, !canOpenConversationItem && styles.itemCardDisabled]}
+            onPress={openConversationItem}
+            disabled={!canOpenConversationItem}
+          >
+            <Image
+              source={{
+                uri:
+                  conversationItem?.image ||
+                  'https://via.placeholder.com/160x160/F5E6C8/C1440E?text=Annonce',
+              }}
+              style={styles.itemImage}
+            />
+            <View style={styles.itemMeta}>
+              <Text style={styles.itemOverline}>A propos de cette annonce</Text>
+              <Text numberOfLines={2} style={styles.itemTitle}>
+                {conversationItem?.title || 'Annonce'}
+              </Text>
+              <Text style={styles.itemPrice}>{formatPriceFCFA(conversationItem?.price)}</Text>
+            </View>
+            <View style={styles.itemActionBtn}>
+              <Ionicons name="open-outline" size={16} color={P.orange500} />
+            </View>
+          </TouchableOpacity>
+        ) : null}
+
+        {/* Invitation à laisser un avis si éligible */}
+        {reviewEligible && conversation?.closedByOwner && (
+          <TouchableOpacity
+            activeOpacity={0.85}
+            onPress={() => { setReviewRating(0); setReviewComment(''); setReviewModalVisible(true); }}
+            style={[styles.reviewInviteCard, { backgroundColor: '#fff7ed', borderColor: P.orange500 }]}
+          >
+            <View style={styles.reviewInviteContent}>
+              <Text style={[styles.reviewInviteTitle, { color: '#92400e' }]}>⭐ Donnez votre avis</Text>
+              <Text style={[styles.reviewInviteText, { color: '#b45309' }]}>
+                Appuyez ici pour noter ce produit — ça prend 10 secondes.
+              </Text>
+            </View>
+            <View style={[styles.reviewInviteBtn, { backgroundColor: P.orange500 }]}>
+              <Text style={styles.reviewInviteBtnText}>Noter →</Text>
+            </View>
+          </TouchableOpacity>
+        )}
+
+        {/* Custom bottom sheet — avis */}
+        <ReviewBottomSheet
+          visible={reviewModalVisible}
+          onClose={() => setReviewModalVisible(false)}
+          theme={theme}
+          item={conversation?.item}
+          reviewRating={reviewRating}
+          setReviewRating={setReviewRating}
+          reviewComment={reviewComment}
+          setReviewComment={setReviewComment}
+          submittingReview={submittingReview}
+          onSubmit={submitReview}
+          insets={insets}
+        />
 
         <FlatList
           ref={flatListRef}
@@ -1067,41 +1666,34 @@ useEffect(() => {
           keyboardShouldPersistTaps="always"
           keyboardDismissMode="none"
           onContentSizeChange={() => {
-            flatListRef.current?.scrollToEnd({ animated: false });
+            if (!loadingOlder) {
+              flatListRef.current?.scrollToEnd({ animated: false });
+            }
           }}
           onLayout={() => {
-            flatListRef.current?.scrollToEnd({ animated: false });
+            if (!loadingOlder) {
+              flatListRef.current?.scrollToEnd({ animated: false });
+            }
           }}
+          onScrollBeginDrag={() => { initialScrollDoneRef.current = true; }}
+          onScroll={({ nativeEvent }) => {
+            if (nativeEvent.contentOffset.y < 60 && hasMoreMessages && !loadingOlder) {
+              loadOlderMessages();
+            }
+          }}
+          scrollEventThrottle={200}
           ListHeaderComponent={
-            <>
-              {conversationItem ? (
-                <TouchableOpacity
-                  activeOpacity={canOpenConversationItem ? 0.88 : 1}
-                  style={[styles.itemCard, !canOpenConversationItem && styles.itemCardDisabled]}
-                  onPress={openConversationItem}
-                  disabled={!canOpenConversationItem}
-                >
-                  <Image
-                    source={{
-                      uri:
-                        conversationItem?.image ||
-                        'https://via.placeholder.com/160x160/F5E6C8/C1440E?text=Annonce',
-                    }}
-                    style={styles.itemImage}
-                  />
-                  <View style={styles.itemMeta}>
-                    <Text style={styles.itemOverline}>A propos de cette annonce</Text>
-                    <Text numberOfLines={2} style={styles.itemTitle}>
-                      {conversationItem?.title || 'Annonce'}
-                    </Text>
-                    <Text style={styles.itemPrice}>{formatPriceFCFA(conversationItem?.price)}</Text>
-                  </View>
-                  <View style={styles.itemActionBtn}>
-                    <Ionicons name="open-outline" size={16} color={P.orange500} />
-                  </View>
-                </TouchableOpacity>
-              ) : null}
-            </>
+            loadingOlder ? (
+              <View style={styles.loadOlderWrap}>
+                <ActivityIndicator size="small" color={P.amber} />
+                <Text style={styles.loadOlderText}>Chargement...</Text>
+              </View>
+            ) : hasMoreMessages ? (
+              <TouchableOpacity style={styles.loadOlderWrap} onPress={loadOlderMessages} activeOpacity={0.8}>
+                <Ionicons name="chevron-up" size={14} color={P.orange500} />
+                <Text style={styles.loadOlderText}>Messages plus anciens</Text>
+              </TouchableOpacity>
+            ) : null
           }
           ListFooterComponent={
             typingLabel ? (
@@ -1112,7 +1704,7 @@ useEffect(() => {
           }
         />
 
-        <View style={[styles.composerWrap, { paddingBottom: Math.max(insets.bottom, 8) }]}> 
+        {!reviewModalVisible && <View style={[styles.composerWrap, { paddingBottom: Math.max(insets.bottom, 8) }]}>
           <View style={styles.composerInner}>
             <TextInput
               value={text}
@@ -1175,7 +1767,7 @@ useEffect(() => {
               </TouchableOpacity>
             </View>
           ) : null}
-        </View>
+        </View>}
       </KeyboardAvoidingView>
 
       <AlertModal
@@ -1206,13 +1798,62 @@ function createStyles(theme, isDark) {
       paddingHorizontal: 14,
       paddingTop: 8,
     },
+    closureBannerWrap: {
+      paddingHorizontal: 14,
+      paddingTop: 8,
+    },
+    closureBanner: {
+      borderRadius: 16,
+      borderWidth: 1,
+      padding: 12,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 10,
+    },
+    closureBannerOpen: {
+      backgroundColor: 'rgba(34,197,94,0.08)',
+      borderColor: 'rgba(34,197,94,0.22)',
+    },
+    closureBannerClosed: {
+      backgroundColor: 'rgba(107,114,128,0.10)',
+      borderColor: 'rgba(107,114,128,0.22)',
+    },
+    closureBannerTextWrap: {
+      flex: 1,
+      minWidth: 0,
+    },
+    closureBannerTitle: {
+      color: theme.text,
+      fontSize: 13,
+      fontWeight: '800',
+      marginBottom: 2,
+    },
+    closureBannerText: {
+      color: theme.textMuted,
+      fontSize: 12,
+      lineHeight: 18,
+    },
+    closureActionBtn: {
+      backgroundColor: P.orange500,
+      paddingHorizontal: 14,
+      paddingVertical: 10,
+      borderRadius: 12,
+      alignItems: 'center',
+      justifyContent: 'center',
+      minWidth: 92,
+    },
+    closureActionBtnText: {
+      color: '#fff',
+      fontWeight: '800',
+      fontSize: 12,
+    },
     dealBannerWrap: {
       paddingHorizontal: 14,
       paddingTop: 8,
     },
     headerTitleWrap: {
       alignItems: 'flex-start',
-      maxWidth: 180,
+      maxWidth: 200,
     },
     headerTitleText: {
       color: theme.text,
@@ -1223,6 +1864,45 @@ function createStyles(theme, isDark) {
       color: theme.textMuted,
       fontSize: 11,
       marginTop: 1,
+    },
+    headerOnlineRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 4,
+      marginTop: 2,
+    },
+    headerOnlineDot: {
+      width: 7,
+      height: 7,
+      borderRadius: 4,
+    },
+    headerOnlineDotActive: {
+      backgroundColor: '#22c55e',
+    },
+    headerOnlineDotInactive: {
+      backgroundColor: '#9ca3af',
+    },
+    headerOnlineText: {
+      fontSize: 11,
+      fontWeight: '500',
+    },
+    headerOnlineTextActive: {
+      color: '#22c55e',
+    },
+    headerOnlineTextInactive: {
+      color: '#9ca3af',
+    },
+    loadOlderWrap: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 6,
+      paddingVertical: 10,
+    },
+    loadOlderText: {
+      fontSize: 12,
+      color: P.orange500,
+      fontWeight: '600',
     },
     headerDealChip: {
       maxWidth: 120,
@@ -1558,20 +2238,53 @@ function createStyles(theme, isDark) {
     timeTextOther: {
       color: theme.textMuted,
     },
-    readIconRead: {
-      color: '#22c55e',
-    },
-    readIconPending: {
-      color: theme.textMuted,
-    },
     typingWrap: {
       marginTop: 10,
       marginLeft: 8,
+      marginBottom: 16,
+      paddingHorizontal: 10,
+      paddingVertical: 12,
+      backgroundColor: theme.cardSoft,
+      borderRadius: 12,
     },
     typingText: {
       color: theme.textMuted,
       fontSize: 13,
       fontStyle: 'italic',
+    },
+    dateSeparatorWrap: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      marginVertical: 12,
+      marginHorizontal: 16,
+      gap: 8,
+    },
+    dateSeparatorLine: {
+      flex: 1,
+      height: 1,
+      backgroundColor: theme.border || 'rgba(0,0,0,0.10)',
+    },
+    dateSeparatorText: {
+      fontSize: 11,
+      fontWeight: '600',
+      color: theme.textMuted,
+      textTransform: 'uppercase',
+      letterSpacing: 0.5,
+    },
+    systemMessageWrap: {
+      alignSelf: 'center',
+      marginVertical: 8,
+      paddingHorizontal: 12,
+      paddingVertical: 6,
+      borderRadius: 12,
+      backgroundColor: theme.surfaceAlt,
+      borderWidth: 1,
+      borderColor: theme.border,
+    },
+    systemMessageText: {
+      color: theme.textMuted,
+      fontSize: 12,
+      fontWeight: '700',
     },
     composerWrap: {
       borderTopWidth: 1,
@@ -1684,6 +2397,43 @@ function createStyles(theme, isDark) {
       color: theme.surface,
       fontSize: 12,
       fontWeight: '800',
+    },
+    reviewInviteCard: {
+      marginHorizontal: 14,
+      marginTop: 10,
+      marginBottom: 10,
+      borderRadius: 16,
+      borderWidth: 1,
+      padding: 14,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: 12,
+    },
+    reviewInviteContent: {
+      flex: 1,
+      minWidth: 0,
+    },
+    reviewInviteTitle: {
+      fontSize: 14,
+      fontWeight: '800',
+      marginBottom: 2,
+    },
+    reviewInviteText: {
+      fontSize: 12,
+      lineHeight: 16,
+    },
+    reviewInviteBtn: {
+      paddingHorizontal: 12,
+      paddingVertical: 10,
+      borderRadius: 10,
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+    reviewInviteBtnText: {
+      color: '#fff',
+      fontWeight: '800',
+      fontSize: 11,
     },
   });
 }

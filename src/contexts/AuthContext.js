@@ -1,4 +1,5 @@
 import React, { createContext, useState, useContext, useEffect } from 'react';
+import { DeviceEventEmitter } from 'react-native';
 import Constants from 'expo-constants';
 import * as Notifications from 'expo-notifications';
 import { login as apiLogin, register as apiRegister, getProfile, registerPushToken } from '../api/auth';
@@ -71,6 +72,17 @@ export const AuthProvider = ({ children }) => {
     loadUser();
   }, []);
 
+  // Écouter l'expiration de session déclenchée par l'intercepteur axios
+  useEffect(() => {
+    const subscription = DeviceEventEmitter.addListener('auth:session_expired', () => {
+      setToken(null);
+      setUser(null);
+      setIsAuthenticated(false);
+      console.log('ℹ️ Session expirée — état auth réinitialisé');
+    });
+    return () => subscription.remove();
+  }, []);
+
   const loadUser = async () => {
     try {
       setLoading(true);
@@ -101,8 +113,12 @@ export const AuthProvider = ({ children }) => {
         throw new Error(response.message || 'Échec de connexion');
       }
 
-      const { user: userData, tokens } = response.data;
+      const { user: userData, tokens } = response.data || {};
       const { accessToken, refreshToken } = tokens;
+
+      if (!accessToken || !refreshToken || !userData) {
+        throw new Error('Réponse de connexion invalide');
+      }
 
       // Sauvegarder les données
       await saveAccessToken(accessToken);
@@ -135,8 +151,12 @@ export const AuthProvider = ({ children }) => {
         throw new Error(response.message || 'Échec d\'inscription');
       }
 
-      const { user: newUser, tokens } = response.data;
+      const { user: newUser, tokens } = response.data || {};
       const { accessToken, refreshToken } = tokens;
+
+      if (!accessToken || !refreshToken || !newUser) {
+        throw new Error('Réponse d\'inscription invalide');
+      }
 
       // Sauvegarder les données
       await saveAccessToken(accessToken);
@@ -166,6 +186,9 @@ export const AuthProvider = ({ children }) => {
   const setAuthData = async (userData, tokens) => {
     try {
       const { accessToken, refreshToken } = tokens;
+      if (!accessToken || !refreshToken || !userData) {
+        throw new Error('Données d\'authentification invalides');
+      }
       await saveAccessToken(accessToken);
       await saveRefreshToken(refreshToken);
       await saveUserData(userData);

@@ -8,12 +8,6 @@ import { navigationRef } from '../navigation/AppNavigator';
 import { registerPushToken } from '../api/auth';
 
 const FALLBACK_EAS_PROJECT_ID = 'c85af018-b333-49ac-9f39-8a3623969b2d';
-const SHOW_PUSH_VISUAL_DEBUG = true;
-
-const showPushStep = (title, message) => {
-  if (!SHOW_PUSH_VISUAL_DEBUG) return;
-  Alert.alert(title, String(message || ''));
-};
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
@@ -39,7 +33,6 @@ export default function PushNotificationsBridge() {
       try {
         if (isExpoGo) {
           console.log('ℹ️ Expo Go détecté: enregistrement token désactivé pour ne pas polluer la prod. Utilisez un build APK/development build.');
-          showPushStep('Push debug', 'Expo Go detecte: enregistrement token desactive. Utilise l APK preview/prod.');
           return;
         }
 
@@ -57,24 +50,20 @@ export default function PushNotificationsBridge() {
           appOwnership: Constants.appOwnership,
           isExpoGo,
         });
-        showPushStep('Push debug', `Demarrage push pour user ${user.id}`);
 
         const permissions = await Notifications.getPermissionsAsync();
         let status = permissions.status;
 
         console.log('📣 Push permission status (current):', status);
-        showPushStep('Push permission', `Statut actuel: ${status}`);
 
         if (status !== 'granted') {
           const requested = await Notifications.requestPermissionsAsync();
           status = requested.status;
           console.log('📣 Push permission status (requested):', status);
-          showPushStep('Push permission', `Statut apres demande: ${status}`);
         }
 
         if (status !== 'granted' || cancelled) {
           console.log('⚠️ Push token non enregistré: permission refusée ou opération annulée.');
-          showPushStep('Push stop', 'Permission non accordee ou operation annulee');
           return;
         }
 
@@ -84,19 +73,16 @@ export default function PushNotificationsBridge() {
           FALLBACK_EAS_PROJECT_ID;
 
         console.log('📣 Push project config:', { projectId, appOwnership: Constants.appOwnership });
-        showPushStep('Push project', `projectId: ${projectId}`);
 
         const tokenResponse = await Notifications.getExpoPushTokenAsync({ projectId });
         const expoPushToken = tokenResponse?.data;
 
         if (!expoPushToken || cancelled) {
           console.log('⚠️ Aucun Expo push token généré.');
-          showPushStep('Push token', 'Aucun token Expo genere');
           return;
         }
 
         console.log('📣 Expo push token généré:', expoPushToken.substring(0, 24) + '...');
-        showPushStep('Push token genere', expoPushToken);
 
         let lastError = null;
         for (let attempt = 1; attempt <= 3; attempt += 1) {
@@ -106,7 +92,6 @@ export default function PushNotificationsBridge() {
               attempt,
               tokenPreview: expoPushToken.substring(0, 20) + '...',
             });
-            showPushStep('Push backend', `Token enregistre en base (attempt ${attempt})`);
             lastError = null;
             break;
           } catch (err) {
@@ -118,7 +103,6 @@ export default function PushNotificationsBridge() {
               status,
               message,
             });
-            showPushStep('Push retry', `Echec attempt ${attempt}: ${message || status || 'erreur inconnue'}`);
             if (attempt < 3) {
               await new Promise((resolve) => setTimeout(resolve, 1200));
             }
@@ -135,7 +119,6 @@ export default function PushNotificationsBridge() {
           status: backendStatus,
           message: backendMessage || error?.message || String(error),
         });
-        showPushStep('Push erreur', `${backendStatus || ''} ${backendMessage || error?.message || String(error)}`);
       }
     };
 
@@ -161,37 +144,54 @@ export default function PushNotificationsBridge() {
     // Écouter les notifications reçues en premier plan
     notificationListenerRef.current = Notifications.addNotificationResponseReceivedListener(
       (response) => {
-        const { conversationId } = response.notification.request.content.data || {};
-        if (conversationId && navigationRef.current) {
-          console.log('📱 Notification tapée, navigation vers conversation:', conversationId);
-          navigationRef.current.dispatch(
-            CommonActions.reset({
-              index: 0,
-              routes: [
-                {
-                  name: 'MainTabs',
-                  state: {
-                    index: 3,
-                    routes: [
-                      { name: 'Home' },
-                      { name: 'Favorites' },
-                      { name: 'Publish' },
-                      {
-                        name: 'Messages',
-                        state: {
-                          index: 1,
-                          routes: [
-                            { name: 'MessagesList' },
-                            { name: 'Conversation', params: { conversationId } },
-                          ],
+        const data = response.notification.request.content.data || {};
+        const { conversationId, productId, isReviewEligible, type } = data;
+
+        if (navigationRef.current) {
+          // Si c'est une invitation à laisser un avis
+          if (isReviewEligible === 'true' || isReviewEligible === true || type === 'review_invitation') {
+            if (productId) {
+              console.log('📱 Notification avis, navigation vers produit:', productId);
+              navigationRef.current.navigate('ProductDetail', {
+                productId,
+                scrollToReviewForm: true,
+              });
+              return;
+            }
+          }
+
+          // Sinon, navigation vers la conversation
+          if (conversationId) {
+            console.log('📱 Notification tapée, navigation vers conversation:', conversationId);
+            navigationRef.current.dispatch(
+              CommonActions.reset({
+                index: 0,
+                routes: [
+                  {
+                    name: 'MainTabs',
+                    state: {
+                      index: 3,
+                      routes: [
+                        { name: 'Home' },
+                        { name: 'Favorites' },
+                        { name: 'Publish' },
+                        {
+                          name: 'Messages',
+                          state: {
+                            index: 1,
+                            routes: [
+                              { name: 'MessagesList' },
+                              { name: 'Conversation', params: { conversationId } },
+                            ],
+                          },
                         },
-                      },
-                    ],
+                      ],
+                    },
                   },
-                },
-              ],
-            })
-          );
+                ],
+              })
+            );
+          }
         }
       }
     );

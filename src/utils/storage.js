@@ -17,7 +17,11 @@ const STORAGE_KEYS = {
  */
 export const saveAccessToken = async (token) => {
   try {
-    await SecureStore.setItemAsync(STORAGE_KEYS.ACCESS_TOKEN, token);
+    if (token === null || token === undefined) {
+      throw new Error('Token manquant');
+    }
+
+    await SecureStore.setItemAsync(STORAGE_KEYS.ACCESS_TOKEN, String(token));
   } catch (error) {
     console.error('❌ Erreur sauvegarde token:', error);
   }
@@ -40,7 +44,11 @@ export const getAccessToken = async () => {
  */
 export const saveRefreshToken = async (token) => {
   try {
-    await SecureStore.setItemAsync(STORAGE_KEYS.REFRESH_TOKEN, token);
+    if (token === null || token === undefined) {
+      throw new Error('Refresh token manquant');
+    }
+
+    await SecureStore.setItemAsync(STORAGE_KEYS.REFRESH_TOKEN, String(token));
   } catch (error) {
     console.error('❌ Erreur sauvegarde refresh token:', error);
   }

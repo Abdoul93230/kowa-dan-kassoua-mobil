@@ -334,12 +334,20 @@ export default function MessagesListScreen({ navigation, route }) {
     return (
       <LinearGradient colors={theme.shell} style={styles.container}>
         <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} backgroundColor="transparent" translucent />
-        <View style={[styles.center, { paddingTop: insets.top + 24 }]}> 
+        <View style={[styles.center, { paddingTop: insets.top + 24 }]}>
           <Text style={styles.emptyTitle}>Connexion requise</Text>
           <Text style={styles.emptySubtitle}>Connectez-vous pour lire et envoyer des messages.</Text>
-          <TouchableOpacity style={styles.loginButton} onPress={() => navigation.navigate('Login')}>
+          <TouchableOpacity
+            style={styles.loginButton}
+            onPress={() => navigation.navigate('QuickAuth', { pendingAction: { type: 'messages' }, returnScreen: 'Messages' })}
+          >
             <Text style={styles.loginButtonText}>Se connecter</Text>
           </TouchableOpacity>
+          {/* Bouton Login standard conservé en dormant
+          <TouchableOpacity style={styles.loginButton} onPress={() => navigation.navigate('Login')}>
+            <Text style={styles.loginButtonText}>Se connecter (standard)</Text>
+          </TouchableOpacity>
+          */}
         </View>
       </LinearGradient>
     );

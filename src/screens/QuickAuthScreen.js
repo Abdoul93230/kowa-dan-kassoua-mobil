@@ -8,7 +8,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import {
   View, Text, StyleSheet, TextInput, TouchableOpacity, Image,
   ScrollView, StatusBar, Animated, KeyboardAvoidingView,
-  Platform, ActivityIndicator, Modal,
+  Platform, ActivityIndicator, Modal, Keyboard,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -96,6 +96,8 @@ export default function QuickAuthScreen({ navigation, route }) {
 
   const fadeAnim = useRef(new Animated.Value(1)).current;
   const slideAnim = useRef(new Animated.Value(0)).current;
+  const errorFadeAnim = useRef(new Animated.Value(0)).current;
+  const errorShakeAnim = useRef(new Animated.Value(0)).current;
 
   const animateTransition = (forward = true) => {
     Animated.parallel([
@@ -122,6 +124,27 @@ export default function QuickAuthScreen({ navigation, route }) {
     const currentDigits = normalizePhoneDigits(phone).slice(0, maxDigits);
     setPhone(formatNationalPhone(country, currentDigits));
   }, [country]);
+
+  useEffect(() => {
+    if (!error) {
+      Animated.timing(errorFadeAnim, { toValue: 0, duration: 150, useNativeDriver: true }).start();
+      return;
+    }
+    // Fermer le clavier pour que la bannière soit visible
+    Keyboard.dismiss();
+    // Fade in
+    errorFadeAnim.setValue(0);
+    Animated.timing(errorFadeAnim, { toValue: 1, duration: 200, useNativeDriver: true }).start();
+    // Shake
+    errorShakeAnim.setValue(0);
+    Animated.sequence([
+      Animated.timing(errorShakeAnim, { toValue: 8,  duration: 60, useNativeDriver: true }),
+      Animated.timing(errorShakeAnim, { toValue: -8, duration: 60, useNativeDriver: true }),
+      Animated.timing(errorShakeAnim, { toValue: 6,  duration: 50, useNativeDriver: true }),
+      Animated.timing(errorShakeAnim, { toValue: -6, duration: 50, useNativeDriver: true }),
+      Animated.timing(errorShakeAnim, { toValue: 0,  duration: 40, useNativeDriver: true }),
+    ]).start();
+  }, [error]);
 
   // ── Étape 1 : Vérifier le numéro ──
   const handleCheckPhone = async () => {
@@ -511,15 +534,27 @@ export default function QuickAuthScreen({ navigation, route }) {
             </>
           )}
 
-          {/* ── Erreur ── */}
-          {error ? (
-            <View style={s.errorWrap}>
-              <Text style={s.errorTxt}>⚠ {error}</Text>
-            </View>
-          ) : null}
-
         </Animated.View>
       </ScrollView>
+
+      {/* ── Bannière erreur — toujours visible au-dessus du footer ── */}
+      {error ? (
+        <Animated.View
+          style={[
+            s.errorBanner,
+            {
+              opacity: errorFadeAnim,
+              transform: [{ translateX: errorShakeAnim }],
+            },
+          ]}
+        >
+          <Text style={s.errorBannerIcon}>⚠️</Text>
+          <Text style={s.errorBannerTxt}>{error}</Text>
+          <TouchableOpacity onPress={() => setError('')} style={s.errorBannerClose} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+            <Text style={s.errorBannerCloseTxt}>✕</Text>
+          </TouchableOpacity>
+        </Animated.View>
+      ) : null}
 
       {/* ── FOOTER bouton ── */}
       <View style={[s.footer, { backgroundColor: theme.screen, borderTopColor: theme.divider, paddingBottom: Math.max(insets.bottom, 12) + 4 }]}> 
@@ -753,13 +788,29 @@ const s = StyleSheet.create({
   infoIcon: { fontSize: 20 },
   infoText: { flex: 1, fontSize: 13, color: P.charcoal, lineHeight: 19 },
 
-  // ── Erreur ──
-  errorWrap: {
-    backgroundColor: P.errorSoft, borderRadius: 10,
-    paddingHorizontal: 14, paddingVertical: 10,
-    borderWidth: 1, borderColor: P.errorBorder, marginTop: 8,
+  // ── Bannière erreur flottante ──
+  errorBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginHorizontal: 16,
+    marginBottom: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderRadius: 14,
+    backgroundColor: '#fff1f1',
+    borderWidth: 1.5,
+    borderColor: '#fca5a5',
+    shadowColor: '#ef4444',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.18,
+    shadowRadius: 8,
+    elevation: 5,
   },
-  errorTxt: { fontSize: 13, color: P.error, fontWeight: '600' },
+  errorBannerIcon: { fontSize: 18, lineHeight: 22 },
+  errorBannerTxt:  { flex: 1, fontSize: 13, fontWeight: '600', color: '#b91c1c', lineHeight: 18 },
+  errorBannerClose: { width: 24, height: 24, borderRadius: 12, backgroundColor: '#fee2e2', alignItems: 'center', justifyContent: 'center' },
+  errorBannerCloseTxt: { fontSize: 11, fontWeight: '800', color: '#ef4444' },
 
   // ── Footer ──
   footer:        { paddingHorizontal: 20, paddingTop: 12, backgroundColor: P.white, borderTopWidth: 1, borderTopColor: P.dim },

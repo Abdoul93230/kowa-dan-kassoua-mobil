@@ -40,3 +40,13 @@ export const markReviewHelpful = async (reviewId) => {
     );
   }
 };
+
+export const checkReviewEligibility = async (productId) => {
+  try {
+    const response = await api.get(`/reviews/eligibility/${productId}`);
+    return response.data;
+  } catch (error) {
+    console.error('❌ Erreur vérification éligibilité avis:', error);
+    return { eligible: false, reason: error.response?.data?.message || 'Non éligible' };
+  }
+};

@@ -188,7 +188,7 @@ function PlaceholderScreen({ route, navigation }) {
 
 // ─── Navigation principale avec onglets ───────────────────────────────────────
 function MainTabs() {
-  const { isAuthenticated, token, user } = useAuth();
+  const { isAuthenticated, token, user, loading: authLoading } = useAuth();
   const { isDark, theme } = useAppTheme();
   const insets = useSafeAreaInsets();
   const TAB_HEIGHT = 54 + Math.max(insets.bottom, 6);
@@ -200,7 +200,7 @@ function MainTabs() {
   });
 
   const loadUnreadCount = useCallback(async () => {
-    if (!isAuthenticated) {
+    if (authLoading || !isAuthenticated || !token) {
       setUnreadCount(0);
       return;
     }
@@ -211,7 +211,7 @@ function MainTabs() {
     } catch (error) {
       console.error('Erreur chargement compteur non lus:', error);
     }
-  }, [isAuthenticated]);
+  }, [authLoading, isAuthenticated, token]);
 
   useEffect(() => {
     loadUnreadCount();
@@ -287,6 +287,9 @@ function MainTabs() {
         tabBarItemStyle: {
           paddingTop: 2,
           height: 50,
+          flex: 1,
+          justifyContent: 'center',
+          alignItems: 'center',
         },
         tabBarLabelStyle: {
           display: 'none',
