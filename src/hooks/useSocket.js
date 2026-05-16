@@ -101,8 +101,8 @@ export function useSocket({ enabled = true, token } = {}) {
     emit('message:read', { messageId, conversationId });
   }, [emit]);
 
-  const startTyping = useCallback((conversationId) => {
-    emit('typing:start', { conversationId });
+  const startTyping = useCallback((conversationId, type = 'text') => {
+    emit('typing:start', { conversationId, type });
   }, [emit]);
 
   const stopTyping = useCallback((conversationId) => {

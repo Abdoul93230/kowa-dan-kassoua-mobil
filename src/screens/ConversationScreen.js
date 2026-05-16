@@ -451,6 +451,7 @@ export default function ConversationScreen({ route, navigation }) {
   const [audioStates, setAudioStates] = useState({});
   const [audioTrackWidths, setAudioTrackWidths] = useState({});
   const [typingUsers, setTypingUsers] = useState({});
+  const [typingType, setTypingType] = useState('text');
   const [reviewEligible, setReviewEligible] = useState(false);
   const [checkingReviewEligibility, setCheckingReviewEligibility] = useState(false);
   const [reviewModalVisible, setReviewModalVisible] = useState(false);
@@ -590,7 +591,15 @@ export default function ConversationScreen({ route, navigation }) {
       setMessages((prev) => {
         const alreadyExists = prev.some((m) => String(m.id) === String(message.id));
         if (alreadyExists) return prev;
-        return [...prev, message];
+        // Si le message entrant est un système de clôture/réouverture, on retire tous les messages locaux de clôture (optimistic + permanents locaux)
+        const isClosureSystemMsg = message?.type === 'system' && (
+          String(message?.content || '').includes('clôtur') ||
+          String(message?.content || '').includes('rouverte')
+        );
+        const filtered = isClosureSystemMsg
+          ? prev.filter((m) => !String(m.id || '').startsWith('sys-closure-'))
+          : prev;
+        return [...filtered, message];
       });
 
       if (!isCurrentUserMessage(message, user, currentUserIdSet)) {
@@ -623,10 +632,11 @@ export default function ConversationScreen({ route, navigation }) {
       );
     };
 
-    const onTypingStart = ({ conversationId: payloadConversationId, userId, userName }) => {
+    const onTypingStart = ({ conversationId: payloadConversationId, userId, userName, type }) => {
       if (payloadConversationId !== conversationId) return;
       if (String(userId) === String(currentUserId)) return;
       setTypingUsers((prev) => ({ ...prev, [userId]: userName || 'Quelqu\'un' }));
+      setTypingType(type === 'recording' ? 'recording' : 'text');
     };
 
     const onTypingStop = ({ conversationId: payloadConversationId, userId }) => {
@@ -636,6 +646,7 @@ export default function ConversationScreen({ route, navigation }) {
         delete next[userId];
         return next;
       });
+      setTypingType('text');
     };
     const onConversationUpdated = (payload) => {
       const payloadConversationId = String(payload?.conversationId || payload?.id || '');
@@ -817,6 +828,7 @@ export default function ConversationScreen({ route, navigation }) {
       recordingRef.current = recording;
       setRecordingMs(0);
       setIsRecording(true);
+      if (conversationId) startTyping(conversationId, 'recording');
 
       if (recordingIntervalRef.current) clearInterval(recordingIntervalRef.current);
       recordingIntervalRef.current = setInterval(async () => {
@@ -865,6 +877,7 @@ export default function ConversationScreen({ route, navigation }) {
       recordingIntervalRef.current = null;
       setIsRecording(false);
       setRecordingMs(0);
+      if (conversationId) stopTyping(conversationId);
     }
   };
 
@@ -911,6 +924,7 @@ export default function ConversationScreen({ route, navigation }) {
       setIsRecording(false);
       setRecordingMs(0);
       setSendingVoice(false);
+      if (conversationId) stopTyping(conversationId);
     }
   };
 
@@ -1007,13 +1021,32 @@ export default function ConversationScreen({ route, navigation }) {
           </View>
         </View>
       ),
+      headerRight: canManageOwnerClosure ? () => (
+        <TouchableOpacity
+          onPress={toggleOwnerClosure}
+          disabled={ownerClosureLoading}
+          style={{
+            marginRight: 12,
+            paddingHorizontal: 10,
+            paddingVertical: 5,
+            borderRadius: 6,
+            borderWidth: 1,
+            borderColor: isOwnerClosureActive ? theme.primary || '#4CAF50' : theme.error || '#F44336',
+            opacity: ownerClosureLoading ? 0.5 : 1,
+          }}
+        >
+          <Text style={{ fontSize: 12, color: isOwnerClosureActive ? theme.primary || '#4CAF50' : theme.error || '#F44336', fontWeight: '600' }}>
+            {ownerClosureLoading ? '...' : isOwnerClosureActive ? 'Réouvrir' : 'Clôturer'}
+          </Text>
+        </TouchableOpacity>
+      ) : undefined,
       headerStyle: {
         backgroundColor: theme.surface,
         shadowColor: theme.shadow,
       },
       headerTintColor: theme.text,
     });
-  }, [navigation, peer?.businessName, peer?.name, theme, peerIsOnline, isConnected]);
+  }, [navigation, peer?.businessName, peer?.name, theme, peerIsOnline, isConnected, canManageOwnerClosure, toggleOwnerClosure, ownerClosureLoading, isOwnerClosureActive]);
 
   const onPressAudioMessage = useCallback(
     async (message) => {
@@ -1178,9 +1211,6 @@ export default function ConversationScreen({ route, navigation }) {
     const previousConversation = conversation;
     try {
       setOwnerClosureLoading(true);
-      // optimistic system message (temporary id)
-      const optimisticId = `sys-closure-optimistic-${Date.now()}`;
-      addClosureSystemMessage(true ? !isOwnerClosureActive : isOwnerClosureActive, new Date().toISOString(), optimisticId);
 
       const response = isOwnerClosureActive
         ? await reopenConversationByOwner(conversationId)
@@ -1194,16 +1224,10 @@ export default function ConversationScreen({ route, navigation }) {
 
       if (updatedConversation) {
         setConversation(updatedConversation);
-        try {
-          addClosureSystemMessage(Boolean(updatedConversation.closedByOwner), updatedConversation.closedAt || null);
-        } catch (e) {}
       } else {
         const refreshed = await getConversationById(conversationId);
         if (refreshed?.data) {
           setConversation(refreshed.data);
-          try {
-            addClosureSystemMessage(Boolean(refreshed.data.closedByOwner), refreshed.data.closedAt || null);
-          } catch (e) {}
         }
       }
     } catch (e) {
@@ -1431,7 +1455,7 @@ export default function ConversationScreen({ route, navigation }) {
     }
   }, [conversationId, dealActionLoading, conversation, applyDealTransition]);
 
-  const renderMessage = ({ item, index }) => {
+  const renderMessage = useCallback(({ item, index }) => {
     const prevItem = index > 0 ? messages[index - 1] : null;
     const showDateSeparator = !isSameDay(item?.timestamp, prevItem?.timestamp);
 
@@ -1499,53 +1523,55 @@ export default function ConversationScreen({ route, navigation }) {
                   />
                 </TouchableOpacity>
 
-                <TouchableOpacity
-                  activeOpacity={0.9}
-                  style={styles.audioTrack}
-                  onLayout={(e) => {
-                    const width = e.nativeEvent.layout.width;
-                    setAudioTrackWidths((prev) => ({ ...prev, [messageId]: width }));
-                  }}
-                  onPress={(e) => onSeekAudioMessage(messageId, e)}
-                >
-                  <View style={styles.audioWaveRow}>
-                    {WAVE_BARS.map((bar) => {
-                      const threshold = ((bar + 1) / WAVE_BARS.length) * 100;
-                      const active = progressPct >= threshold;
-                      return (
-                        <View
-                          key={bar}
-                          style={[
-                            styles.audioWaveBar,
-                            { height: 6 + ((bar * 5) % 12) },
-                            active
-                              ? { backgroundColor: mine ? 'rgba(255,255,255,0.92)' : P.orange500 }
-                              : styles.audioWaveBarInactive,
-                          ]}
-                        />
-                      );
-                    })}
-                  </View>
-                  <View
-                    style={[
-                      styles.audioTrackHead,
-                      {
-                        left: `${progressPct}%`,
-                        backgroundColor: mine ? '#fff' : P.orange500,
-                      },
-                    ]}
-                  />
-                </TouchableOpacity>
+                <View style={styles.audioTrackCol}>
+                  <TouchableOpacity
+                    activeOpacity={0.9}
+                    style={styles.audioTrack}
+                    onLayout={(e) => {
+                      const width = e.nativeEvent.layout.width;
+                      setAudioTrackWidths((prev) => ({ ...prev, [messageId]: width }));
+                    }}
+                    onPress={(e) => onSeekAudioMessage(messageId, e)}
+                  >
+                    <View style={styles.audioWaveRow}>
+                      {WAVE_BARS.map((bar) => {
+                        const threshold = ((bar + 1) / WAVE_BARS.length) * 100;
+                        const active = progressPct >= threshold;
+                        return (
+                          <View
+                            key={bar}
+                            style={[
+                              styles.audioWaveBar,
+                              { height: 6 + ((bar * 5) % 12) },
+                              active
+                                ? { backgroundColor: mine ? 'rgba(255,255,255,0.92)' : P.orange500 }
+                                : styles.audioWaveBarInactive,
+                            ]}
+                          />
+                        );
+                      })}
+                    </View>
+                    <View
+                      style={[
+                        styles.audioTrackHead,
+                        {
+                          left: `${progressPct}%`,
+                          backgroundColor: mine ? '#fff' : P.orange500,
+                        },
+                      ]}
+                    />
+                  </TouchableOpacity>
 
-                <View style={styles.audioMetaRow}>
-                  <Ionicons
-                    name="mic"
-                    size={11}
-                    color={mine ? 'rgba(255,255,255,0.88)' : 'rgba(255,255,255,0.7)'}
-                  />
-                  <Text style={[styles.audioTimeText, mine ? styles.messageTextMine : styles.messageTextOther]}>
-                    {formatAudioTime(positionMs)} / {formatAudioTime(durationMs)}
-                  </Text>
+                  <View style={styles.audioMetaRow}>
+                    <Ionicons
+                      name="mic"
+                      size={11}
+                      color={mine ? 'rgba(255,255,255,0.88)' : 'rgba(255,255,255,0.7)'}
+                    />
+                    <Text style={[styles.audioTimeText, mine ? styles.messageTextMine : styles.messageTextOther]}>
+                      {formatAudioTime(positionMs)} / {formatAudioTime(durationMs)}
+                    </Text>
+                  </View>
                 </View>
               </View>
             ) : (
@@ -1557,9 +1583,9 @@ export default function ConversationScreen({ route, navigation }) {
               <Text style={[styles.timeText, mine ? styles.timeTextMine : styles.timeTextOther]}>{formatTime(item.timestamp)}</Text>
               {mine ? (
                 <Ionicons
-                  name={item.read ? 'checkmark-done' : item.delivered ? 'checkmark-done' : 'checkmark'}
-                  size={14}
-                  color={item.read ? '#fde68a' : item.delivered ? 'rgba(255,255,255,0.90)' : 'rgba(255,255,255,0.45)'}
+                  name={item.read || item.delivered ? 'checkmark-done' : 'checkmark'}
+                  size={15}
+                  color={item.read ? (isDark ? P.orange500 : '#facc15') : item.delivered ? 'rgba(255,255,255,0.90)' : 'rgba(255,255,255,0.40)'}
                 />
               ) : null}
             </View>
@@ -1567,7 +1593,7 @@ export default function ConversationScreen({ route, navigation }) {
         </View>
       </View>
     );
-  };
+  }, [messages, user, currentUserIdSet, audioStates, peer, styles, isDark, onPressAudioMessage, onSeekAudioMessage, setAudioTrackWidths]);
 
   if (loading) {
     return (
@@ -1698,7 +1724,9 @@ export default function ConversationScreen({ route, navigation }) {
           ListFooterComponent={
             typingLabel ? (
               <View style={styles.typingWrap}>
-                <Text style={styles.typingText}>{typingLabel} est en train d'ecrire...</Text>
+                <Text style={styles.typingText}>
+                  {typingLabel} {typingType === 'recording' ? 'enregistre un vocal...' : 'est en train d\'écrire...'}
+                </Text>
               </View>
             ) : null
           }
@@ -2147,7 +2175,13 @@ function createStyles(theme, isDark) {
     audioWrap: {
       minWidth: 230,
       maxWidth: 280,
-      gap: 6,
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+      gap: 8,
+    },
+    audioTrackCol: {
+      flex: 1,
+      gap: 4,
     },
     audioPlayBtn: {
       width: 32,
@@ -2155,6 +2189,7 @@ function createStyles(theme, isDark) {
       borderRadius: 16,
       alignItems: 'center',
       justifyContent: 'center',
+      marginTop: -4,
       backgroundColor: theme.overlay,
     },
     audioTrack: {

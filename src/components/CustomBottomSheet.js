@@ -1,12 +1,3 @@
-// ─── CustomBottomSheet v4 ─ MarketHub Niger ───────────────────────────────────
-// FIX CLAVIER : on écoute Keyboard.addListener et on translate le sheet vers
-// le haut de la hauteur du clavier. Zéro KeyboardAvoidingView → zéro compression.
-//
-// USAGE identique à v2 :
-//   <CustomBottomSheet visible={bool} onClose={fn} title="…" footer={<Btn/>}>
-//     {contenu scrollable}
-//   </CustomBottomSheet>
-
 import React, { useEffect, useRef } from 'react';
 import {
   View, Text, Animated, PanResponder, TouchableOpacity,
@@ -30,33 +21,40 @@ export default function CustomBottomSheet({
   bottomOffset = 0,
 }) {
   const { theme } = useAppTheme();
-  const insets    = useSafeAreaInsets();
-  const slideY    = useRef(new Animated.Value(SCREEN_H)).current;
-  const fadeBack  = useRef(new Animated.Value(0)).current;
-  // translateY supplémentaire pour monter le sheet quand le clavier apparaît
-  const keyboardY = useRef(new Animated.Value(0)).current;
-  const rendered  = useRef(false);
+  const insets = useSafeAreaInsets();
 
-  // ── Animation open / close ────────────────────────────────────────────────
+  // Open/close slide animation — useNativeDriver: true (GPU)
+  const slideY = useRef(new Animated.Value(SCREEN_H)).current;
+  const fadeBack = useRef(new Animated.Value(0)).current;
+  const rendered = useRef(false);
+
+  // Keyboard avoidance — useNativeDriver: false (layout props)
+  const bottomAnim = useRef(new Animated.Value(0)).current;
+  const heightAnim = useRef(new Animated.Value(Math.min(maxHeight, SCREEN_H * 0.92))).current;
+
+  const baseHeight = Math.min(maxHeight, SCREEN_H * 0.92);
+
+  // ── Open / close ──────────────────────────────────────────────────────────
   useEffect(() => {
     if (visible) {
       rendered.current = true;
       slideY.setValue(SCREEN_H);
-      keyboardY.setValue(0);
+      bottomAnim.setValue(0);
+      heightAnim.setValue(baseHeight);
       Animated.parallel([
-        Animated.spring(slideY,   { toValue: 0, damping: 24, stiffness: 200, useNativeDriver: true }),
-        Animated.timing(fadeBack, { toValue: 1, duration: 240, useNativeDriver: true }),
+        Animated.spring(slideY,   { toValue: 0, damping: 24, stiffness: 200, useNativeDriver: false }),
+        Animated.timing(fadeBack, { toValue: 1, duration: 240, useNativeDriver: false }),
       ]).start();
     } else {
       Keyboard.dismiss();
       Animated.parallel([
-        Animated.timing(slideY,   { toValue: SCREEN_H, duration: 260, useNativeDriver: true }),
-        Animated.timing(fadeBack, { toValue: 0,        duration: 200, useNativeDriver: true }),
+        Animated.timing(slideY,   { toValue: SCREEN_H, duration: 260, useNativeDriver: false }),
+        Animated.timing(fadeBack, { toValue: 0,        duration: 200, useNativeDriver: false }),
       ]).start(() => { rendered.current = false; });
     }
   }, [visible]);
 
-  // ── Écoute du clavier ─────────────────────────────────────────────────────
+  // ── Keyboard avoidance ────────────────────────────────────────────────────
   useEffect(() => {
     if (!avoidKeyboard) return;
 
@@ -64,27 +62,32 @@ export default function CustomBottomSheet({
     const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
 
     const onShow = (e) => {
-      Animated.timing(keyboardY, {
-        toValue: -e.endCoordinates.height,
-        duration: Platform.OS === 'ios' ? (e.duration || 250) : 200,
-        useNativeDriver: true,
-      }).start();
+      const kbH = e.endCoordinates.height;
+      const dur = Platform.OS === 'ios' ? (e.duration || 250) : 220;
+      // Espace disponible au-dessus du clavier (moins safe area top + marge)
+      const availableH = SCREEN_H - kbH - (insets.top || 0) - 12;
+      const newHeight = Math.min(baseHeight, availableH);
+
+      Animated.parallel([
+        Animated.timing(bottomAnim, { toValue: kbH, duration: dur, useNativeDriver: false }),
+        Animated.timing(heightAnim, { toValue: newHeight, duration: dur, useNativeDriver: false }),
+      ]).start();
     };
 
     const onHide = (e) => {
-      Animated.timing(keyboardY, {
-        toValue: 0,
-        duration: Platform.OS === 'ios' ? (e.duration || 200) : 180,
-        useNativeDriver: true,
-      }).start();
+      const dur = Platform.OS === 'ios' ? (e.duration || 200) : 180;
+      Animated.parallel([
+        Animated.timing(bottomAnim, { toValue: 0,          duration: dur, useNativeDriver: false }),
+        Animated.timing(heightAnim, { toValue: baseHeight,  duration: dur, useNativeDriver: false }),
+      ]).start();
     };
 
     const subShow = Keyboard.addListener(showEvent, onShow);
     const subHide = Keyboard.addListener(hideEvent, onHide);
     return () => { subShow.remove(); subHide.remove(); };
-  }, [avoidKeyboard]);
+  }, [avoidKeyboard, baseHeight, insets.top]);
 
-  // ── Swipe-to-close (handle uniquement) ───────────────────────────────────
+  // ── Swipe-to-close ────────────────────────────────────────────────────────
   const pan = useRef(PanResponder.create({
     onStartShouldSetPanResponder: () => true,
     onMoveShouldSetPanResponder:  (_, { dy }) => dy > 4,
@@ -99,8 +102,8 @@ export default function CustomBottomSheet({
         onClose();
       } else {
         Animated.parallel([
-          Animated.spring(slideY,   { toValue: 0, damping: 24, stiffness: 220, useNativeDriver: true }),
-          Animated.timing(fadeBack, { toValue: 1, duration: 180, useNativeDriver: true }),
+          Animated.spring(slideY,   { toValue: 0, damping: 24, stiffness: 220, useNativeDriver: false }),
+          Animated.timing(fadeBack, { toValue: 1, duration: 180, useNativeDriver: false }),
         ]).start();
       }
     },
@@ -108,32 +111,31 @@ export default function CustomBottomSheet({
 
   if (!visible && !rendered.current) return null;
 
-  const sheetH  = Math.min(maxHeight, SCREEN_H * 0.92);
   const safeBot = Math.max(insets.bottom, 16) + bottomOffset;
 
   return (
-    <View style={[StyleSheet.absoluteFill, s.root, (title==="Choisir une ville" || title==="Indicatif du pays") && { marginBottom: 40 }]} pointerEvents={visible ? 'auto' : 'none'}>
-
+    <View
+      style={[StyleSheet.absoluteFill, s.root, (title === 'Choisir une ville' || title === 'Indicatif du pays') && { marginBottom: 40 }]}
+      pointerEvents={visible ? 'auto' : 'none'}
+    >
       {/* Backdrop */}
       <Animated.View style={[s.backdrop, { opacity: fadeBack }]}>
         <TouchableOpacity style={StyleSheet.absoluteFill} onPress={onClose} activeOpacity={1} />
       </Animated.View>
 
-      {/* Sheet : slide depuis le bas + monte avec le clavier */}
+      {/* Sheet */}
       <Animated.View
         style={[
           s.sheet,
           { backgroundColor: theme.surface },
           {
-            height: sheetH,
-            transform: [
-              { translateY: slideY },    // animation open/close + swipe
-              { translateY: keyboardY }, // monte quand le clavier apparaît
-            ],
+            bottom: bottomAnim,
+            height: heightAnim,
+            transform: [{ translateY: slideY }],
           },
         ]}
       >
-        {/* Handle swipeable */}
+        {/* Handle */}
         <View {...pan.panHandlers} style={s.handleZone} hitSlop={{ top: 8, bottom: 8 }}>
           <View style={[s.handle, { backgroundColor: theme.divider }]} />
         </View>
@@ -155,18 +157,18 @@ export default function CustomBottomSheet({
 
         <View style={[s.hairline, { backgroundColor: theme.divider }]} />
 
-        {/* Scroll — flex:1 : prend TOUT l'espace entre header et footer */}
+        {/* Contenu scrollable — flex:1 absorbe tout l'espace restant */}
         <ScrollView
           style={s.scroll}
           contentContainerStyle={s.scrollPad}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
-          bounces
+          bounces={false}
         >
           {children}
         </ScrollView>
 
-        {/* Footer — jamais compressé, toujours visible */}
+        {/* Footer */}
         {footer ? (
           <View style={[s.footer, { paddingBottom: safeBot, backgroundColor: theme.surface }]}>
             <View style={[s.footerLine, { backgroundColor: theme.divider }]} />
@@ -175,29 +177,25 @@ export default function CustomBottomSheet({
         ) : (
           <View style={{ height: Math.max(insets.bottom, 24), flexShrink: 0 }} />
         )}
-
       </Animated.View>
     </View>
   );
 }
 
 const s = StyleSheet.create({
-  root: { zIndex: 999, elevation: 999, },
+  root: { zIndex: 999, elevation: 999 },
 
   backdrop: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: 'rgba(12, 10, 8, 0.60)',
   },
 
-  // Sheet ancré en bas via position absolute
   sheet: {
     position: 'absolute',
-    bottom: 0,
     left: 0,
     right: 0,
     borderTopLeftRadius: 30,
     borderTopRightRadius: 30,
-    // Colonne flex stricte : scroll(flex:1) + footer(flexShrink:0)
     flexDirection: 'column',
     overflow: 'hidden',
     shadowColor: '#000',
@@ -207,7 +205,6 @@ const s = StyleSheet.create({
     elevation: 32,
   },
 
-  // Handle
   handleZone: {
     alignItems: 'center',
     paddingTop: 14,
@@ -218,10 +215,8 @@ const s = StyleSheet.create({
     width: 42,
     height: 4,
     borderRadius: 2,
-    backgroundColor: 'rgba(0,0,0,0.11)',
   },
 
-  // Header
   header: {
     flexShrink: 0,
     flexDirection: 'row',
@@ -239,27 +234,23 @@ const s = StyleSheet.create({
   closeWrap: { flexShrink: 0, marginLeft: 12 },
   closeChip: {
     width: 30, height: 30, borderRadius: 15,
-    backgroundColor: 'rgba(0,0,0,0.07)',
     alignItems: 'center', justifyContent: 'center',
   },
-  closeTxt: { fontSize: 12, fontWeight: '800', color: P.charcoal, lineHeight: 14 },
+  closeTxt: { fontSize: 12, fontWeight: '800', lineHeight: 14 },
 
   hairline: {
     flexShrink: 0,
     height: StyleSheet.hairlineWidth,
-    backgroundColor: 'rgba(0,0,0,0.09)',
   },
 
-  // Scroll — DOIT avoir flex:1
-  scroll:    { flex: 1 },
+  scroll: { flex: 1 },
   scrollPad: {
     paddingHorizontal: 22,
     paddingTop: 22,
     paddingBottom: 16,
   },
 
-  // Footer
-  footer:      { flexShrink: 0, backgroundColor: P.white },
+  footer:      { flexShrink: 0 },
   footerLine:  {
     height: StyleSheet.hairlineWidth,
     marginHorizontal: 22,

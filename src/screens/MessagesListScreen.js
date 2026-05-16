@@ -306,7 +306,7 @@ export default function MessagesListScreen({ navigation, route }) {
                 <Ionicons
                   name={lastMessage?.read || lastMessage?.delivered ? 'checkmark-done' : 'checkmark'}
                   size={14}
-                  color={lastMessage?.read ? P.orange500 : 'rgba(255,255,255,0.62)'}
+                  color={lastMessage?.read ? P.orange500 : isDark ? 'rgba(255,255,255,0.62)' : 'rgba(0,0,0,0.35)'}
                 />
               </View>
             ) : null}
