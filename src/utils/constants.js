@@ -5,10 +5,10 @@ import { COLORS } from '../theme/colors';
 // URL de l'API backend
 // En développement, utiliser l'IP locale de votre machine (pas localhost)
 // Exemple: si backend sur http://localhost:5000, utiliser http://192.168.1.X:5000
-export const API_BASE_URL = 'https://kowa-dan-kassoua-backend.onrender.com/api'; // À MODIFIER avec votre IP
+export const API_BASE_URL = 'https://kowa-dan-kassoua-backend-v01.onrender.com/api'; // À MODIFIER avec votre IP
 
 // Configuration Socket.IO
-export const SOCKET_URL = 'https://kowa-dan-kassoua-backend.onrender.com'; // À MODIFIER avec votre IP
+export const SOCKET_URL = 'https://kowa-dan-kassoua-backend-v01.onrender.com'; // À MODIFIER avec votre IP
 
 // Couleurs centralisees (source unique)
 export { COLORS };

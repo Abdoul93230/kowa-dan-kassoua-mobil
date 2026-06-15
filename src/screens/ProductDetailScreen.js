@@ -220,9 +220,9 @@ function SellerCard({ seller, onPress, isService, appTheme }) {
           </View>
           <Text style={[s.sellerLoc, { color: appTheme.textMuted }]}>📍 {getCityName(seller.location)}</Text>
           <View style={s.ratingRow}>
-            <Text style={s.ratingStars}>{'★'.repeat(Math.round(seller.sellerStats?.rating || 0))}</Text>
-            <Text style={[s.ratingNum, { color: appTheme.text }]}>{seller.sellerStats?.rating?.toFixed(1) || '0.0'}</Text>
-            <Text style={[s.ratingCount, { color: appTheme.textMuted }]}>({seller.sellerStats?.totalReviews || 0} avis)</Text>
+            <Text style={s.ratingStars}>{'★'.repeat(Math.round(seller.rating || 0))}</Text>
+            <Text style={[s.ratingNum, { color: appTheme.text }]}>{Number(seller.rating || 0).toFixed(1)}</Text>
+            <Text style={[s.ratingCount, { color: appTheme.textMuted }]}>({seller.totalReviews || 0} avis)</Text>
           </View>
         </View>
 
