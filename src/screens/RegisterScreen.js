@@ -1,11 +1,11 @@
-// ─── RegisterScreen v2 PREMIUM ─ MarketHub Niger ─────────────────────────────
+// ─── RegisterScreen v2 PREMIUM ─ TakTak Niger ─────────────────────────────
 // Micro-étapes animées — une question à la fois, ultra user-friendly
 
 import React, { useState, useRef, useEffect } from 'react';
 import {
   View, Text, StyleSheet, TextInput, TouchableOpacity,
   KeyboardAvoidingView, Platform, ActivityIndicator,
-  Animated, Modal, ScrollView, StatusBar,
+  Animated, Modal, ScrollView, StatusBar, Image,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -300,10 +300,7 @@ export default function RegisterScreen({ navigation }) {
           </TouchableOpacity>
 
           <View style={s.headerCenter}>
-            <LinearGradient colors={[P.orange500, P.orange700]} style={s.logoMini}>
-              <Text style={s.logoMiniTxt}>M</Text>
-            </LinearGradient>
-            <Text style={[s.headerBrand, { color: theme.text }]}>MarketHub</Text>
+            <Image source={require('../../Branding/flogo-removebg-preview.png')} style={{ height: 32, width: 120, resizeMode: 'contain' }} />
           </View>
 
           <TouchableOpacity onPress={() => navigation.navigate('Login')} style={[s.loginLink, { borderColor: theme.border, backgroundColor: theme.glass }]}>

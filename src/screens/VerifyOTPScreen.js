@@ -1,4 +1,4 @@
-// ─── VerifyOTPScreen v2 PREMIUM ─ MarketHub Niger ────────────────────────────
+// ─── VerifyOTPScreen v2 PREMIUM ─ TakTak Niger ────────────────────────────
 // Vérification OTP — design cohérent, épuré, user-friendly
 
 import React, { useState, useEffect, useRef } from 'react';
@@ -247,7 +247,7 @@ export default function VerifyOTPScreen({ navigation, route }) {
             <LinearGradient colors={[P.orange500, P.orange700]} style={s.logoMini}>
               <Text style={s.logoMiniTxt}>M</Text>
             </LinearGradient>
-            <Text style={[s.headerBrand, { color: theme.text }]}>MarketHub</Text>
+            <Text style={[s.headerBrand, { color: theme.text }]}>TakTak</Text>
           </View>
 
           <View style={{ width: 38 }} />

@@ -1,4 +1,4 @@
-// ─── FavoritesScreen — MarketHub Niger ──────────────────────────────────────
+// ─── FavoritesScreen — TakTak Niger ──────────────────────────────────────
 // Version premium redesign — moderne, bling-bling, engageant
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
@@ -243,11 +243,11 @@ const EmptyState = ({ type, onAction }) => {
       </Animated.View>
 
       <Text style={s.emptyTitle}>
-        {type === 'auth' ? 'Connectez-vous' : 'Aucun favori'}
+        {type === 'auth' ? 'Vos coups de cœur' : 'Aucun favori'}
       </Text>
       <Text style={s.emptyDesc}>
         {type === 'auth'
-          ? 'Sauvegardez vos annonces préférées et retrouvez-les ici.'
+          ? 'Connectez-vous pour sauvegarder vos annonces préférées et les retrouver à tout moment.'
           : 'Parcourez les annonces et cliquez sur ♡ pour les ajouter.'}
       </Text>
 
@@ -259,7 +259,7 @@ const EmptyState = ({ type, onAction }) => {
           style={s.emptyBtn}
         >
           <Text style={s.emptyBtnTxt}>
-            {type === 'auth' ? 'Continuer →' : 'Explorer les annonces →'}
+            {type === 'auth' ? 'Se connecter' : 'Explorer les annonces →'}
           </Text>
         </LinearGradient>
       </TouchableOpacity>
@@ -394,7 +394,7 @@ export default function FavoritesScreen({ navigation }) {
 
         <View style={s.headerTop}>
           <View>
-            <Text style={[s.headerEyebrow, { color: isDark ? P.amber : theme.textMuted }]}>MarketHub Niger</Text>
+            <Text style={[s.headerEyebrow, { color: isDark ? P.amber : theme.textMuted }]}>TakTak Niger</Text>
             <Text style={[s.headerTitle, { color: theme.text }]}>Mes Favoris</Text>
           </View>
           <View style={s.headerBadge}>
@@ -423,7 +423,6 @@ export default function FavoritesScreen({ navigation }) {
       item={item}
       index={index}
       onPress={() => {
-        console.log('Navigating to product detail for:', item);
         openDetail(item)}}
       onRemove={handleRemoveFavorite}
     />

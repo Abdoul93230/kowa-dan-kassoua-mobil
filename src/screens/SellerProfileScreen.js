@@ -1,4 +1,4 @@
-﻿// ─── SellerProfileScreen — MarketHub Niger ────────────────────────────────────
+﻿// ─── SellerProfileScreen — TakTak Niger ────────────────────────────────────
 // Profil public d'un vendeur avec ses annonces
 
 import React, { useState, useEffect, useRef } from 'react';
@@ -215,9 +215,11 @@ export default function SellerProfileScreen({ route, navigation }) {
     return (
       <View style={{ flex: 1 }}>
         <LinearGradient colors={[P.charcoal, P.brown]} style={s.loadScreen}>
-          <View style={s.loadLogoBox}><Text style={s.loadLogoTxt}>M</Text></View>
-          <Text style={s.loadBrand}>MarketHub</Text>
-          <ActivityIndicator size="large" color={P.cream} style={{ marginTop: 24 }} />
+          <Image
+            source={require('../../Branding/flogo-removebg-preview.png')}
+            style={{ width: 160, height: 160, resizeMode: 'contain' }}
+          />
+          <ActivityIndicator size="large" color={P.cream} style={{ marginTop: 40 }} />
         </LinearGradient>
       </View>
     );

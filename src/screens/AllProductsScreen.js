@@ -1,4 +1,4 @@
-﻿// ─── AllProductsScreen v2 PREMIUM ─ MarketHub Niger ──────────────────────────
+﻿// ─── AllProductsScreen v2 PREMIUM ─ TakTak Niger ──────────────────────────
 // Layout éditorial : Hero card + grille 2 col · Header shrink au scroll
 // Filtre prix slider · Favoris · Animations staggerées · 100% tokens P.*
 
@@ -167,7 +167,7 @@ function HeroCard({ item, onPress, isFav, onFavToggle, fadeAnim }) {
         <View style={h.card}>
           {/* Image */}
           <Image
-            source={{ uri: item.images?.[0] || 'https://via.placeholder.com/400x220/F5E6C8/C1440E?text=MarketHub' }}
+            source={{ uri: item.images?.[0] || 'https://via.placeholder.com/400x220/F5E6C8/C1440E?text=TakTak' }}
             style={h.img}
             resizeMode="cover"
           />
@@ -688,12 +688,12 @@ export default function AllProductsScreen({ route, navigation }) {
   if (loading) {
     return (
       <View style={s.loadScreen}>
-        <LinearGradient colors={theme.loadScreenColors} style={s.loadInner}>
-          <LinearGradient colors={theme.loadLogoColors} style={s.loadLogoBox}>
-            <Text style={[s.loadLogoTxt, { color: isServicePage ? P.white : P.brown }]}>M</Text>
-          </LinearGradient>
-          <Text style={[s.loadBrand, { color: theme.loadBrandColor }]}>MarketHub</Text>
-          <ActivityIndicator size="large" color={theme.accent} style={{ marginTop: 24 }} />
+        <LinearGradient colors={theme.loadScreenColors} style={[s.loadInner, { justifyContent: 'center', alignItems: 'center' }]}>
+          <Image
+            source={require('../../Branding/flogo-removebg-preview.png')}
+            style={{ width: 160, height: 160, resizeMode: 'contain' }}
+          />
+          <ActivityIndicator size="large" color={theme.accent} style={{ marginTop: 40 }} />
         </LinearGradient>
       </View>
     );

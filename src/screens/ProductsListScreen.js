@@ -1,4 +1,4 @@
-﻿// ─── ProductsListScreen v3 PREMIUM ─ MarketHub Niger ─────────────────────────
+﻿// ─── ProductsListScreen v3 PREMIUM ─ TakTak Niger ─────────────────────────
 // Redesign bling-bling — moderne, engageant, irrésistible
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
@@ -465,17 +465,12 @@ export default function ProductsListScreen({ navigation }) {
   // ─── Loading screen ────────────────────────────────────────────────────────
   if (loading) {
     return (
-      <LinearGradient colors={theme.shell} style={s.loadScreen}>
+      <LinearGradient colors={theme.shell} style={[s.loadScreen, { justifyContent: 'center', alignItems: 'center' }]}>
         <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} backgroundColor="transparent" translucent />
-        <View style={s.loadLogoWrap}>
-          <LinearGradient colors={[P.orange500, P.orange700]} style={s.loadLogoBox}>
-            <Text style={s.loadLogoTxt}>M</Text>
-          </LinearGradient>
-          {/* Anneau décoratif */}
-          <View style={s.loadRing} />
-        </View>
-        <Text style={[s.loadBrand, { color: theme.text }]}>MarketHub</Text>
-        <Text style={[s.loadSlogan, { color: theme.textMuted }]}>Kowa Dan Kassoua · Niger</Text>
+        <Image
+          source={require('../../Branding/flogo-removebg-preview.png')}
+          style={{ width: 160, height: 160, resizeMode: 'contain' }}
+        />
         <ActivityIndicator size="large" color={P.amber} style={{ marginTop: 40 }} />
       </LinearGradient>
     );
@@ -514,14 +509,11 @@ export default function ProductsListScreen({ navigation }) {
 
             {/* ── Barre marque ── */}
             <View style={s.brandBar}>
-              <LinearGradient colors={[P.orange500, P.orange700]} style={s.logoBox}>
-                <Text style={s.logoTxt}>M</Text>
-              </LinearGradient>
-              <View style={{ flex: 1 }}>
-                <Text style={[s.brandName, { color: theme.text }]}>MarketHub</Text>
-                <Text style={[s.brandSub, { color: theme.textMuted }]}>Kowa Dan Kassoua · Niger</Text>
-              </View>
-              <TouchableOpacity
+              <Image
+                source={require('../../Branding/flogo-removebg-preview.png')}
+                style={{ width: 44, height: 44, resizeMode: 'contain' }}
+              />
+              {/* <TouchableOpacity
                 style={[s.notifBox, { backgroundColor: theme.cardSoft, borderColor: theme.border }]}
                 onPress={() => {
                   if (!isAuthenticated) {
@@ -533,7 +525,7 @@ export default function ProductsListScreen({ navigation }) {
                     navigation.navigate('Messages')
                   }
                 }}
-              >
+              > */}
 
 
 
@@ -547,24 +539,21 @@ export default function ProductsListScreen({ navigation }) {
 
 
 
-                <Text style={{ fontSize: 20 }}>🔔</Text>
+                {/* <Text style={{ fontSize: 20 }}>🔔</Text>
                 {unreadCount > 0 && <PulseBadge text={String(unreadCount)} />}
-              </TouchableOpacity>
+              </TouchableOpacity> */}
             </View>
 
             {/* ── Accroche ── */}
-            <View style={s.heroTextWrap}>
+            {/* <View style={s.heroTextWrap}>
                   <Text style={[s.heroH1, { color: theme.text }]}>
                 Trouvez, contactez,{'\n'}
                 <Text style={s.heroH1Accent}>concluez.</Text>
               </Text>
-              {/* <Text style={s.heroH2}>
-                La place de marché du Niger — entre particuliers et professionnels.
-              </Text> */}
-            </View>
+            </View> */}
 
             {/* ── Ticker live ── */}
-            <StatsTicker stats={platformStats} isDark={isDark} theme={theme} />
+            {/* <StatsTicker stats={platformStats} isDark={isDark} theme={theme} /> */}
 
             {/* ── Barre de recherche ── */}
             <View style={s.searchBar}>
@@ -889,7 +878,7 @@ export default function ProductsListScreen({ navigation }) {
             CONFIANCE
         ═══════════════════════════════════════════════════════════════════ */}
         <View style={[s.trustSection, { backgroundColor: isDark ? '#374151' : theme.surfaceAlt }]}> 
-          <SectionHeader title="Pourquoi MarketHub ?" light={isDark} />
+          <SectionHeader title="Pourquoi TakTak ?" light={isDark} />
           <ScrollView
             horizontal
             showsHorizontalScrollIndicator={false}
@@ -987,7 +976,7 @@ const s = StyleSheet.create({
   deco3: { position: 'absolute', top: 80, right: 60, width: 60, height: 60, borderRadius: 30, backgroundColor: 'rgba(236,90,19,0.08)' },
 
   // Brand bar
-  brandBar: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 16 },
+  brandBar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-start', gap: 10, marginBottom: 16 },
   logoBox: { width: 42, height: 42, borderRadius: 12, justifyContent: 'center', alignItems: 'center', shadowColor: P.terra, shadowOpacity: 0.4, shadowOffset: { width: 0, height: 4 }, shadowRadius: 10, elevation: 8 },
   logoTxt: { fontSize: 23, fontWeight: '900', color: P.white },
   brandName: { fontSize: 17, fontWeight: '800', color: P.white, letterSpacing: -0.4 },

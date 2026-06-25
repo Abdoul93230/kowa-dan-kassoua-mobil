@@ -206,11 +206,13 @@ export default function ProfileScreen({ navigation }) {
                   <Text style={s.loginBtnTxt}>Se connecter</Text>
                 </LinearGradient>
               </TouchableOpacity>
-              {/* Bouton standard conservé en dormant — peut être réactivé si besoin
-              <TouchableOpacity style={s.registerBtn} onPress={() => navigation.navigate('Register')} activeOpacity={0.88}>
+              <TouchableOpacity
+                style={s.registerBtn}
+                onPress={() => navigation.navigate('QuickAuth', { pendingAction: { type: 'profile' }, returnScreen: 'Profile' })}
+                activeOpacity={0.88}
+              >
                 <Text style={s.registerBtnTxt}>Créer un compte</Text>
               </TouchableOpacity>
-              */}
             </View>
           </View>
         </ScrollView>

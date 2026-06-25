@@ -1,7 +1,7 @@
-// ─── PublishScreen v2 PREMIUM ─ MarketHub Niger ───────────────────────────────
+// ─── PublishScreen v2 PREMIUM ─ TakTak Niger ───────────────────────────────
 // Formulaire de publication — design cohérent, épuré, 3 étapes
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
   TextInput, Image, ActivityIndicator, KeyboardAvoidingView,
@@ -25,6 +25,7 @@ const iconToEmoji = {
   Smartphone:'📱', UtensilsCrossed:'🍔', Home:'🏠', Car:'🚗', Shirt:'👕',
   Wrench:'🔧', Laptop:'💻', Dumbbell:'🏋️', Baby:'👶', PawPrint:'🐾',
   Book:'📚', Palette:'🎨', Briefcase:'💼', Gamepad2:'🎮', HardHat:'⛑️', Package:'📦',
+  MoreHorizontal:'•••',
 };
 const getEmoji = (icon) => iconToEmoji[icon] || '📦';
 const CATEGORY_CARD_GAP = 8;
@@ -154,6 +155,7 @@ export default function PublishScreen({ navigation, route }) {
   const editItemId = editItem?._id || editItem?.id || '';
   const isEditing = Boolean(editItemId);
 
+  const scrollRef = useRef(null);
   const [step,       setStep]       = useState(1);
   const [categories, setCategories] = useState([]);
   const [loadingCats,setLoadingCats]= useState(true);
@@ -341,8 +343,9 @@ export default function PublishScreen({ navigation, route }) {
     return Object.keys(e).length === 0;
   };
 
-  const next = () => validate(step) && setStep(s => s + 1);
-  const prev = () => setStep(s => s - 1);
+  const scrollToTop = () => scrollRef.current?.scrollTo({ y: 0, animated: true });
+  const next = () => { if (validate(step)) { setStep(s => s + 1); scrollToTop(); } };
+  const prev = () => { setStep(s => s - 1); scrollToTop(); };
 
   const resetPublishState = () => {
     setForm({
@@ -414,22 +417,15 @@ export default function PublishScreen({ navigation, route }) {
             data.images = imagesB64;
             await createProduct(data);
           }
-          setAlert({
-            visible: true,
-            type: 'success',
-            title: 'Succès 🎉',
-            message: isEditing ? 'Annonce mise à jour avec succès' : 'Annonce publiée avec succès',
-            buttons: [{
-              text: 'OK',
-              onPress: () => {
-                resetPublishState();
-                navigation.navigate('MainTabs', {
-                  screen: 'Profile',
-                  params: { screen: 'MyListingsTab' },
-                });
-              }
-            }],
-          });
+          resetPublishState();
+          if (isEditing) {
+            navigation.navigate('ProductDetail', { productId: editItemId });
+          } else {
+            navigation.navigate('MainTabs', {
+              screen: 'Profile',
+              params: { screen: 'MyListingsTab' },
+            });
+          }
         } catch (e) {
           setAlert({
             visible: true,
@@ -477,10 +473,14 @@ export default function PublishScreen({ navigation, route }) {
           text: 'Super !',
           onPress: () => {
             resetPublishState();
-            navigation.navigate('MainTabs', {
-              screen: 'Profile',
-              params: { screen: 'MyListingsTab' },
-            });
+            if (draftForm.editItemId) {
+              navigation.navigate('ProductDetail', { productId: draftForm.editItemId });
+            } else {
+              navigation.navigate('MainTabs', {
+                screen: 'Profile',
+                params: { screen: 'MyListingsTab' },
+              });
+            }
           }
         }],
       });
@@ -565,7 +565,7 @@ export default function PublishScreen({ navigation, route }) {
         <View style={[s.headerAccent, { backgroundColor: accent }, isService && d.headerAccent]} />
         <View style={s.headerRow}>
           <View>
-            <Text style={[s.headerEye, { color: theme.textMuted }]}>MarketHub Niger</Text>
+            <Text style={[s.headerEye, { color: theme.textMuted }]}>TakTak Niger</Text>
             <Text style={[s.headerTitle, { color: theme.text }]}>Publier une annonce</Text>
           </View>
           <View style={[s.stepBadge, { backgroundColor: theme.glass, borderColor: theme.border }]}>
@@ -616,6 +616,7 @@ export default function PublishScreen({ navigation, route }) {
 
       {/* ── SCROLL ─────────────────────────────────────────────────────── */}
       <ScrollView
+        ref={scrollRef}
         style={{flex:1}}
         contentContainerStyle={[s.scroll, { paddingBottom: keyboardVisible ? 20 : 24 }]}
         keyboardShouldPersistTaps="handled"

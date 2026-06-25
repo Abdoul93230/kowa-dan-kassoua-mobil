@@ -1,4 +1,4 @@
-﻿// ─── MyListingsScreen v2 PREMIUM ─ MarketHub Niger ───────────────────────────
+﻿// ─── MyListingsScreen v2 PREMIUM ─ TakTak Niger ───────────────────────────
 // Design cohérent avec l'app — ardoise, orange, épuré
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
@@ -492,7 +492,7 @@ export default function MyListingsScreen({ navigation }) {
           {/* Top row */}
           <View style={s.headerTop}>
             <View>
-              <Text style={[s.headerEyebrow, { color: isDark ? P.amber : theme.textMuted }]}>MarketHub Niger</Text>
+              <Text style={[s.headerEyebrow, { color: isDark ? P.amber : theme.textMuted }]}>TakTak Niger</Text>
               <Text style={[s.headerTitle, { color: theme.text }]}>Mes Annonces</Text>
             </View>
             <TouchableOpacity

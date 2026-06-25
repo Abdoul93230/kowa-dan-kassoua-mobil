@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "frontend-mobile",
+    "name": "TakTak",
     "slug": "frontend-mobile",
     "version": "1.0.0",
     "runtimeVersion": {
@@ -12,9 +12,9 @@
     "splash": {
       "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
-      "backgroundColor": "#f6f7fb",
+      "backgroundColor": "#FFFFFF",
       "dark": {
-        "backgroundColor": "#111827"
+        "backgroundColor": "#FFFFFF"
       }
     },
     "ios": {
@@ -29,12 +29,7 @@
     "android": {
       "package": "com.kowadankassoua.mobile",
       "googleServicesFile": "./google-services.json",
-      "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
-        "foregroundImage": "./assets/android-icon-foreground.png",
-        "backgroundImage": "./assets/android-icon-background.png",
-        "monochromeImage": "./assets/android-icon-monochrome.png"
-      }
+      "icon": "./assets/icon.png"
     },
     "web": {
       "favicon": "./assets/favicon.png"

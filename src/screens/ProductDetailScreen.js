@@ -1,4 +1,4 @@
-// ─── ProductDetailScreen v3 PREMIUM ─ MarketHub Niger ────────────────────────
+// ─── ProductDetailScreen v3 PREMIUM ─ TakTak Niger ────────────────────────
 // Design irrésistible — sombre, impactant, cohérent avec l'app
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
@@ -513,7 +513,7 @@ export default function ProductDetailScreen({ route, navigation }) {
 
   const handleShare = async () => {
     if (!product) return;
-    await Share.share({ message: `${product.title} — ${product.price ? parseInt(product.price).toLocaleString() + ' FCFA' : 'Prix à discuter'}\nVoir sur MarketHub` });
+    await Share.share({ message: `${product.title} — ${product.price ? parseInt(product.price).toLocaleString() + ' FCFA' : 'Prix à discuter'}\nVoir sur TakTak` });
   };
 
   const handleContact = (type) => {
@@ -621,15 +621,11 @@ export default function ProductDetailScreen({ route, navigation }) {
     return (
       <LinearGradient colors={appTheme.shell} style={s.loadScreen}>
         <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} backgroundColor="transparent" translucent />
-        <View style={s.loadRingWrap}>
-          <LinearGradient colors={isService ? d.sellerAvatarGrad : [P.orange500, P.orange700]} style={[s.loadLogoBox, isService && d.loadLogoBox]}>
-            <Text style={s.loadLogoTxt}>M</Text>
-          </LinearGradient>
-          <View style={[s.loadRing, isService && d.loadRing]} />
-        </View>
-        <Text style={[s.loadBrand, { color: appTheme.text }]}>MarketHub</Text>
-        <Text style={[s.loadSub, { color: appTheme.textMuted }]}>Chargement de l'annonce…</Text>
-        <ActivityIndicator size="large" color={isService ? P.blue100 : P.amber} style={{ marginTop: 36 }} />
+        <Image
+          source={require('../../Branding/flogo-removebg-preview.png')}
+          style={{ width: 160, height: 160, resizeMode: 'contain' }}
+        />
+        <ActivityIndicator size="large" color={isService ? P.blue100 : P.amber} style={{ marginTop: 40 }} />
       </LinearGradient>
     );
   }
@@ -667,7 +663,7 @@ export default function ProductDetailScreen({ route, navigation }) {
       label: 'État',
       value: product.condition === 'new' ? '✨ Neuf' : product.condition === 'used' ? '🔄 Occasion' : '🔧 Reconditionné',
     },
-    !isService && product.quantity && { label: 'Quantité', value: String(product.quantity) },
+    // !isService && product.quantity && { label: 'Quantité', value: String(product.quantity) },
     product.category?.name && { label: 'Catégorie', value: product.category.name },
     product.subcategory     && { label: 'Sous-catégorie', value: product.subcategory },
   ].filter(Boolean);

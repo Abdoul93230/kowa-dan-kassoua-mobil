@@ -34,6 +34,7 @@ const iconToEmoji = {
   Gamepad2: '🎮',
   HardHat: '⛑️',
   Package: '📦',
+  MoreHorizontal: '•••',
 };
 
 const getEmoji = (icon, fallback) => fallback || iconToEmoji[icon] || '📦';

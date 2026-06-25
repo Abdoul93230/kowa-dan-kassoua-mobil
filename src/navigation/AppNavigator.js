@@ -308,17 +308,6 @@ function MainTabs() {
       <Tab.Screen
         name="Favorites"
         component={FavoritesScreen}
-        listeners={({ navigation }) => ({
-          tabPress: (e) => {
-            if (!isAuthenticated) {
-              e.preventDefault();
-              navigation.navigate('QuickAuth', {
-                pendingAction: { type: 'favorites' },
-                returnScreen: 'Favorites',
-              });
-            }
-          },
-        })}
         options={{
           tabBarIcon: ({ focused, color }) => (
             <TabBarIcon name="favorites" focused={focused} color={color} badge={0} />
@@ -337,17 +326,6 @@ function MainTabs() {
       <Tab.Screen
         name="Messages"
         component={MessagesNavigator}
-        listeners={({ navigation }) => ({
-          tabPress: (e) => {
-            if (!isAuthenticated) {
-              e.preventDefault();
-              navigation.navigate('QuickAuth', {
-                pendingAction: { type: 'messages_list' },
-                returnScreen: 'Messages',
-              });
-            }
-          },
-        })}
         options={({ route }) => {
           const routeName = getFocusedRouteNameFromRoute(route) || 'MessagesList';
           const hideTabBar = routeName === 'Conversation';

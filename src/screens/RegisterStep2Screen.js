@@ -1,4 +1,4 @@
-﻿// ─── RegisterStep2Screen v2 PREMIUM ─ MarketHub Niger ────────────────────────
+﻿// ─── RegisterStep2Screen v2 PREMIUM ─ TakTak Niger ────────────────────────
 // Profil vendeur — micro-étapes animées, cohérent avec l'app
 
 import React, { useState, useRef, useEffect } from 'react';
@@ -502,10 +502,7 @@ export default function RegisterStep2Screen({ navigation, route }) {
           </TouchableOpacity>
 
           <View style={s.headerCenter}>
-            <LinearGradient colors={[P.orange500, P.orange700]} style={s.logoMini}>
-              <Text style={s.logoMiniTxt}>M</Text>
-            </LinearGradient>
-            <Text style={[s.headerBrand, { color: theme.text }]}>MarketHub</Text>
+            <Image source={require('../../Branding/flogo-removebg-preview.png')} style={{ height: 32, width: 120, resizeMode: 'contain' }} />
           </View>
 
           <TouchableOpacity onPress={() => navigation.navigate('Login')} style={[s.loginLink, { borderColor: theme.border, backgroundColor: theme.glass }]}>

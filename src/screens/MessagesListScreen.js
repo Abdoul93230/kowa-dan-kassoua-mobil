@@ -334,20 +334,20 @@ export default function MessagesListScreen({ navigation, route }) {
     return (
       <LinearGradient colors={theme.shell} style={styles.container}>
         <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} backgroundColor="transparent" translucent />
-        <View style={[styles.center, { paddingTop: insets.top + 24 }]}>
-          <Text style={styles.emptyTitle}>Connexion requise</Text>
-          <Text style={styles.emptySubtitle}>Connectez-vous pour lire et envoyer des messages.</Text>
+        <View style={[styles.center, { paddingTop: insets.top + 24, paddingHorizontal: 32 }]}>
+          <View style={{ width: 80, height: 80, borderRadius: 40, backgroundColor: isDark ? 'rgba(255,255,255,0.07)' : 'rgba(236,90,19,0.08)', alignItems: 'center', justifyContent: 'center', marginBottom: 20 }}>
+            <Ionicons name="chatbubbles-outline" size={40} color={P.terra} />
+          </View>
+          <Text style={[styles.emptyTitle, { fontSize: 20, marginBottom: 10 }]}>Vos messages</Text>
+          <Text style={[styles.emptySubtitle, { lineHeight: 22, marginBottom: 32 }]}>
+            Connectez-vous pour discuter avec les vendeurs et acheteurs, et retrouver toutes vos conversations.
+          </Text>
           <TouchableOpacity
-            style={styles.loginButton}
+            style={[styles.loginButton, { paddingHorizontal: 36, paddingVertical: 14, borderRadius: 14 }]}
             onPress={() => navigation.navigate('QuickAuth', { pendingAction: { type: 'messages' }, returnScreen: 'Messages' })}
           >
-            <Text style={styles.loginButtonText}>Se connecter</Text>
+            <Text style={[styles.loginButtonText, { fontSize: 16 }]}>Se connecter</Text>
           </TouchableOpacity>
-          {/* Bouton Login standard conservé en dormant
-          <TouchableOpacity style={styles.loginButton} onPress={() => navigation.navigate('Login')}>
-            <Text style={styles.loginButtonText}>Se connecter (standard)</Text>
-          </TouchableOpacity>
-          */}
         </View>
       </LinearGradient>
     );

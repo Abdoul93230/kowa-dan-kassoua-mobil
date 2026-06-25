@@ -1,4 +1,4 @@
-// ─── LoginScreen v2 PREMIUM ─ MarketHub Niger ────────────────────────────────
+// ─── LoginScreen v2 PREMIUM ─ TakTak Niger ────────────────────────────────
 // Design 100% cohérent avec RegisterScreen & VerifyOTPScreen
 // Zéro valeur hex brute — uniquement les tokens MOBILE_COLORS
 
@@ -231,10 +231,7 @@ export default function LoginScreen({ navigation, route }) {
           </TouchableOpacity>
 
           <View style={s.headerCenter}>
-            <LinearGradient colors={[P.orange500, P.orange700]} style={s.logoMini}>
-              <Text style={s.logoMiniTxt}>M</Text>
-            </LinearGradient>
-            <Text style={[s.headerBrand, { color: theme.text }]}>MarketHub</Text>
+            <Image source={require('../../Branding/flogo-removebg-preview.png')} style={{ height: 32, width: 120, resizeMode: 'contain' }} />
           </View>
 
           <TouchableOpacity

@@ -26,7 +26,7 @@ export default function HomeScreen({ navigation }) {
       <View style={styles.content}>
         {/* Header */}
         <View style={styles.header}>
-          <Text style={styles.logo}>🛒 MarketHub</Text>
+          <Text style={styles.logo}>🛒 TakTak</Text>
           <Text style={styles.welcome}>Bienvenue, {user?.name}!</Text>
         </View>
 

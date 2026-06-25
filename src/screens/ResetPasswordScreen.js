@@ -1,4 +1,4 @@
-﻿// ─── ResetPasswordScreen v2 PREMIUM ─ MarketHub Niger ────────────────────────
+﻿// ─── ResetPasswordScreen v2 PREMIUM ─ TakTak Niger ────────────────────────
 // Design 100% cohérent avec RegisterScreen, LoginScreen & ForgotPasswordScreen
 // Zéro valeur hex brute — uniquement les tokens MOBILE_COLORS
 
@@ -6,7 +6,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import {
   View, Text, StyleSheet, TextInput, TouchableOpacity,
   ScrollView, StatusBar, Animated, KeyboardAvoidingView,
-  Platform, ActivityIndicator,
+  Platform, ActivityIndicator, Image,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -145,10 +145,7 @@ export default function ResetPasswordScreen({ navigation, route }) {
           </TouchableOpacity>
 
           <View style={s.headerCenter}>
-            <LinearGradient colors={[P.orange500, P.orange700]} style={s.logoMini}>
-              <Text style={s.logoMiniTxt}>M</Text>
-            </LinearGradient>
-            <Text style={[s.headerBrand, { color: theme.text }]}>MarketHub</Text>
+            <Image source={require('../../Branding/flogo-removebg-preview.png')} style={{ height: 32, width: 120, resizeMode: 'contain' }} />
           </View>
 
           <View style={{ width: 38 }} />

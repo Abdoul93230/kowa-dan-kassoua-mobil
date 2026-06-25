@@ -113,24 +113,20 @@ function StandardIcon({ name, focused, badge }) {
 
   const icon = ICONS[name] || ICONS.profile;
   const iconColor = focused ? P.amber : (isDark ? 'rgba(255,255,255,0.4)' : 'rgba(17,24,39,0.45)');
-  const iconSize = name === 'profile'
-    ? (focused ? 25 : 23)
-    : (focused ? 23 : 21);
+  const iconSize = focused ? 26 : 24;
 
   return (
     <View style={s.iconWrap}>
-      {/* Pill active */}
-      <Animated.View style={[s.iconPill, { opacity: pillAnim }]}>
-        <LinearGradient
-          colors={['rgba(236,90,19,0.18)', 'rgba(255,168,123,0.10)']}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 1 }}
-          style={StyleSheet.absoluteFill}
-        />
-      </Animated.View>
-
-      {/* Icône */}
-      <Animated.View style={{ transform: [{ scale }] }}>
+      <Animated.View style={[s.iconCircle, { transform: [{ scale }] }]}>
+        {/* Pill active */}
+        <Animated.View style={[StyleSheet.absoluteFill, { opacity: pillAnim, borderRadius: 23 }]}>
+          <LinearGradient
+            colors={['rgba(236,90,19,0.18)', 'rgba(255,168,123,0.10)']}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={[StyleSheet.absoluteFill, { borderRadius: 23 }]}
+          />
+        </Animated.View>
         <Feather name={icon.feather} size={iconSize} color={iconColor} />
       </Animated.View>
 
@@ -155,20 +151,19 @@ const s = StyleSheet.create({
 
   // ── Icône standard ──────────────────────────────────────────────────────────
   iconWrap: {
+    alignItems: 'center',
+    justifyContent: 'center',
     width: 54,
-    height: 46,
+    height: 54,
+    marginTop: 10,
+  },
+  iconCircle: {
+    width: 45,
+    height: 45,
+    borderRadius: 23,
     justifyContent: 'center',
     alignItems: 'center',
-    position: 'relative',
-  },
-  iconPill: {
-    position: 'absolute',
-    width: 50,
-    height: 34,
-    borderRadius: 17,
     overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: 'rgba(236,90,19,0.22)',
   },
 
   // ── Badge ────────────────────────────────────────────────────────────────────
