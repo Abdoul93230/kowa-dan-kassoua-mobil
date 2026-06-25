@@ -509,10 +509,12 @@ export default function ProductsListScreen({ navigation }) {
 
             {/* ── Barre marque ── */}
             <View style={s.brandBar}>
-              <Image
-                source={require('../../Branding/flogo-removebg-preview.png')}
-                style={{ width: 44, height: 44, resizeMode: 'contain' }}
-              />
+              <View style={{ overflow: 'hidden', width: 160, height: 44, justifyContent: 'center', alignItems: 'flex-start', marginLeft: -36, marginBottom: -8 }}>
+                <Image
+                  source={require('../../Branding/flogo-removebg-preview.png')}
+                  style={{ width: 160, height: 44, resizeMode: 'contain', transform: [{ scale: 2.0 }] }}
+                />
+              </View>
               {/* <TouchableOpacity
                 style={[s.notifBox, { backgroundColor: theme.cardSoft, borderColor: theme.border }]}
                 onPress={() => {
