@@ -316,6 +316,27 @@ export default function ProductsListScreen({ navigation }) {
   const [selectedLocation, setSelectedLocation] = useState('all');
   const [locationsLoading, setLocationsLoading] = useState(false);
   const [showQuickSearch, setShowQuickSearch] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const searchWidth = useRef(new Animated.Value(0)).current;
+  const searchOpacity = useRef(new Animated.Value(0)).current;
+  const searchInputRef = useRef(null);
+
+  const openSearch = () => {
+    setSearchOpen(true);
+    Animated.parallel([
+      Animated.timing(searchWidth, { toValue: 1, duration: 250, useNativeDriver: false }),
+      Animated.timing(searchOpacity, { toValue: 1, duration: 200, useNativeDriver: false }),
+    ]).start(() => searchInputRef.current?.focus());
+  };
+
+  const closeSearch = () => {
+    searchInputRef.current?.blur();
+    setShowQuickSearch(false);
+    Animated.parallel([
+      Animated.timing(searchWidth, { toValue: 0, duration: 200, useNativeDriver: false }),
+      Animated.timing(searchOpacity, { toValue: 0, duration: 150, useNativeDriver: false }),
+    ]).start(() => { setSearchOpen(false); setSearchQuery(''); });
+  };
   const [platformStats, setPlatformStats] = useState({ totalProducts: 0, totalUsers: 0, totalCities: 0 });
   const [activeSellers, setActiveSellers] = useState([]);
   const [unreadCount, setUnreadCount] = useState(0);
@@ -507,27 +528,59 @@ export default function ProductsListScreen({ navigation }) {
 
           <Animated.View style={{ opacity: fade, transform: [{ translateY: slideY }] }}>
 
-            {/* ── Barre marque ── */}
-            <View style={s.brandBar}>
-              <View style={{ overflow: 'hidden', width: 160, height: 44, justifyContent: 'center', alignItems: 'flex-start', marginLeft: -36, marginBottom: -8 }}>
-                <Image
-                  source={require('../../Branding/flogo-removebg-preview.png')}
-                  style={{ width: 160, height: 44, resizeMode: 'contain', transform: [{ scale: 2.0 }] }}
-                />
-              </View>
-              {/* <TouchableOpacity
-                style={[s.notifBox, { backgroundColor: theme.cardSoft, borderColor: theme.border }]}
-                onPress={() => {
-                  if (!isAuthenticated) {
-                    navigation.navigate('QuickAuth', {
-                      pendingAction: { type: 'messages_list' },
-                      returnScreen: 'Messages',
-                    });
-                  } else {
-                    navigation.navigate('Messages')
-                  }
-                }}
-              > */}
+            {/* ── Barre marque + recherche ── */}
+            <View style={[s.brandBar, { alignItems: 'center' }]}>
+              {/* Logo — caché quand recherche ouverte */}
+              {!searchOpen && (
+                <View style={{ overflow: 'hidden', width: 160, height: 44, justifyContent: 'center', alignItems: 'flex-start', marginLeft: -36, marginBottom: -8, flex: 1 }}>
+                  <Image
+                    source={require('../../Branding/flogo-removebg-preview.png')}
+                    style={{ width: 160, height: 44, resizeMode: 'contain', transform: [{ scale: 2.0 }] }}
+                  />
+                </View>
+              )}
+
+              {/* Barre de recherche animée */}
+              {searchOpen && (
+                <Animated.View style={{ flex: 1, opacity: searchOpacity, flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: -8 }}>
+                  <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', backgroundColor: theme.surface, borderRadius: 10, paddingHorizontal: 9, paddingVertical: 6, borderWidth: 1, borderColor: theme.border }}>
+                    <Text style={{ fontSize: 13, marginRight: 6 }}>🔍</Text>
+                    <TextInput
+                      ref={searchInputRef}
+                      style={[s.searchInput, { color: theme.text, flex: 1 }]}
+                      placeholder="Rechercher une annonce…"
+                      placeholderTextColor={theme.textMuted}
+                      value={searchQuery}
+                      onChangeText={setSearchQuery}
+                      returnKeyType="search"
+                      onSubmitEditing={handleHomeSearch}
+                      autoFocus
+                    />
+                  </View>
+                  {/* Icône filtre */}
+                  <TouchableOpacity
+                    onPress={() => setShowQuickSearch(v => !v)}
+                    style={{ width: 36, height: 36, borderRadius: 10, justifyContent: 'center', alignItems: 'center', backgroundColor: showQuickSearch ? P.terra : theme.surface, borderWidth: 1, borderColor: showQuickSearch ? P.terra : theme.border }}
+                  >
+                    <Feather name="sliders" size={16} color={showQuickSearch ? '#fff' : theme.textMuted} />
+                  </TouchableOpacity>
+                  {/* Fermer */}
+                  <TouchableOpacity
+                    onPress={closeSearch}
+                    style={{ width: 36, height: 36, borderRadius: 10, justifyContent: 'center', alignItems: 'center', backgroundColor: theme.surface, borderWidth: 1, borderColor: theme.border }}
+                  >
+                    <Feather name="x" size={16} color={theme.textMuted} />
+                  </TouchableOpacity>
+                </Animated.View>
+              )}
+
+              {/* Icône loupe */}
+              {!searchOpen && (
+                <TouchableOpacity onPress={openSearch} style={{ padding: 6, marginBottom: -8 }}>
+                  <Feather name="search" size={20} color={theme.text} />
+                </TouchableOpacity>
+              )}
+              {/* <TouchableOpacity ... */}
 
 
 
@@ -557,41 +610,7 @@ export default function ProductsListScreen({ navigation }) {
             {/* ── Ticker live ── */}
             {/* <StatsTicker stats={platformStats} isDark={isDark} theme={theme} /> */}
 
-            {/* ── Barre de recherche ── */}
-            <View style={s.searchBar}>
-                  <View style={[s.searchInner, { backgroundColor: theme.surface, borderColor: theme.border }]}> 
-                <Text style={s.searchIcon}>🔍</Text>
-                <TextInput
-                      style={[s.searchInput, { color: theme.text }]}
-                  placeholder="Rechercher une annonce…"
-                      placeholderTextColor={theme.textMuted}
-                  value={searchQuery}
-                  onChangeText={setSearchQuery}
-                  returnKeyType="search"
-                  onSubmitEditing={handleHomeSearch}
-                />
-              </View>
-              <TouchableOpacity
-                style={s.searchCta}
-                onPress={handleHomeSearch}
-                activeOpacity={0.85}
-              >
-                <LinearGradient colors={[P.orange500, P.orange700]} style={s.searchCtaGrad}>
-                  <Text style={s.searchCtaTxt}>→</Text>
-                </LinearGradient>
-              </TouchableOpacity>
-            </View>
-
-            <TouchableOpacity
-              activeOpacity={0.8}
-              onPress={() => setShowQuickSearch((value) => !value)}
-              style={[s.searchToggle, { backgroundColor: theme.cardSoft, borderColor: theme.border }]}
-            >
-              <Feather name={showQuickSearch ? 'chevron-up' : 'chevron-down'} size={12} color={theme.textMuted} />
-              <Text style={[s.searchToggleTxt, { color: theme.textMuted }]}>
-                {showQuickSearch ? 'Masquer les options' : 'Plus d’options'}
-              </Text>
-            </TouchableOpacity>
+{/* chevron filtres masqué */}
 
             {showQuickSearch && (
               <View style={[s.quickSearchCard, { backgroundColor: theme.cardSoft, borderColor: theme.border }]}> 
