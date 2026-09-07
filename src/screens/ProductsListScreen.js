@@ -13,11 +13,13 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Feather } from '@expo/vector-icons';
 import { CATEGORIES } from '../utils/constants';
 import { apiClient } from '../api/auth';
+import { getCategories } from '../api/categories';
 import { getUnreadCount } from '../api/messaging';
 import { useAuth } from '../contexts/AuthContext';
 import { useAppTheme } from '../contexts/ThemeContext';
 import { useSocket } from '../hooks/useSocket';
 import { MOBILE_COLORS as P } from '../theme/colors';
+import SearchOverlay from '../components/SearchOverlay';
 
 const { width } = Dimensions.get('window');
 
@@ -317,6 +319,13 @@ export default function ProductsListScreen({ navigation }) {
   const [locationsLoading, setLocationsLoading] = useState(false);
   const [showQuickSearch, setShowQuickSearch] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
+  const [selectedType, setSelectedType] = useState('all');
+  const [selectedCategory, setSelectedCategory] = useState(null);
+  const [selectedCondition, setSelectedCondition] = useState('all');
+  const [minPrice, setMinPrice] = useState('');
+  const [maxPrice, setMaxPrice] = useState('');
+  const [apiCategories, setApiCategories] = useState([]);
+  const [categoriesLoading, setCategoriesLoading] = useState(false);
   const searchWidth = useRef(new Animated.Value(0)).current;
   const searchOpacity = useRef(new Animated.Value(0)).current;
   const searchInputRef = useRef(null);
@@ -353,14 +362,26 @@ export default function ProductsListScreen({ navigation }) {
   const handleHomeSearch = useCallback(() => {
     const q = (searchQuery || '').trim();
     const params = {
-      type: 'all',
+      type: selectedType || 'all',
       q,
     };
     if (selectedLocation && selectedLocation !== 'all') {
       params.location = selectedLocation;
     }
+    if (selectedCategory) {
+      params.category = selectedCategory;
+    }
+    if (selectedCondition && selectedCondition !== 'all') {
+      params.condition = selectedCondition;
+    }
+    if (minPrice) {
+      params.minPrice = minPrice;
+    }
+    if (maxPrice) {
+      params.maxPrice = maxPrice;
+    }
     navigation.navigate('AllProducts', params);
-  }, [navigation, searchQuery, selectedLocation]);
+  }, [navigation, searchQuery, selectedLocation, selectedType, selectedCategory, selectedCondition, minPrice, maxPrice]);
 
   const handlePopularSearch = useCallback((value) => {
     setSearchQuery(value);
@@ -457,11 +478,26 @@ export default function ProductsListScreen({ navigation }) {
     }
   };
 
+  const fetchApiCategories = async () => {
+    try {
+      setCategoriesLoading(true);
+      const response = await getCategories();
+      const cats = response?.data || response || [];
+      setApiCategories(Array.isArray(cats) ? cats : []);
+    } catch (e) {
+      console.error('Erreur chargement categories:', e);
+      setApiCategories([]);
+    } finally {
+      setCategoriesLoading(false);
+    }
+  };
+
   useEffect(() => {
     fetchProducts();
     fetchStats();
     fetchSellers();
     fetchLocations();
+    fetchApiCategories();
   }, []);
 
   const onRefresh = useCallback(() => {
@@ -470,6 +506,7 @@ export default function ProductsListScreen({ navigation }) {
     fetchStats();
     fetchSellers();
     fetchLocations();
+    fetchApiCategories();
   }, []);
 
   useFocusEffect(
@@ -479,6 +516,7 @@ export default function ProductsListScreen({ navigation }) {
       fetchStats();
       fetchSellers();
       fetchLocations();
+      fetchApiCategories();
       loadUnreadCount();
     }, [loadUnreadCount])
   );
@@ -613,16 +651,21 @@ export default function ProductsListScreen({ navigation }) {
 {/* chevron filtres masqué */}
 
             {showQuickSearch && (
-              <View style={[s.quickSearchCard, { backgroundColor: theme.cardSoft, borderColor: theme.border }]}> 
+              <View style={[s.quickSearchCard, { backgroundColor: theme.cardSoft, borderColor: theme.border }]}>
                 <View style={s.quickSearchHead}>
                   <View style={s.quickSearchHeadLeft}>
                     <Feather name="sliders" size={11} color={theme.textMuted} />
-                    <Text style={[s.quickSearchTitle, { color: theme.text }]}>Filtres rapides</Text>
+                    <Text style={[s.quickSearchTitle, { color: theme.text }]}>Filtres</Text>
                   </View>
                   <TouchableOpacity
                     activeOpacity={0.8}
                     onPress={() => {
                       setSelectedLocation('all');
+                      setSelectedType('all');
+                      setSelectedCategory(null);
+                      setSelectedCondition('all');
+                      setMinPrice('');
+                      setMaxPrice('');
                       setSearchQuery('');
                     }}
                     style={[s.quickResetBtn, { backgroundColor: theme.surfaceAlt, borderColor: theme.border }]}
@@ -631,65 +674,225 @@ export default function ProductsListScreen({ navigation }) {
                   </TouchableOpacity>
                 </View>
 
-                <ScrollView
-                  horizontal
-                  showsHorizontalScrollIndicator={false}
-                  contentContainerStyle={s.quickRail}
-                >
-                  <TouchableOpacity
-                    activeOpacity={0.85}
-                    onPress={() => setSelectedLocation('all')}
-                    style={[
-                      s.quickChip,
-                      { backgroundColor: theme.surfaceAlt, borderColor: theme.border },
-                      selectedLocation === 'all' && s.quickChipActive,
-                    ]}
-                  >
-                    <Feather name="map-pin" size={10} color={selectedLocation === 'all' ? P.amber : theme.textMuted} />
-                    <Text style={[
-                      s.quickChipTxt,
-                      { color: theme.textMuted },
-                      selectedLocation === 'all' && s.quickChipTxtActive,
-                    ]}>Toutes</Text>
-                  </TouchableOpacity>
+                {/* Type chips */}
+                <View style={s.filterSection}>
+                  <Text style={[s.filterLabel, { color: theme.textMuted }]}>Type</Text>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.quickRail}>
+                    {[
+                      { key: 'all', label: 'Tous' },
+                      { key: 'product', label: 'Produits' },
+                      { key: 'service', label: 'Services' },
+                    ].map((t) => (
+                      <TouchableOpacity
+                        key={t.key}
+                        activeOpacity={0.85}
+                        onPress={() => setSelectedType(t.key)}
+                        style={[
+                          s.quickChip,
+                          { backgroundColor: theme.surfaceAlt, borderColor: theme.border },
+                          selectedType === t.key && s.quickChipActive,
+                        ]}
+                      >
+                        <Text style={[
+                          s.quickChipTxt,
+                          { color: theme.textMuted },
+                          selectedType === t.key && s.quickChipTxtActive,
+                        ]}>{t.label}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </ScrollView>
+                </View>
 
-                  {(locations.slice(0, 3)).map((city) => (
+                {/* Categories */}
+                <View style={s.filterSection}>
+                  <Text style={[s.filterLabel, { color: theme.textMuted }]}>Categorie</Text>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.quickRail}>
                     <TouchableOpacity
-                      key={city}
                       activeOpacity={0.85}
-                      onPress={() => setSelectedLocation(city)}
+                      onPress={() => setSelectedCategory(null)}
                       style={[
                         s.quickChip,
                         { backgroundColor: theme.surfaceAlt, borderColor: theme.border },
-                        selectedLocation === city && s.quickChipActive,
+                        !selectedCategory && s.quickChipActive,
                       ]}
                     >
                       <Text style={[
                         s.quickChipTxt,
                         { color: theme.textMuted },
-                        selectedLocation === city && s.quickChipTxtActive,
-                      ]}>{city}</Text>
+                        !selectedCategory && s.quickChipTxtActive,
+                      ]}>Toutes</Text>
                     </TouchableOpacity>
-                  ))}
+                    {apiCategories.slice(0, 8).map((cat) => (
+                      <TouchableOpacity
+                        key={cat._id}
+                        activeOpacity={0.85}
+                        onPress={() => setSelectedCategory(cat._id)}
+                        style={[
+                          s.quickChip,
+                          { backgroundColor: theme.surfaceAlt, borderColor: theme.border },
+                          selectedCategory === cat._id && s.quickChipActive,
+                        ]}
+                      >
+                        <Text style={[
+                          s.quickChipTxt,
+                          { color: theme.textMuted },
+                          selectedCategory === cat._id && s.quickChipTxtActive,
+                        ]}>{cat.name}</Text>
+                      </TouchableOpacity>
+                    ))}
+                    {categoriesLoading && (
+                      <View style={s.quickChipLoader}>
+                        <ActivityIndicator size="small" color={P.amber} />
+                      </View>
+                    )}
+                  </ScrollView>
+                </View>
 
-                  {locationsLoading && (
-                    <View style={s.quickChipLoader}>
-                      <ActivityIndicator size="small" color={P.amber} />
-                    </View>
-                  )}
-
-                  {POPULAR_SEARCHES.slice(0, 3).map((term) => (
+                {/* Location */}
+                <View style={s.filterSection}>
+                  <Text style={[s.filterLabel, { color: theme.textMuted }]}>Localisation</Text>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.quickRail}>
                     <TouchableOpacity
-                      key={term}
                       activeOpacity={0.85}
-                      style={[s.quickChip, { backgroundColor: theme.surfaceAlt, borderColor: theme.border }]}
-                      onPress={() => handlePopularSearch(term)}
+                      onPress={() => setSelectedLocation('all')}
+                      style={[
+                        s.quickChip,
+                        { backgroundColor: theme.surfaceAlt, borderColor: theme.border },
+                        selectedLocation === 'all' && s.quickChipActive,
+                      ]}
                     >
-                      <Feather name="trending-up" size={10} color={theme.textMuted} />
-                      <Text style={[s.quickChipTxt, { color: theme.textMuted }]}>{term}</Text>
+                      <Feather name="map-pin" size={10} color={selectedLocation === 'all' ? P.amber : theme.textMuted} />
+                      <Text style={[
+                        s.quickChipTxt,
+                        { color: theme.textMuted },
+                        selectedLocation === 'all' && s.quickChipTxtActive,
+                      ]}>Toutes</Text>
                     </TouchableOpacity>
-                  ))}
-                </ScrollView>
+                    {locations.slice(0, 6).map((city) => (
+                      <TouchableOpacity
+                        key={city}
+                        activeOpacity={0.85}
+                        onPress={() => setSelectedLocation(city)}
+                        style={[
+                          s.quickChip,
+                          { backgroundColor: theme.surfaceAlt, borderColor: theme.border },
+                          selectedLocation === city && s.quickChipActive,
+                        ]}
+                      >
+                        <Text style={[
+                          s.quickChipTxt,
+                          { color: theme.textMuted },
+                          selectedLocation === city && s.quickChipTxtActive,
+                        ]}>{city}</Text>
+                      </TouchableOpacity>
+                    ))}
+                    {locationsLoading && (
+                      <View style={s.quickChipLoader}>
+                        <ActivityIndicator size="small" color={P.amber} />
+                      </View>
+                    )}
+                  </ScrollView>
+                </View>
+
+                {/* Condition */}
+                <View style={s.filterSection}>
+                  <Text style={[s.filterLabel, { color: theme.textMuted }]}>Etat</Text>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.quickRail}>
+                    {[
+                      { key: 'all', label: 'Tous' },
+                      { key: 'new', label: 'Neuf' },
+                      { key: 'used', label: 'Occasion' },
+                      { key: 'refurbished', label: 'Reconditionne' },
+                    ].map((c) => (
+                      <TouchableOpacity
+                        key={c.key}
+                        activeOpacity={0.85}
+                        onPress={() => setSelectedCondition(c.key)}
+                        style={[
+                          s.quickChip,
+                          { backgroundColor: theme.surfaceAlt, borderColor: theme.border },
+                          selectedCondition === c.key && s.quickChipActive,
+                        ]}
+                      >
+                        <Text style={[
+                          s.quickChipTxt,
+                          { color: theme.textMuted },
+                          selectedCondition === c.key && s.quickChipTxtActive,
+                        ]}>{c.label}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </ScrollView>
+                </View>
+
+                {/* Price range */}
+                <View style={s.filterSection}>
+                  <Text style={[s.filterLabel, { color: theme.textMuted }]}>Prix (FCFA)</Text>
+                  <View style={s.priceRow}>
+                    <View style={[s.priceInputWrap, { backgroundColor: theme.surfaceAlt, borderColor: theme.border }]}>
+                      <TextInput
+                        style={[s.priceInput, { color: theme.text }]}
+                        placeholder="Min"
+                        placeholderTextColor={theme.textMuted}
+                        value={minPrice}
+                        onChangeText={setMinPrice}
+                        keyboardType="numeric"
+                      />
+                    </View>
+                    <Text style={[s.priceSeparator, { color: theme.textMuted }]}>-</Text>
+                    <View style={[s.priceInputWrap, { backgroundColor: theme.surfaceAlt, borderColor: theme.border }]}>
+                      <TextInput
+                        style={[s.priceInput, { color: theme.text }]}
+                        placeholder="Max"
+                        placeholderTextColor={theme.textMuted}
+                        value={maxPrice}
+                        onChangeText={setMaxPrice}
+                        keyboardType="numeric"
+                      />
+                    </View>
+                  </View>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={[s.quickRail, { marginTop: 6 }]}>
+                    {[
+                      { label: '< 5 000', min: '', max: '5000' },
+                      { label: '5k - 25k', min: '5000', max: '25000' },
+                      { label: '25k - 100k', min: '25000', max: '100000' },
+                      { label: '> 100 000', min: '100000', max: '' },
+                    ].map((range) => (
+                      <TouchableOpacity
+                        key={range.label}
+                        activeOpacity={0.85}
+                        onPress={() => { setMinPrice(range.min); setMaxPrice(range.max); }}
+                        style={[
+                          s.quickChip,
+                          { backgroundColor: theme.surfaceAlt, borderColor: theme.border },
+                          minPrice === range.min && maxPrice === range.max && s.quickChipActive,
+                        ]}
+                      >
+                        <Text style={[
+                          s.quickChipTxt,
+                          { color: theme.textMuted },
+                          minPrice === range.min && maxPrice === range.max && s.quickChipTxtActive,
+                        ]}>{range.label}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </ScrollView>
+                </View>
+
+                {/* Search button */}
+                <TouchableOpacity
+                  activeOpacity={0.85}
+                  onPress={handleHomeSearch}
+                  style={s.filterSearchBtn}
+                >
+                  <LinearGradient
+                    colors={[P.orange500, P.orange700]}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 0 }}
+                    style={s.filterSearchBtnGrad}
+                  >
+                    <Feather name="search" size={14} color={P.white} />
+                    <Text style={s.filterSearchBtnTxt}>Rechercher</Text>
+                  </LinearGradient>
+                </TouchableOpacity>
               </View>
             )}
 
@@ -960,6 +1163,17 @@ export default function ProductsListScreen({ navigation }) {
         </View> */}
 
       </ScrollView>
+
+      {/* Search Overlay */}
+      {searchOpen && (
+        <SearchOverlay
+          searchQuery={searchQuery}
+          setSearchQuery={setSearchQuery}
+          onSearch={handleHomeSearch}
+          onClose={closeSearch}
+          navigation={navigation}
+        />
+      )}
     </View>
   );
 }
@@ -1077,6 +1291,31 @@ const s = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.14)',
   },
+
+  // ─── Filter panel ──────────────────────────────────────────────────────────
+  filterSection: { marginTop: 8 },
+  filterLabel: { fontSize: 9, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 5, marginLeft: 2 },
+  priceRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  priceInputWrap: {
+    flex: 1,
+    borderRadius: 8,
+    borderWidth: 1,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  priceInput: { fontSize: 11, fontWeight: '600', paddingVertical: 2 },
+  priceSeparator: { fontSize: 12, fontWeight: '700' },
+  filterSearchBtn: { marginTop: 12, borderRadius: 10, overflow: 'hidden' },
+  filterSearchBtnGrad: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 20,
+    borderRadius: 10,
+  },
+  filterSearchBtnTxt: { fontSize: 13, fontWeight: '800', color: P.white },
 
   // ─── Stats strip ────────────────────────────────────────────────────────────
   statsStrip: {

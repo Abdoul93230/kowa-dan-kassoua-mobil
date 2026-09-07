@@ -1,28 +1,32 @@
 import React, { useEffect, useRef } from 'react';
 import Constants from 'expo-constants';
-import * as Notifications from 'expo-notifications';
 import { CommonActions } from '@react-navigation/native';
-import { Alert, AppState, Platform } from 'react-native';
+import { AppState, Platform } from 'react-native';
 import { useAuth } from '../contexts/AuthContext';
 import { navigationRef } from '../navigation/AppNavigator';
 import { registerPushToken } from '../api/auth';
 
 const FALLBACK_EAS_PROJECT_ID = 'c85af018-b333-49ac-9f39-8a3623969b2d';
+const IS_EXPO_GO = Constants.appOwnership === 'expo';
 
-Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowBanner: true,
-    shouldShowList: true,
-    shouldPlaySound: true,
-    shouldSetBadge: false,
-  }),
-});
+// expo-notifications crash au simple import dans Expo Go depuis SDK 53
+const Notifications = IS_EXPO_GO ? null : require('expo-notifications');
+
+if (Notifications) {
+  Notifications.setNotificationHandler({
+    handleNotification: async () => ({
+      shouldShowBanner: true,
+      shouldShowList: true,
+      shouldPlaySound: true,
+      shouldSetBadge: false,
+    }),
+  });
+}
 
 export default function PushNotificationsBridge() {
   const { isAuthenticated, user } = useAuth();
   const notificationListenerRef = useRef(null);
   const appStateListenerRef = useRef(null);
-  const isExpoGo = Constants.appOwnership === 'expo';
 
   useEffect(() => {
     let cancelled = false;
@@ -31,8 +35,8 @@ export default function PushNotificationsBridge() {
       if (!isAuthenticated || !user?.id) return;
 
       try {
-        if (isExpoGo) {
-          console.log('ℹ️ Expo Go détecté: enregistrement token désactivé pour ne pas polluer la prod. Utilisez un build APK/development build.');
+        if (IS_EXPO_GO || !Notifications) {
+          console.log('ℹ️ Expo Go: push notifications désactivées. Utilisez un development build.');
           return;
         }
 
@@ -48,7 +52,7 @@ export default function PushNotificationsBridge() {
         console.log('📣 Push setup start:', {
           userId: user.id,
           appOwnership: Constants.appOwnership,
-          isExpoGo,
+          isExpoGo: IS_EXPO_GO,
         });
 
         const permissions = await Notifications.getPermissionsAsync();
@@ -136,10 +140,10 @@ export default function PushNotificationsBridge() {
         appStateListenerRef.current.remove();
       }
     };
-  }, [isAuthenticated, isExpoGo, user?.id]);
+  }, [isAuthenticated, user?.id]);
 
   useEffect(() => {
-    if (!isAuthenticated) return;
+    if (!isAuthenticated || IS_EXPO_GO || !Notifications) return;
 
     // Écouter les notifications reçues en premier plan
     notificationListenerRef.current = Notifications.addNotificationResponseReceivedListener(

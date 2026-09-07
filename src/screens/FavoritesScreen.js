@@ -432,13 +432,12 @@ export default function FavoritesScreen({ navigation }) {
   if (!isAuthenticated) {
     return (
       <View style={[s.container, { paddingTop: insets.top, backgroundColor: theme.screen }]}>
-        {renderHeader()}
-        <EmptyState 
-          type="auth" 
-          onAction={() => navigation.navigate('QuickAuth', { 
-            pendingAction: { type: 'favorites' }, 
-            returnScreen: 'Favorites' 
-          })} 
+        <EmptyState
+          type="auth"
+          onAction={() => navigation.navigate('QuickAuth', {
+            pendingAction: { type: 'favorites' },
+            returnScreen: 'Favorites'
+          })}
         />
       </View>
     );

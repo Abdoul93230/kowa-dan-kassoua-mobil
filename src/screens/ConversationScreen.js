@@ -19,7 +19,9 @@ import {
   TouchableWithoutFeedback,
   View,
 } from 'react-native';
-import { Audio } from 'expo-av';
+import Constants from 'expo-constants';
+// expo-av (ExponentAV) n'est plus dans Expo Go SDK 57 — require conditionnel
+const Audio = Constants.appOwnership === 'expo' ? null : require('expo-av').Audio;
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import { useHeaderHeight } from '@react-navigation/elements';
@@ -800,6 +802,7 @@ export default function ConversationScreen({ route, navigation }) {
   }, [stopAudioPlayback]);
 
   const startVoiceRecording = async () => {
+    if (!Audio) return; // expo-av non disponible dans Expo Go
     if (isRecording || sendingVoice) return;
 
     try {
@@ -855,6 +858,7 @@ export default function ConversationScreen({ route, navigation }) {
   };
 
   const cancelVoiceRecording = async () => {
+    if (!Audio) { setIsRecording(false); setRecordingMs(0); return; }
     const recording = recordingRef.current;
     if (!recording) {
       setIsRecording(false);
@@ -882,6 +886,7 @@ export default function ConversationScreen({ route, navigation }) {
   };
 
   const stopAndSendVoiceRecording = async () => {
+    if (!Audio) return;
     const recording = recordingRef.current;
     if (!recording || !conversationId || sendingVoice) return;
 
@@ -1050,6 +1055,7 @@ export default function ConversationScreen({ route, navigation }) {
 
   const onPressAudioMessage = useCallback(
     async (message) => {
+      if (!Audio) return; // expo-av non disponible dans Expo Go
       const audioUrl = message?.attachments?.[0];
       if (!audioUrl) return;
 

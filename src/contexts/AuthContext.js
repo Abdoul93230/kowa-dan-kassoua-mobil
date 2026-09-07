@@ -1,8 +1,11 @@
 import React, { createContext, useState, useContext, useEffect } from 'react';
 import { DeviceEventEmitter } from 'react-native';
 import Constants from 'expo-constants';
-import * as Notifications from 'expo-notifications';
 import { login as apiLogin, register as apiRegister, getProfile, registerPushToken } from '../api/auth';
+
+const IS_EXPO_GO = Constants.appOwnership === 'expo';
+// expo-notifications crash au simple import dans Expo Go depuis SDK 53
+const Notifications = IS_EXPO_GO ? null : require('expo-notifications');
 import {
   saveAccessToken,
   saveRefreshToken,
@@ -24,8 +27,8 @@ const syncPushToken = async (userData) => {
   try {
     if (!userData?.id) return;
 
-    if (Constants.appOwnership === 'expo') {
-      console.log('ℹ️ Sync push ignorée dans Expo Go (token non fiable pour la prod).');
+    if (IS_EXPO_GO || !Notifications) {
+      console.log('ℹ️ Sync push ignorée dans Expo Go.');
       return;
     }
 

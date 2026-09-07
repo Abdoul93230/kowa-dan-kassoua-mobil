@@ -9,14 +9,6 @@
     "orientation": "portrait",
     "icon": "./assets/icon-v2.png",
     "userInterfaceStyle": "automatic",
-    "splash": {
-      "image": "./assets/splash-icon.png",
-      "resizeMode": "contain",
-      "backgroundColor": "#FFFFFF",
-      "dark": {
-        "backgroundColor": "#FFFFFF"
-      }
-    },
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.kowadankassoua.mobile",
@@ -41,7 +33,16 @@
     },
     "plugins": [
       "expo-secure-store",
-      "expo-notifications"
+      "expo-notifications",
+      "expo-status-bar",
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/splash-icon.png",
+          "resizeMode": "contain",
+          "backgroundColor": "#FFFFFF"
+        }
+      ]
     ],
     "extra": {
       "eas": {
