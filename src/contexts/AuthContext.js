@@ -2,10 +2,6 @@ import React, { createContext, useState, useContext, useEffect } from 'react';
 import { DeviceEventEmitter } from 'react-native';
 import Constants from 'expo-constants';
 import { login as apiLogin, register as apiRegister, getProfile, registerPushToken } from '../api/auth';
-
-const IS_EXPO_GO = Constants.appOwnership === 'expo';
-// expo-notifications crash au simple import dans Expo Go depuis SDK 53
-const Notifications = IS_EXPO_GO ? null : require('expo-notifications');
 import {
   saveAccessToken,
   saveRefreshToken,
@@ -14,6 +10,11 @@ import {
   getUserData,
   clearAllData,
 } from '../utils/storage';
+
+// expo-notifications crash dès son import dans Expo Go (SDK 53+).
+// On ne le charge donc QUE dans un development build / APK (jamais dans Expo Go).
+const IS_EXPO_GO = Constants.appOwnership === 'expo';
+const Notifications = IS_EXPO_GO ? null : require('expo-notifications');
 
 /**
  * Context d'authentification global
@@ -28,7 +29,7 @@ const syncPushToken = async (userData) => {
     if (!userData?.id) return;
 
     if (IS_EXPO_GO || !Notifications) {
-      console.log('ℹ️ Sync push ignorée dans Expo Go.');
+      console.log('ℹ️ Sync push ignorée dans Expo Go (notifications push indisponibles).');
       return;
     }
 

@@ -19,9 +19,13 @@ import {
   TouchableWithoutFeedback,
   View,
 } from 'react-native';
-import Constants from 'expo-constants';
-// expo-av (ExponentAV) n'est plus dans Expo Go SDK 57 — require conditionnel
-const Audio = Constants.appOwnership === 'expo' ? null : require('expo-av').Audio;
+import {
+  createAudioPlayer,
+  RecordingPresets,
+  requestRecordingPermissionsAsync,
+  setAudioModeAsync,
+  useAudioRecorder,
+} from 'expo-audio';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import { useHeaderHeight } from '@react-navigation/elements';
@@ -453,7 +457,6 @@ export default function ConversationScreen({ route, navigation }) {
   const [audioStates, setAudioStates] = useState({});
   const [audioTrackWidths, setAudioTrackWidths] = useState({});
   const [typingUsers, setTypingUsers] = useState({});
-  const [typingType, setTypingType] = useState('text');
   const [reviewEligible, setReviewEligible] = useState(false);
   const [checkingReviewEligibility, setCheckingReviewEligibility] = useState(false);
   const [reviewModalVisible, setReviewModalVisible] = useState(false);
@@ -483,11 +486,11 @@ export default function ConversationScreen({ route, navigation }) {
 
   const typingTimeoutRef = useRef(null);
   const flatListRef = useRef(null);
-  const recordingRef = useRef(null);
   const recordingIntervalRef = useRef(null);
   const playingSoundRef = useRef(null);
   const playingMessageIdRef = useRef('');
   const initialScrollDoneRef = useRef(false);
+  const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
   const styles = useMemo(() => createStyles(theme, isDark), [theme, isDark]);
 
   const {
@@ -593,15 +596,7 @@ export default function ConversationScreen({ route, navigation }) {
       setMessages((prev) => {
         const alreadyExists = prev.some((m) => String(m.id) === String(message.id));
         if (alreadyExists) return prev;
-        // Si le message entrant est un système de clôture/réouverture, on retire tous les messages locaux de clôture (optimistic + permanents locaux)
-        const isClosureSystemMsg = message?.type === 'system' && (
-          String(message?.content || '').includes('clôtur') ||
-          String(message?.content || '').includes('rouverte')
-        );
-        const filtered = isClosureSystemMsg
-          ? prev.filter((m) => !String(m.id || '').startsWith('sys-closure-'))
-          : prev;
-        return [...filtered, message];
+        return [...prev, message];
       });
 
       if (!isCurrentUserMessage(message, user, currentUserIdSet)) {
@@ -634,11 +629,10 @@ export default function ConversationScreen({ route, navigation }) {
       );
     };
 
-    const onTypingStart = ({ conversationId: payloadConversationId, userId, userName, type }) => {
+    const onTypingStart = ({ conversationId: payloadConversationId, userId, userName }) => {
       if (payloadConversationId !== conversationId) return;
       if (String(userId) === String(currentUserId)) return;
       setTypingUsers((prev) => ({ ...prev, [userId]: userName || 'Quelqu\'un' }));
-      setTypingType(type === 'recording' ? 'recording' : 'text');
     };
 
     const onTypingStop = ({ conversationId: payloadConversationId, userId }) => {
@@ -648,7 +642,6 @@ export default function ConversationScreen({ route, navigation }) {
         delete next[userId];
         return next;
       });
-      setTypingType('text');
     };
     const onConversationUpdated = (payload) => {
       const payloadConversationId = String(payload?.conversationId || payload?.id || '');
@@ -756,40 +749,29 @@ export default function ConversationScreen({ route, navigation }) {
 
   const stopAudioPlayback = useCallback(async () => {
     const currentId = playingMessageIdRef.current;
+    const player = playingSoundRef.current;
 
-    if (!playingSoundRef.current) {
-      if (currentId) {
-        setAudioStates((prev) => ({
-          ...prev,
-          [currentId]: {
-            ...(prev[currentId] || {}),
-            isPlaying: false,
-          },
-        }));
+    playingSoundRef.current = null;
+    setPlayingMessageId('');
+    playingMessageIdRef.current = '';
+
+    if (player) {
+      try {
+        player.pause();
+        player.remove();
+      } catch (e) {
+        // No-op: just ensure local state resets.
       }
-      setPlayingMessageId('');
-      playingMessageIdRef.current = '';
-      return;
     }
 
-    try {
-      await playingSoundRef.current.stopAsync();
-      await playingSoundRef.current.unloadAsync();
-    } catch (e) {
-      // No-op: just ensure local state resets.
-    } finally {
-      playingSoundRef.current = null;
-      if (currentId) {
-        setAudioStates((prev) => ({
-          ...prev,
-          [currentId]: {
-            ...(prev[currentId] || {}),
-            isPlaying: false,
-          },
-        }));
-      }
-      setPlayingMessageId('');
-      playingMessageIdRef.current = '';
+    if (currentId) {
+      setAudioStates((prev) => ({
+        ...prev,
+        [currentId]: {
+          ...(prev[currentId] || {}),
+          isPlaying: false,
+        },
+      }));
     }
   }, []);
 
@@ -802,11 +784,10 @@ export default function ConversationScreen({ route, navigation }) {
   }, [stopAudioPlayback]);
 
   const startVoiceRecording = async () => {
-    if (!Audio) return; // expo-av non disponible dans Expo Go
     if (isRecording || sendingVoice) return;
 
     try {
-      const permission = await Audio.requestPermissionsAsync();
+      const permission = await requestRecordingPermissionsAsync();
       if (!permission.granted) {
         setAlert({
           visible: true,
@@ -818,28 +799,22 @@ export default function ConversationScreen({ route, navigation }) {
         return;
       }
 
-      await Audio.setAudioModeAsync({
-        allowsRecordingIOS: true,
-        playsInSilentModeIOS: true,
-        shouldDuckAndroid: true,
+      await setAudioModeAsync({
+        allowsRecording: true,
+        playsInSilentMode: true,
+        interruptionMode: 'duckOthers',
       });
 
-      const recording = new Audio.Recording();
-      await recording.prepareToRecordAsync(Audio.RecordingOptionsPresets.HIGH_QUALITY);
-      await recording.startAsync();
+      await recorder.prepareToRecordAsync();
+      recorder.record();
 
-      recordingRef.current = recording;
       setRecordingMs(0);
       setIsRecording(true);
-      if (conversationId) startTyping(conversationId, 'recording');
 
       if (recordingIntervalRef.current) clearInterval(recordingIntervalRef.current);
-      recordingIntervalRef.current = setInterval(async () => {
+      recordingIntervalRef.current = setInterval(() => {
         try {
-          const status = await recording.getStatusAsync();
-          if (status?.isRecording) {
-            setRecordingMs(status.durationMillis || 0);
-          }
+          setRecordingMs(Math.floor((recorder.currentTime || 0) * 1000));
         } catch (e) {
           // Ignore status sampling errors while recording.
         }
@@ -853,47 +828,40 @@ export default function ConversationScreen({ route, navigation }) {
         buttons: [{ text: 'OK', onPress: () => { } }],
       });
       setIsRecording(false);
-      recordingRef.current = null;
     }
   };
 
   const cancelVoiceRecording = async () => {
-    if (!Audio) { setIsRecording(false); setRecordingMs(0); return; }
-    const recording = recordingRef.current;
-    if (!recording) {
+    if (!recorder.isRecording) {
       setIsRecording(false);
       setRecordingMs(0);
       return;
     }
 
     try {
-      await recording.stopAndUnloadAsync();
+      await recorder.stop();
     } catch (e) {
       // Ignore stopping errors on cancellation.
     } finally {
-      await Audio.setAudioModeAsync({
-        allowsRecordingIOS: false,
-        playsInSilentModeIOS: true,
-        shouldDuckAndroid: true,
+      await setAudioModeAsync({
+        allowsRecording: false,
+        playsInSilentMode: true,
+        interruptionMode: 'duckOthers',
       });
-      recordingRef.current = null;
       if (recordingIntervalRef.current) clearInterval(recordingIntervalRef.current);
       recordingIntervalRef.current = null;
       setIsRecording(false);
       setRecordingMs(0);
-      if (conversationId) stopTyping(conversationId);
     }
   };
 
   const stopAndSendVoiceRecording = async () => {
-    if (!Audio) return;
-    const recording = recordingRef.current;
-    if (!recording || !conversationId || sendingVoice) return;
+    if (!recorder.isRecording || !conversationId || sendingVoice) return;
 
     try {
       setSendingVoice(true);
-      await recording.stopAndUnloadAsync();
-      const uri = recording.getURI();
+      await recorder.stop();
+      const uri = recorder.uri;
 
       if (!uri) {
         throw new Error('Aucun fichier vocal disponible');
@@ -918,18 +886,16 @@ export default function ConversationScreen({ route, navigation }) {
         buttons: [{ text: 'OK', onPress: () => { } }],
       });
     } finally {
-      await Audio.setAudioModeAsync({
-        allowsRecordingIOS: false,
-        playsInSilentModeIOS: true,
-        shouldDuckAndroid: true,
+      await setAudioModeAsync({
+        allowsRecording: false,
+        playsInSilentMode: true,
+        interruptionMode: 'duckOthers',
       });
-      recordingRef.current = null;
       if (recordingIntervalRef.current) clearInterval(recordingIntervalRef.current);
       recordingIntervalRef.current = null;
       setIsRecording(false);
       setRecordingMs(0);
       setSendingVoice(false);
-      if (conversationId) stopTyping(conversationId);
     }
   };
 
@@ -1026,46 +992,26 @@ export default function ConversationScreen({ route, navigation }) {
           </View>
         </View>
       ),
-      headerRight: canManageOwnerClosure ? () => (
-        <TouchableOpacity
-          onPress={toggleOwnerClosure}
-          disabled={ownerClosureLoading}
-          style={{
-            marginRight: 12,
-            paddingHorizontal: 10,
-            paddingVertical: 5,
-            borderRadius: 6,
-            borderWidth: 1,
-            borderColor: isOwnerClosureActive ? theme.primary || '#4CAF50' : theme.error || '#F44336',
-            opacity: ownerClosureLoading ? 0.5 : 1,
-          }}
-        >
-          <Text style={{ fontSize: 12, color: isOwnerClosureActive ? theme.primary || '#4CAF50' : theme.error || '#F44336', fontWeight: '600' }}>
-            {ownerClosureLoading ? '...' : isOwnerClosureActive ? 'Réouvrir' : 'Clôturer'}
-          </Text>
-        </TouchableOpacity>
-      ) : undefined,
       headerStyle: {
         backgroundColor: theme.surface,
         shadowColor: theme.shadow,
       },
       headerTintColor: theme.text,
     });
-  }, [navigation, peer?.businessName, peer?.name, theme, peerIsOnline, isConnected, canManageOwnerClosure, toggleOwnerClosure, ownerClosureLoading, isOwnerClosureActive]);
+  }, [navigation, peer?.businessName, peer?.name, theme, peerIsOnline, isConnected]);
 
   const onPressAudioMessage = useCallback(
     async (message) => {
-      if (!Audio) return; // expo-av non disponible dans Expo Go
       const audioUrl = message?.attachments?.[0];
       if (!audioUrl) return;
 
       const messageId = String(message.id);
 
-      if (playingSoundRef.current && playingMessageIdRef.current === messageId) {
+      const current = playingSoundRef.current;
+      if (current && playingMessageIdRef.current === messageId) {
         try {
-          const status = await playingSoundRef.current.getStatusAsync();
-          if (status?.isLoaded && status.isPlaying) {
-            await playingSoundRef.current.pauseAsync();
+          if (current.playing) {
+            current.pause();
             setAudioStates((prev) => ({
               ...prev,
               [messageId]: {
@@ -1073,8 +1019,8 @@ export default function ConversationScreen({ route, navigation }) {
                 isPlaying: false,
               },
             }));
-          } else if (status?.isLoaded) {
-            await playingSoundRef.current.playAsync();
+          } else {
+            current.play();
             setAudioStates((prev) => ({
               ...prev,
               [messageId]: {
@@ -1092,36 +1038,31 @@ export default function ConversationScreen({ route, navigation }) {
       try {
         await stopAudioPlayback();
 
-        await Audio.setAudioModeAsync({
-          allowsRecordingIOS: false,
-          playsInSilentModeIOS: true,
-          shouldDuckAndroid: true,
+        await setAudioModeAsync({
+          allowsRecording: false,
+          playsInSilentMode: true,
+          interruptionMode: 'duckOthers',
         });
 
-        const { sound } = await Audio.Sound.createAsync(
-          { uri: audioUrl },
-          { shouldPlay: true }
-        );
+        const player = createAudioPlayer(audioUrl, { updateInterval: 100 });
 
-        playingSoundRef.current = sound;
+        playingSoundRef.current = player;
         setPlayingMessageId(messageId);
         playingMessageIdRef.current = messageId;
 
-        sound.setOnPlaybackStatusUpdate((status) => {
-          if (!status?.isLoaded) return;
-
+        player.addListener('playbackStatusUpdate', (status) => {
           setAudioStates((prev) => ({
             ...prev,
             [messageId]: {
               ...(prev[messageId] || {}),
-              positionMs: status.positionMillis || 0,
-              durationMs: status.durationMillis || 0,
-              isPlaying: !!status.isPlaying,
-              isBuffering: !!status.isBuffering,
+              positionMs: Math.round((status?.currentTime || 0) * 1000),
+              durationMs: Math.round((status?.duration || 0) * 1000),
+              isPlaying: !!status?.playing,
+              isBuffering: !!status?.isBuffering,
             },
           }));
 
-          if (status.didJustFinish) {
+          if (status?.didJustFinish) {
             setAudioStates((prev) => ({
               ...prev,
               [messageId]: {
@@ -1133,6 +1074,8 @@ export default function ConversationScreen({ route, navigation }) {
             stopAudioPlayback();
           }
         });
+
+        player.play();
       } catch (e) {
         setAlert({
           visible: true,
@@ -1161,7 +1104,7 @@ export default function ConversationScreen({ route, navigation }) {
       const target = Math.floor(durationMs * ratio);
 
       try {
-        await playingSoundRef.current.setPositionAsync(target);
+        await playingSoundRef.current.seekTo(target / 1000);
         setAudioStates((prev) => ({
           ...prev,
           [messageId]: {
@@ -1217,6 +1160,9 @@ export default function ConversationScreen({ route, navigation }) {
     const previousConversation = conversation;
     try {
       setOwnerClosureLoading(true);
+      // optimistic system message (temporary id)
+      const optimisticId = `sys-closure-optimistic-${Date.now()}`;
+      addClosureSystemMessage(true ? !isOwnerClosureActive : isOwnerClosureActive, new Date().toISOString(), optimisticId);
 
       const response = isOwnerClosureActive
         ? await reopenConversationByOwner(conversationId)
@@ -1230,10 +1176,16 @@ export default function ConversationScreen({ route, navigation }) {
 
       if (updatedConversation) {
         setConversation(updatedConversation);
+        try {
+          addClosureSystemMessage(Boolean(updatedConversation.closedByOwner), updatedConversation.closedAt || null);
+        } catch (e) {}
       } else {
         const refreshed = await getConversationById(conversationId);
         if (refreshed?.data) {
           setConversation(refreshed.data);
+          try {
+            addClosureSystemMessage(Boolean(refreshed.data.closedByOwner), refreshed.data.closedAt || null);
+          } catch (e) {}
         }
       }
     } catch (e) {
@@ -1461,7 +1413,7 @@ export default function ConversationScreen({ route, navigation }) {
     }
   }, [conversationId, dealActionLoading, conversation, applyDealTransition]);
 
-  const renderMessage = useCallback(({ item, index }) => {
+  const renderMessage = ({ item, index }) => {
     const prevItem = index > 0 ? messages[index - 1] : null;
     const showDateSeparator = !isSameDay(item?.timestamp, prevItem?.timestamp);
 
@@ -1517,19 +1469,19 @@ export default function ConversationScreen({ route, navigation }) {
           <View style={[styles.bubble, mine ? styles.bubbleMine : styles.bubbleOther]}>
             {isAudio ? (
               <View style={styles.audioWrap}>
-                <TouchableOpacity
-                  onPress={() => onPressAudioMessage(item)}
-                  activeOpacity={0.85}
-                  style={styles.audioPlayBtn}
-                >
-                  <Ionicons
-                    name={isPlayingThis ? 'pause' : 'play'}
-                    size={17}
-                    color={mine ? '#fff' : P.orange500}
-                  />
-                </TouchableOpacity>
+                <View style={styles.audioMainRow}>
+                  <TouchableOpacity
+                    onPress={() => onPressAudioMessage(item)}
+                    activeOpacity={0.85}
+                    style={styles.audioPlayBtn}
+                  >
+                    <Ionicons
+                      name={isPlayingThis ? 'pause' : 'play'}
+                      size={17}
+                      color={mine ? '#fff' : P.orange500}
+                    />
+                  </TouchableOpacity>
 
-                <View style={styles.audioTrackCol}>
                   <TouchableOpacity
                     activeOpacity={0.9}
                     style={styles.audioTrack}
@@ -1567,17 +1519,17 @@ export default function ConversationScreen({ route, navigation }) {
                       ]}
                     />
                   </TouchableOpacity>
+                </View>
 
-                  <View style={styles.audioMetaRow}>
-                    <Ionicons
-                      name="mic"
-                      size={11}
-                      color={mine ? 'rgba(255,255,255,0.88)' : 'rgba(255,255,255,0.7)'}
-                    />
-                    <Text style={[styles.audioTimeText, mine ? styles.messageTextMine : styles.messageTextOther]}>
-                      {formatAudioTime(positionMs)} / {formatAudioTime(durationMs)}
-                    </Text>
-                  </View>
+                <View style={styles.audioMetaRow}>
+                  <Ionicons
+                    name="mic"
+                    size={11}
+                    color={mine ? 'rgba(255,255,255,0.88)' : 'rgba(255,255,255,0.7)'}
+                  />
+                  <Text style={[styles.audioTimeText, mine ? styles.messageTextMine : styles.messageTextOther]}>
+                    {formatAudioTime(positionMs)} / {formatAudioTime(durationMs)}
+                  </Text>
                 </View>
               </View>
             ) : (
@@ -1589,9 +1541,9 @@ export default function ConversationScreen({ route, navigation }) {
               <Text style={[styles.timeText, mine ? styles.timeTextMine : styles.timeTextOther]}>{formatTime(item.timestamp)}</Text>
               {mine ? (
                 <Ionicons
-                  name={item.read || item.delivered ? 'checkmark-done' : 'checkmark'}
-                  size={15}
-                  color={item.read ? (isDark ? P.orange500 : '#facc15') : item.delivered ? 'rgba(255,255,255,0.90)' : 'rgba(255,255,255,0.40)'}
+                  name={item.read ? 'checkmark-done' : item.delivered ? 'checkmark-done' : 'checkmark'}
+                  size={14}
+                  color={item.read ? '#fde68a' : item.delivered ? 'rgba(255,255,255,0.90)' : 'rgba(255,255,255,0.45)'}
                 />
               ) : null}
             </View>
@@ -1599,7 +1551,7 @@ export default function ConversationScreen({ route, navigation }) {
         </View>
       </View>
     );
-  }, [messages, user, currentUserIdSet, audioStates, peer, styles, isDark, onPressAudioMessage, onSeekAudioMessage, setAudioTrackWidths]);
+  };
 
   if (loading) {
     return (
@@ -1730,9 +1682,7 @@ export default function ConversationScreen({ route, navigation }) {
           ListFooterComponent={
             typingLabel ? (
               <View style={styles.typingWrap}>
-                <Text style={styles.typingText}>
-                  {typingLabel} {typingType === 'recording' ? 'enregistre un vocal...' : 'est en train d\'écrire...'}
-                </Text>
+                <Text style={styles.typingText}>{typingLabel} est en train d'ecrire...</Text>
               </View>
             ) : null
           }
@@ -2181,13 +2131,12 @@ function createStyles(theme, isDark) {
     audioWrap: {
       minWidth: 230,
       maxWidth: 280,
-      flexDirection: 'row',
-      alignItems: 'flex-start',
-      gap: 8,
+      gap: 6,
     },
-    audioTrackCol: {
-      flex: 1,
-      gap: 4,
+    audioMainRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
     },
     audioPlayBtn: {
       width: 32,
@@ -2195,10 +2144,10 @@ function createStyles(theme, isDark) {
       borderRadius: 16,
       alignItems: 'center',
       justifyContent: 'center',
-      marginTop: -4,
       backgroundColor: theme.overlay,
     },
     audioTrack: {
+      flex: 1,
       height: 24,
       borderRadius: 12,
       overflow: 'hidden',

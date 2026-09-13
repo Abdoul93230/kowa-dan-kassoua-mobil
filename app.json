@@ -42,7 +42,10 @@
           "resizeMode": "contain",
           "backgroundColor": "#FFFFFF"
         }
-      ]
+      ],
+      "expo-font",
+      "expo-audio",
+      "expo-asset"
     ],
     "extra": {
       "eas": {
