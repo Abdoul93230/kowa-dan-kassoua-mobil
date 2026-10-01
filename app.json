@@ -21,7 +21,8 @@
     "android": {
       "package": "com.kowadankassoua.mobile",
       "googleServicesFile": "./google-services.json",
-      "icon": "./assets/icon-v2.png"
+      "icon": "./assets/icon-v2.png",
+      "versionCode": 3
     },
     "web": {
       "favicon": "./assets/favicon.png"

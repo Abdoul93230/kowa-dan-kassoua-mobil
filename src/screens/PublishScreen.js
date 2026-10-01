@@ -47,6 +47,25 @@ const normalizeSubcategoryValue = (value) => {
 
 const isRemoteImageUrl = (value) => /^https?:\/\//i.test(String(value || ''));
 
+// Formulaire vierge (source unique pour tous les resets)
+const createEmptyForm = () => ({
+  type: 'product', title: '', category: '', subcategory: '',
+  price: '', description: '', condition: 'used', images: [],
+  delivery: false, deliveryCost: '', deliveryAreas: [],
+  specifications: {},
+  availability: { openingTime: '', closingTime: '', days: [] },
+});
+
+// Détecte si le formulaire contient une saisie en cours (brouillon non publié)
+const hasPublishContent = (form) => Boolean(
+  String(form?.title || '').trim() ||
+  form?.category ||
+  form?.subcategory ||
+  form?.price ||
+  String(form?.description || '').trim() ||
+  (Array.isArray(form?.images) && form.images.length > 0)
+);
+
 const buildPublishSummary = (form, categories, editItemId = '') => {
   const selectedCategory = categories.find((cat) => String(cat?._id || '') === String(form.category || ''));
   const firstImage = Array.isArray(form.images) && form.images.length > 0 ? form.images[0] : '';
@@ -175,15 +194,19 @@ export default function PublishScreen({ navigation, route }) {
     buttons: [{ text: 'OK', onPress: () => {} }],
   });
 
-  const [form, setForm] = useState({
-    type: 'product', title: '', category: '', subcategory: '',
-    price: '', description: '', condition: 'used', images: [],
-    delivery: false, deliveryCost: '', deliveryAreas: [],
-    specifications: {},
-    availability: { openingTime: '', closingTime: '', days: [] },
-  });
+  const [form, setForm] = useState(createEmptyForm());
+  const [draftBanner, setDraftBanner] = useState(false);
+
+  // Refs de cycle de vie : lecture de valeurs fraîches dans les callbacks de focus
+  const formRef = useRef(form);
+  const paramsRef = useRef(route?.params || {});
+  const draftAcknowledgedRef = useRef(false);
 
   const set = (key, val) => setForm(p => ({ ...p, [key]: val }));
+
+  // Garder les refs synchronisées avec l'état / les params
+  useEffect(() => { formRef.current = form; }, [form]);
+  useEffect(() => { paramsRef.current = route?.params || {}; }, [route?.params]);
 
   useEffect(() => {
     loadCategories();
@@ -207,6 +230,7 @@ export default function PublishScreen({ navigation, route }) {
     const existingImages = Array.isArray(editItem.images) ? editItem.images.filter(isRemoteImageUrl) : [];
     setOriginalImages(existingImages);
     setDeletedImages([]);
+    setStep(1);
     setForm({
       type: editItem.type || 'product',
       title: editItem.title || '',
@@ -347,48 +371,71 @@ export default function PublishScreen({ navigation, route }) {
   const next = () => { if (validate(step)) { setStep(s => s + 1); scrollToTop(); } };
   const prev = () => { setStep(s => s - 1); scrollToTop(); };
 
-  const resetPublishState = () => {
-    setForm({
-      type:'product',
-      title:'',
-      category:'',
-      subcategory:'',
-      price:'',
-      description:'',
-      condition:'used',
-      images:[],
-      delivery:false,
-      deliveryCost:'',
-      deliveryAreas:[],
-      specifications:{},
-      availability:{ openingTime:'', closingTime:'', days:[] },
-    });
+  const resetPublishState = useCallback(() => {
+    setForm(createEmptyForm());
     setStep(1);
     setOriginalImages([]);
     setDeletedImages([]);
-    navigation.setParams?.({ editItem: undefined });
+    setSpecKey('');
+    setSpecVal('');
+    setDelArea('');
+    setErrors({});
+    setDraftBanner(false);
+    draftAcknowledgedRef.current = false;
+    if (paramsRef.current?.editItem) {
+      navigation.setParams?.({ editItem: undefined });
+    }
+  }, [navigation]);
+
+  const dismissDraftBanner = () => {
+    draftAcknowledgedRef.current = true;
+    setDraftBanner(false);
+  };
+
+  // Repartir d'un formulaire vierge : efface le brouillon en cours
+  const discardDraft = () => {
+    resetPublishState();
   };
 
   useFocusEffect(
     useCallback(() => {
-      const hasEditItem = Boolean(route?.params?.editItem);
-      const hasAutoSubmit = Boolean(route?.params?.autoSubmit);
+      const params = paramsRef.current || {};
+      const hasEditItem = Boolean(params.editItem);
+      const hasAutoSubmit = Boolean(params.autoSubmit);
 
-      if (!hasEditItem && !hasAutoSubmit) {
-        setErrors({});
-        setSpecKey('');
-        setSpecVal('');
-        setDelArea('');
-        setOriginalImages([]);
-        setDeletedImages([]);
+      // Nettoyage léger des états transitoires à chaque focus
+      setErrors({});
+      setSpecKey('');
+      setSpecVal('');
+      setDelArea('');
+
+      if (hasEditItem) {
+        // Intention = MODIFIER : repartir de l'étape 1, l'item est chargé par l'effet dédié
+        setStep(1);
+        return () => {
+          // Quitter une édition non finalisée => on annule (évite les données fantômes)
+          resetPublishState();
+        };
       }
 
-      return () => {
-        if (hasEditItem) {
-          navigation.setParams?.({ editItem: undefined });
-        }
-      };
-    }, [navigation, route?.params?.autoSubmit, route?.params?.editItem])
+      if (hasAutoSubmit) {
+        // Intention = REPRISE post-authentification : géré par l'effet autoSubmit
+        return undefined;
+      }
+
+      // Intention = CRÉATION
+      setOriginalImages([]);
+      setDeletedImages([]);
+
+      if (hasPublishContent(formRef.current) && !draftAcknowledgedRef.current) {
+        // Un brouillon non publié subsiste : on l'affiche, on ne l'écrase pas
+        setDraftBanner(true);
+      } else {
+        resetPublishState();
+      }
+
+      return undefined;
+    }, [navigation, resetPublishState])
   );
 
   const doSubmit = async () => {
@@ -462,6 +509,7 @@ export default function PublishScreen({ navigation, route }) {
         data.images = imagesB64;
         await createProduct(data);
       }
+      resetPublishState();
       setAlert({
         visible: true,
         type: 'success',
@@ -472,7 +520,6 @@ export default function PublishScreen({ navigation, route }) {
         buttons: [{
           text: 'Super !',
           onPress: () => {
-            resetPublishState();
             if (draftForm.editItemId) {
               navigation.navigate('ProductDetail', { productId: draftForm.editItemId });
             } else {
@@ -623,6 +670,35 @@ export default function PublishScreen({ navigation, route }) {
         keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
         showsVerticalScrollIndicator={false}
       >
+        {draftBanner && (
+          <View style={[s.draftBanner, { backgroundColor: theme.surfaceAlt, borderColor: theme.border }]}>
+            <View style={s.draftBannerRow}>
+              <Text style={s.draftBannerIcon}>📝</Text>
+              <View style={{ flex: 1 }}>
+                <Text style={[s.draftBannerTitle, { color: theme.text }]}>Brouillon non publié</Text>
+                <Text style={[s.draftBannerSub, { color: theme.textMuted }]}>
+                  Une annonce non publiée est en cours. Reprenez-la ou repartez de zéro.
+                </Text>
+              </View>
+            </View>
+            <View style={s.draftBannerActions}>
+              <TouchableOpacity
+                style={[s.draftBannerBtn, { borderColor: theme.border, backgroundColor: theme.surface }]}
+                onPress={discardDraft}
+                activeOpacity={0.85}
+              >
+                <Text style={[s.draftBannerBtnTxt, { color: theme.textMuted }]}>Effacer</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[s.draftBannerBtn, s.draftBannerBtnPrimary]}
+                onPress={dismissDraftBanner}
+                activeOpacity={0.85}
+              >
+                <Text style={[s.draftBannerBtnTxt, { color: P.white }]}>Reprendre</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        )}
 
         {/* ══════════ ÉTAPE 1 ══════════════════════════════════════════ */}
         {step === 1 && (
@@ -1100,6 +1176,17 @@ const s = StyleSheet.create({
   // Content
   scroll:       { padding: 18 },
   sectionTitle: { fontSize: 18, fontWeight: '900', color: P.charcoal, marginBottom: 20, letterSpacing: -0.3 },
+
+  // Bannière brouillon non publié
+  draftBanner:        { borderRadius: 14, borderWidth: 1.5, padding: 14, marginBottom: 16 },
+  draftBannerRow:     { flexDirection: 'row', alignItems: 'flex-start', gap: 10 },
+  draftBannerIcon:    { fontSize: 20 },
+  draftBannerTitle:   { fontSize: 14, fontWeight: '800', marginBottom: 2 },
+  draftBannerSub:     { fontSize: 12, lineHeight: 17 },
+  draftBannerActions: { flexDirection: 'row', gap: 8, marginTop: 12 },
+  draftBannerBtn:     { flex: 1, paddingVertical: 10, borderRadius: 10, alignItems: 'center', borderWidth: 1.5, borderColor: 'transparent' },
+  draftBannerBtnPrimary: { backgroundColor: P.terra, borderColor: P.terra },
+  draftBannerBtnTxt:  { fontSize: 13, fontWeight: '700' },
 
   // Catégories
   catCarousel:   { paddingRight: 18, gap: CATEGORY_CARD_GAP },
