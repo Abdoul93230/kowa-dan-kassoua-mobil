@@ -179,13 +179,22 @@ export const registerPushToken = async (expoPushToken, userId = null) => {
 };
 
 /**
- * Envoyer code OTP pour inscription
- * @param {string} phone - Numéro de téléphone au format "+227 12345678"
+ * Corps de requête pour un identifiant : { email } s'il contient "@", sinon { phone }
+ * @param {string} identifier - Numéro "+227 12345678" ou email
+ */
+export const identifierPayload = (identifier) => {
+  const value = String(identifier || '').trim();
+  return value.includes('@') ? { email: value.toLowerCase() } : { phone: value };
+};
+
+/**
+ * Envoyer code OTP pour inscription (par SMS ou par email)
+ * @param {string} identifier - Numéro au format "+227 12345678" ou email
  * @returns {Promise<{success: boolean, data: {attemptsRemaining: number, devOTPCode?: string}}>}
  */
-export const sendOTP = async (phone) => {
+export const sendOTP = async (identifier) => {
   try {
-    const response = await api.post('/auth/send-otp', { phone });
+    const response = await api.post('/auth/send-otp', identifierPayload(identifier));
     return response.data;
   } catch (error) {
     console.error('❌ Erreur envoi OTP:', error);
@@ -197,13 +206,13 @@ export const sendOTP = async (phone) => {
 
 /**
  * Vérifier code OTP pour inscription
- * @param {string} phone - Numéro de téléphone
+ * @param {string} identifier - Numéro de téléphone ou email
  * @param {string} code - Code OTP à 6 chiffres
  * @returns {Promise<{success: boolean, data: {verified: boolean}}>}
  */
-export const verifyOTP = async (phone, code) => {
+export const verifyOTP = async (identifier, code) => {
   try {
-    const response = await api.post('/auth/verify-otp', { phone, code });
+    const response = await api.post('/auth/verify-otp', { ...identifierPayload(identifier), code });
     return response.data;
   } catch (error) {
     console.error('❌ Erreur vérification OTP:', error);
@@ -268,13 +277,13 @@ export const resetPassword = async (identifier, code, newPassword) => {
 };
 
 /**
- * Vérifier si un numéro de téléphone existe (Mode 1)
- * @param {string} phone - Numéro de téléphone au format "+227 12345678"
+ * Vérifier si un numéro de téléphone (ou un email) existe (Mode 1)
+ * @param {string} identifier - Numéro au format "+227 12345678" ou email
  * @returns {Promise<{success: boolean, data: {exists: boolean}}>}
  */
-export const checkPhone = async (phone) => {
+export const checkPhone = async (identifier) => {
   try {
-    const response = await api.post('/auth/check-phone', { phone });
+    const response = await api.post('/auth/check-phone', identifierPayload(identifier));
     return response.data;
   } catch (error) {
     console.error('❌ Erreur check-phone:', error);
@@ -286,12 +295,12 @@ export const checkPhone = async (phone) => {
 
 /**
  * Inscription rapide contextuelle (Mode 1)
- * @param {Object} data - { name, phone }
+ * @param {Object} data - { name, identifier } (identifier = téléphone ou email)
  * @returns {Promise<{success: boolean, data: {user, tokens}, devTempPassword?}>}
  */
-export const quickRegister = async ({ name, phone }) => {
+export const quickRegister = async ({ name, identifier }) => {
   try {
-    const response = await api.post('/auth/quick-register', { name, phone });
+    const response = await api.post('/auth/quick-register', { name, ...identifierPayload(identifier) });
     return response.data;
   } catch (error) {
     console.error('❌ Erreur quick-register:', error);

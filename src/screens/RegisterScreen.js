@@ -65,21 +65,27 @@ const validatePhoneForCountry = (country, digits, required = true) => {
 
 // Définition des micro-étapes
 // Chaque étape = une seule question
+// L'étape "identifier" bascule entre téléphone (par défaut) et email
 const STEPS = [
   { id: 'name',            label: 'Comment vous appelez-vous ?',      icon: '👋', hint: 'Votre nom complet' },
   { id: 'country',         label: 'Votre pays ?',                     icon: '🌍', hint: 'Sélectionnez votre pays' },
-  { id: 'phone',           label: 'Votre identifiant numéro ?',       icon: '📱', hint: 'Numéro principal' },
-  { id: 'whatsapp',        label: 'Votre WhatsApp ?',                  icon: '💬', hint: 'Optionnel — même numéro par défaut' },
-  { id: 'email',           label: 'Votre email ?',                     icon: '✉️', hint: 'Optionnel' },
+  { id: 'identifier',      label: 'Votre identifiant numéro ?',       icon: '📱', hint: 'Numéro principal',
+    emailLabel: 'Votre adresse email ?', emailIcon: '✉️', emailHint: 'Vous recevrez un code de vérification par email' },
+  { id: 'whatsapp',        label: 'Votre WhatsApp ?',                  icon: '💬', hint: 'Optionnel — même numéro par défaut',
+    emailHint: 'Optionnel — pour que les acheteurs vous contactent' },
+  { id: 'email',           label: 'Votre email ?',                     icon: '✉️', hint: 'Optionnel', phoneOnly: true },
   { id: 'password',        label: 'Choisissez un mot de passe',        icon: '🔒', hint: 'Minimum 6 caractères' },
   { id: 'confirmPassword', label: 'Confirmez votre mot de passe',      icon: '✅', hint: 'Retapez votre mot de passe' },
 ];
+
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 // ─────────────────────────────────────────────────────────────────────────────
 export default function RegisterScreen({ navigation }) {
   const insets = useSafeAreaInsets();
   const { isDark, theme } = useAppTheme();
   const [stepIndex,  setStepIndex]  = useState(0);
+  const [mode,       setMode]       = useState('phone'); // 'phone' | 'email'
   const [country,    setCountry]    = useState(COUNTRIES[0]);
   const [showPicker, setShowPicker] = useState(false);
   const [showPwd,    setShowPwd]    = useState(false);
@@ -96,8 +102,20 @@ export default function RegisterScreen({ navigation }) {
   const fadeAnim= useRef(new Animated.Value(1)).current;
   const progAnim= useRef(new Animated.Value(0)).current;
 
-  const step = STEPS[stepIndex];
-  const progress = (stepIndex) / (STEPS.length - 1);
+  const isEmailMode = mode === 'email';
+  // En mode email, l'étape "email optionnel" disparaît (elle suit l'étape identifiant, l'index reste stable)
+  const steps = isEmailMode ? STEPS.filter(st => !st.phoneOnly) : STEPS;
+  const step = steps[stepIndex];
+  const stepLabel = isEmailMode && step.emailLabel ? step.emailLabel : step.label;
+  const stepIcon  = isEmailMode && step.emailIcon ? step.emailIcon : step.icon;
+  const stepHint  = isEmailMode && step.emailHint ? step.emailHint : step.hint;
+  const progress = (stepIndex) / (steps.length - 1);
+
+  const switchMode = (next) => {
+    if (next === mode) return;
+    setMode(next);
+    setError('');
+  };
 
   useEffect(() => {
     Animated.timing(progAnim, {
@@ -152,8 +170,11 @@ export default function RegisterScreen({ navigation }) {
         if (!v.name.trim() || v.name.trim().length < 2)
           return 'Minimum 2 caractères requis';
         break;
-      case 'phone':
-        {
+      case 'identifier':
+        if (isEmailMode) {
+          if (!v.email.trim() || !EMAIL_REGEX.test(v.email.trim()))
+            return 'Adresse email invalide';
+        } else {
           const phoneErr = validatePhoneForCountry(country, normalizePhoneDigits(v.phone), true);
           if (phoneErr) return phoneErr;
         }
@@ -165,7 +186,7 @@ export default function RegisterScreen({ navigation }) {
         }
         break;
       case 'email':
-        if (v.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.email))
+        if (v.email && !EMAIL_REGEX.test(v.email))
           return 'Adresse email invalide';
         break;
       case 'password':
@@ -184,12 +205,12 @@ export default function RegisterScreen({ navigation }) {
     const err = validate();
     if (err) { setError(err); return; }
 
-    // Auto-fill whatsapp si vide
-    if (step.id === 'phone' && !form.whatsapp) {
+    // Auto-fill whatsapp si vide (mode téléphone uniquement)
+    if (step.id === 'identifier' && !isEmailMode && !form.whatsapp) {
       setForm(p => ({ ...p, whatsapp: p.phone }));
     }
 
-    if (stepIndex < STEPS.length - 1) {
+    if (stepIndex < steps.length - 1) {
       animateNext(true);
       setStepIndex(i => i + 1);
       setError('');
@@ -212,15 +233,18 @@ export default function RegisterScreen({ navigation }) {
     try {
       const phoneDigits = normalizePhoneDigits(form.phone);
       const whatsappDigits = normalizePhoneDigits(form.whatsapp);
-      const fmtPhone = `${country.dialCode} ${phoneDigits}`;
+      const fmtPhone = isEmailMode ? undefined : `${country.dialCode} ${phoneDigits}`;
       const fmtWhatsapp = whatsappDigits
         ? `${country.dialCode} ${whatsappDigits}`
         : fmtPhone;
+      const email = form.email.trim().toLowerCase() || undefined;
+      // Identifiant vérifié par OTP : téléphone, ou email en mode email
+      const identifier = isEmailMode ? email : fmtPhone;
 
-      const result = await sendOTP(fmtPhone);
+      const result = await sendOTP(identifier);
       if (result.success) {
         navigation.navigate('VerifyOTP', {
-          phone: fmtPhone,
+          identifier,
           type: 'register',
           attemptsRemaining: result.data?.attemptsRemaining || 3,
           devCode: result.devOTP || result.data?.devOTP,
@@ -228,7 +252,7 @@ export default function RegisterScreen({ navigation }) {
             name:     form.name.trim(),
             phone:    fmtPhone,
             whatsapp: fmtWhatsapp,
-            email:    form.email.trim() || undefined,
+            email,
             password: form.password,
           },
         });
@@ -273,7 +297,7 @@ export default function RegisterScreen({ navigation }) {
     return 'Fort 💪';
   };
 
-  const isLast = stepIndex === STEPS.length - 1;
+  const isLast = stepIndex === steps.length - 1;
 
   return (
     <KeyboardAvoidingView
@@ -310,7 +334,7 @@ export default function RegisterScreen({ navigation }) {
 
         {/* Barre de progression segmentée */}
         <View style={s.progSegs}>
-          {STEPS.map((_, i) => (
+          {steps.map((_, i) => (
             <View
               key={i}
               style={[
@@ -324,7 +348,7 @@ export default function RegisterScreen({ navigation }) {
         </View>
 
         {/* Compteur */}
-        <Text style={[s.stepCount, { color: theme.textSoft }]}>{stepIndex + 1} / {STEPS.length}</Text>
+        <Text style={[s.stepCount, { color: theme.textSoft }]}>{stepIndex + 1} / {steps.length}</Text>
 
         <LinearGradient
           colors={[theme.divider, P.terra, theme.divider]}
@@ -344,9 +368,9 @@ export default function RegisterScreen({ navigation }) {
         {/* Zone question */}
         <View style={s.questionZone}>
           <Animated.View style={[s.questionWrap, { opacity: fadeAnim, transform: [{ translateX: slideX }] }]}>
-            <Text style={s.stepIcon}>{step.icon}</Text>
-            <Text style={[s.question, { color: theme.text }]}>{step.label}</Text>
-            {step.hint ? <Text style={[s.questionHint, { color: theme.textMuted }]}>{step.hint}</Text> : null}
+            <Text style={s.stepIcon}>{stepIcon}</Text>
+            <Text style={[s.question, { color: theme.text }]}>{stepLabel}</Text>
+            {stepHint ? <Text style={[s.questionHint, { color: theme.textMuted }]}>{stepHint}</Text> : null}
           </Animated.View>
         </View>
 
@@ -370,8 +394,41 @@ export default function RegisterScreen({ navigation }) {
             </TouchableOpacity>
           )}
 
+          {/* Sélecteur téléphone / email (téléphone par défaut) */}
+          {step.id === 'identifier' && (
+            <View style={[s.modeWrap, { backgroundColor: theme.surfaceAlt, borderColor: theme.border }]}>
+              {['phone', 'email'].map(m => (
+                <TouchableOpacity
+                  key={m}
+                  style={[s.modeBtn, mode === m && [s.modeBtnActive, { backgroundColor: theme.surface }]]}
+                  onPress={() => switchMode(m)}
+                  activeOpacity={0.8}
+                >
+                  <Text style={[s.modeTxt, { color: theme.textMuted }, mode === m && s.modeTxtActive]}>
+                    {m === 'phone' ? '📱 Téléphone' : '✉️ Email'}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          )}
+
+          {/* Email identifiant */}
+          {step.id === 'identifier' && isEmailMode && (
+            <TextInput
+              style={[s.mainInput, { color: theme.text }]}
+              placeholder="exemple@email.com"
+              placeholderTextColor={theme.inputPlaceholder}
+              value={form.email}
+              onChangeText={v => set('email', v)}
+              keyboardType="email-address"
+              autoCapitalize="none"
+              autoComplete="email"
+              textContentType="emailAddress"
+            />
+          )}
+
           {/* Numéro de téléphone / whatsapp avec indicatif */}
-          {(step.id === 'phone' || step.id === 'whatsapp') && (
+          {((step.id === 'identifier' && !isEmailMode) || step.id === 'whatsapp') && (
             <View style={s.phoneWrap}>
               <View style={[s.dialBadge, { backgroundColor: theme.surfaceAlt, borderColor: theme.border }]}>
                 <Text style={s.dialFlag}>{country.flag}</Text>
@@ -379,10 +436,10 @@ export default function RegisterScreen({ navigation }) {
               </View>
               <TextInput
                 style={[s.phoneInput, { color: theme.text }]}
-                placeholder={step.id === 'phone' ? country.sample : `${country.sample} (optionnel)`}
+                placeholder={step.id === 'identifier' ? country.sample : `${country.sample} (optionnel)`}
                 placeholderTextColor={theme.inputPlaceholder}
-                value={form[step.id]}
-                onChangeText={v => setPhoneField(step.id, v)}
+                value={step.id === 'whatsapp' ? form.whatsapp : form.phone}
+                onChangeText={v => setPhoneField(step.id === 'whatsapp' ? 'whatsapp' : 'phone', v)}
                 keyboardType="phone-pad"
               />
             </View>
@@ -597,6 +654,13 @@ const s = StyleSheet.create({
   headerBrand:  { fontSize: 16, fontWeight: '800', color: P.white },
   loginLink:    { paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8, borderWidth: 1, borderColor: 'rgba(255,255,255,0.2)' },
   loginLinkTxt: { fontSize: 12, fontWeight: '600', color: P.white },
+
+  // Sélecteur téléphone / email
+  modeWrap:      { flexDirection: 'row', borderRadius: 14, padding: 4, marginBottom: 20, borderWidth: 1, borderColor: P.dim, backgroundColor: P.surface },
+  modeBtn:       { flex: 1, paddingVertical: 10, alignItems: 'center', borderRadius: 10 },
+  modeBtnActive: { backgroundColor: P.white, shadowColor: P.terra, shadowOpacity: 0.12, shadowOffset: { width: 0, height: 2 }, shadowRadius: 6, elevation: 3 },
+  modeTxt:       { fontSize: 14, fontWeight: '600', color: P.muted },
+  modeTxtActive: { color: P.terra, fontWeight: '800' },
 
   // Progression
   progSegs:     { flexDirection: 'row', gap: 4, marginBottom: 8 },

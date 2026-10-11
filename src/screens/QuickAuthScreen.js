@@ -1,8 +1,8 @@
 // ─── QuickAuthScreen — Mode 1 : Authentification contextuelle ─────────────────
 // Déclenché quand un utilisateur non connecté tente une action protégée
-// Étape 1 : Numéro de téléphone → check-phone
-// Étape 2a : Numéro connu → Login (phone pré-rempli + password)
-// Étape 2b : Numéro inconnu → Formulaire minimal (nom) → sendOTP → VerifyOTP → quickRegister
+// Étape 1 : Numéro de téléphone (par défaut) ou email → check-phone
+// Étape 2a : Identifiant connu → Login (identifiant pré-rempli + password)
+// Étape 2b : Identifiant inconnu → Formulaire minimal (nom) → sendOTP → VerifyOTP → quickRegister
 
 import React, { useState, useRef, useEffect } from 'react';
 import {
@@ -65,6 +65,8 @@ const validatePhoneForCountry = (country, digits) => {
   return '';
 };
 
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
 // Étapes du parcours contextuel
 const STEP_PHONE = 'phone';       // Saisie du numéro
 const STEP_LOGIN = 'login';       // Numéro connu → login
@@ -83,9 +85,11 @@ export default function QuickAuthScreen({ navigation, route }) {
   const isPublishFlow = pendingAction?.type === 'publish_submit';
 
   const [step, setStep] = useState(STEP_PHONE);
+  const [mode, setMode] = useState('phone'); // 'phone' (par défaut) | 'email'
   const [country, setCountry] = useState(COUNTRIES[0]);
   const [showPicker, setShowPicker] = useState(false);
   const [phone, setPhone] = useState('');
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPwd, setShowPwd] = useState(false);
   const [name, setName] = useState('');
@@ -146,19 +150,38 @@ export default function QuickAuthScreen({ navigation, route }) {
     ]).start();
   }, [error]);
 
-  // ── Étape 1 : Vérifier le numéro ──
-  const handleCheckPhone = async () => {
+  const isEmailMode = mode === 'email';
+
+  const switchMode = (next) => {
+    if (next === mode) return;
+    setMode(next);
+    setError('');
+  };
+
+  // Valide l'identifiant saisi et retourne { identifier } ou { error }
+  const resolveIdentifier = () => {
+    if (isEmailMode) {
+      const normalizedEmail = email.trim().toLowerCase();
+      if (!EMAIL_REGEX.test(normalizedEmail)) return { error: 'Adresse email invalide' };
+      return { identifier: normalizedEmail };
+    }
     const phoneDigits = normalizePhoneDigits(phone);
     const phoneErr = validatePhoneForCountry(country, phoneDigits);
-    if (phoneErr) {
-      setError(phoneErr);
+    if (phoneErr) return { error: phoneErr };
+    return { identifier: `${country.dialCode} ${phoneDigits}` };
+  };
+
+  // ── Étape 1 : Vérifier l'identifiant ──
+  const handleCheckPhone = async () => {
+    const { identifier, error: idErr } = resolveIdentifier();
+    if (idErr) {
+      setError(idErr);
       return;
     }
     setLoading(true);
     setError('');
     try {
-      const fmtPhone = `${country.dialCode} ${phoneDigits}`;
-      const result = await checkPhone(fmtPhone);
+      const result = await checkPhone(identifier);
       
       if (result.data?.exists) {
         // Numéro connu → étape login dans QuickAuth (ne pas sauter d'étape)
@@ -176,12 +199,11 @@ export default function QuickAuthScreen({ navigation, route }) {
     }
   };
 
-  // ── Étape 2a : Login (numéro connu) ──
+  // ── Étape 2a : Login (identifiant connu) ──
   const handleLogin = async () => {
-    const phoneDigits = normalizePhoneDigits(phone);
-    const phoneErr = validatePhoneForCountry(country, phoneDigits);
-    if (phoneErr) {
-      setError(phoneErr);
+    const { identifier, error: idErr } = resolveIdentifier();
+    if (idErr) {
+      setError(idErr);
       return;
     }
 
@@ -192,8 +214,7 @@ export default function QuickAuthScreen({ navigation, route }) {
     setLoading(true);
     setError('');
     try {
-      const fmtPhone = `${country.dialCode} ${phoneDigits}`;
-      const result = await login(fmtPhone, password);
+      const result = await login(identifier, password);
       if (!result.success) {
         setError(result.message || 'Identifiants incorrects');
         return;
@@ -207,12 +228,11 @@ export default function QuickAuthScreen({ navigation, route }) {
     }
   };
 
-  // ── Étape 2b : Inscription rapide (numéro inconnu) ──
+  // ── Étape 2b : Inscription rapide (identifiant inconnu) ──
   const handleQuickRegister = async () => {
-    const phoneDigits = normalizePhoneDigits(phone);
-    const phoneErr = validatePhoneForCountry(country, phoneDigits);
-    if (phoneErr) {
-      setError(phoneErr);
+    const { identifier, error: idErr } = resolveIdentifier();
+    if (idErr) {
+      setError(idErr);
       return;
     }
 
@@ -223,18 +243,16 @@ export default function QuickAuthScreen({ navigation, route }) {
     setLoading(true);
     setError('');
     try {
-      const fmtPhone = `${country.dialCode} ${phoneDigits}`;
-      const result = await sendOTP(fmtPhone);
-      
+      const result = await sendOTP(identifier);
+
       if (result.success) {
         navigation.navigate('VerifyOTP', {
-          phone: fmtPhone,
+          identifier,
           type: 'quick-register',
           attemptsRemaining: result.data?.attemptsRemaining || 3,
           devCode: result.devOTP || result.data?.devOTP,
           formData: {
             name: name.trim(),
-            phone: fmtPhone,
           },
           pendingAction,
           returnScreen,
@@ -289,6 +307,7 @@ export default function QuickAuthScreen({ navigation, route }) {
 
   const phoneDigits = normalizePhoneDigits(phone);
   const fmtPhone = `${country.dialCode} ${formatNationalPhone(country, phoneDigits)}`;
+  const displayIdentifier = isEmailMode ? email.trim().toLowerCase() : fmtPhone;
 
   // ── Titre et sous-titre dynamiques ──
   const getTitle = () => {
@@ -302,7 +321,7 @@ export default function QuickAuthScreen({ navigation, route }) {
     }
 
     switch (step) {
-      case STEP_PHONE: return 'Votre numéro';
+      case STEP_PHONE: return isEmailMode ? 'Votre email' : 'Votre numéro';
       case STEP_LOGIN: return 'Bon retour ! 👋';
       case STEP_REGISTER: return 'Bienvenue ! ✨';
       default: return '';
@@ -314,13 +333,13 @@ export default function QuickAuthScreen({ navigation, route }) {
       switch (step) {
         case STEP_PHONE: return 'Connexion requise pour terminer';
         case STEP_LOGIN: return 'Encore une étape et c\'est publié';
-        case STEP_REGISTER: return 'Vérifiez votre numéro pour publier';
+        case STEP_REGISTER: return isEmailMode ? 'Vérifiez votre email pour publier' : 'Vérifiez votre numéro pour publier';
         default: return '';
       }
     }
 
     switch (step) {
-      case STEP_PHONE: return 'Saisissez votre numéro pour un accès express';
+      case STEP_PHONE: return isEmailMode ? 'Saisissez votre email pour un accès express' : 'Saisissez votre numéro pour un accès express';
       case STEP_LOGIN: return 'Votre mot de passe pour continuer';
       case STEP_REGISTER: return 'Créons d\'abord votre profil rapide';
       default: return '';
@@ -408,7 +427,7 @@ export default function QuickAuthScreen({ navigation, route }) {
           <View style={s.hero}>
             {!isPublishFlow ? (
               <Text style={s.heroIcon}>
-                {step === STEP_PHONE ? '📱' : step === STEP_LOGIN ? '🔐' : '✨'}
+                {step === STEP_PHONE ? (isEmailMode ? '✉️' : '📱') : step === STEP_LOGIN ? '🔐' : '✨'}
               </Text>
             ) : null}
             <Text style={[s.heroTitle, { color: theme.text }]}>{getTitle()}</Text>
@@ -416,7 +435,44 @@ export default function QuickAuthScreen({ navigation, route }) {
           </View>
 
           {/* ── ÉTAPE 1 : Téléphone ── */}
+          {/* Sélecteur téléphone / email (téléphone par défaut) */}
           {step === STEP_PHONE && (
+            <View style={[s.modeWrap, { backgroundColor: theme.surfaceAlt, borderColor: theme.border }]}>
+              {['phone', 'email'].map(m => (
+                <TouchableOpacity
+                  key={m}
+                  style={[s.modeBtn, mode === m && [s.modeBtnActive, { backgroundColor: theme.surface }]]}
+                  onPress={() => switchMode(m)}
+                  activeOpacity={0.8}
+                >
+                  <Text style={[s.modeTxt, { color: theme.textMuted }, mode === m && s.modeTxtActive]}>
+                    {m === 'phone' ? '📱 Téléphone' : '✉️ Email'}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          )}
+
+          {step === STEP_PHONE && isEmailMode && (
+            <View style={s.fieldZone}>
+              <Text style={[s.fieldLabel, { color: theme.textMuted }]}>Adresse email</Text>
+              <TextInput
+                style={[s.mainInput, { color: theme.inputText, borderBottomColor: accent, backgroundColor: theme.inputBg }]}
+                placeholder="exemple@email.com"
+                placeholderTextColor={theme.inputPlaceholder}
+                value={email}
+                onChangeText={v => { setEmail(v); setError(''); }}
+                keyboardType="email-address"
+                autoCapitalize="none"
+                autoComplete="email"
+                textContentType="emailAddress"
+                autoFocus
+              />
+              <Text style={[s.phoneHelper, { color: theme.textSoft }]}>Le code de vérification vous sera envoyé par email.</Text>
+            </View>
+          )}
+
+          {step === STEP_PHONE && !isEmailMode && (
             <View style={s.fieldZone}>
               <Text style={[s.fieldLabel, { color: theme.textMuted }]}>Numéro de téléphone</Text>
               <View style={s.phoneWrap}>
@@ -449,12 +505,12 @@ export default function QuickAuthScreen({ navigation, route }) {
           {/* ── ÉTAPE 2a : Login (numéro connu) ── */}
           {step === STEP_LOGIN && (
             <>
-              {/* Phone affiché (non modifiable) */}
+              {/* Identifiant affiché (non modifiable) */}
               <View style={s.fieldZone}>
-                <Text style={s.fieldLabel}>Numéro de téléphone</Text>
+                <Text style={s.fieldLabel}>{isEmailMode ? 'Adresse email' : 'Numéro de téléphone'}</Text>
                 <View style={[s.phoneReadonly, { backgroundColor: theme.surfaceAlt, borderColor: theme.border }]}>
-                  <Text style={s.phoneReadonlyFlag}>{country.flag}</Text>
-                  <Text style={[s.phoneReadonlyTxt, { color: theme.text }]}>{fmtPhone}</Text>
+                  <Text style={s.phoneReadonlyFlag}>{isEmailMode ? '✉️' : country.flag}</Text>
+                  <Text style={[s.phoneReadonlyTxt, { color: theme.text }]} numberOfLines={1}>{displayIdentifier}</Text>
                   <TouchableOpacity onPress={handleBack}>
                     <Text style={s.phoneChangeTxt}>Modifier</Text>
                   </TouchableOpacity>
@@ -495,12 +551,12 @@ export default function QuickAuthScreen({ navigation, route }) {
           {/* ── ÉTAPE 2b : Formulaire minimal (numéro inconnu) ── */}
           {step === STEP_REGISTER && (
             <>
-              {/* Phone affiché */}
+              {/* Identifiant affiché */}
               <View style={s.fieldZone}>
-                <Text style={s.fieldLabel}>Numéro de téléphone</Text>
+                <Text style={s.fieldLabel}>{isEmailMode ? 'Adresse email' : 'Numéro de téléphone'}</Text>
                   <View style={[s.phoneReadonly, { backgroundColor: theme.surfaceAlt, borderColor: theme.border }]}>
-                  <Text style={s.phoneReadonlyFlag}>{country.flag}</Text>
-                    <Text style={[s.phoneReadonlyTxt, { color: theme.text }]}>{fmtPhone}</Text>
+                  <Text style={s.phoneReadonlyFlag}>{isEmailMode ? '✉️' : country.flag}</Text>
+                    <Text style={[s.phoneReadonlyTxt, { color: theme.text }]} numberOfLines={1}>{displayIdentifier}</Text>
                   <TouchableOpacity onPress={handleBack}>
                     <Text style={s.phoneChangeTxt}>Modifier</Text>
                   </TouchableOpacity>
@@ -578,7 +634,9 @@ export default function QuickAuthScreen({ navigation, route }) {
                   ? (isPublishFlow ? 'Continuer vers la publication →' : 'Continuer →')
                   : step === STEP_LOGIN
                     ? (isPublishFlow ? 'Se connecter et publier →' : 'Se connecter →')
-                    : (isPublishFlow ? 'Vérifier mon numéro et publier →' : 'Vérifier mon numéro →')}
+                    : isEmailMode
+                      ? (isPublishFlow ? 'Vérifier mon email et publier →' : 'Vérifier mon email →')
+                      : (isPublishFlow ? 'Vérifier mon numéro et publier →' : 'Vérifier mon numéro →')}
               </Text>
             )}
           </LinearGradient>
@@ -734,6 +792,13 @@ const s = StyleSheet.create({
   heroIcon:  { fontSize: 48, marginBottom: 12 },
   heroTitle: { fontSize: 24, fontWeight: '900', color: P.charcoal, letterSpacing: -0.5, marginBottom: 6, textAlign: 'center' },
   heroSub:   { fontSize: 14, color: P.muted, textAlign: 'center' },
+  // ── Sélecteur téléphone / email ──
+  modeWrap:      { flexDirection: 'row', borderRadius: 14, padding: 4, marginBottom: 24, borderWidth: 1, borderColor: P.dim, backgroundColor: P.surface },
+  modeBtn:       { flex: 1, paddingVertical: 10, alignItems: 'center', borderRadius: 10 },
+  modeBtnActive: { backgroundColor: P.white, shadowColor: P.terra, shadowOpacity: 0.12, shadowOffset: { width: 0, height: 2 }, shadowRadius: 6, elevation: 3 },
+  modeTxt:       { fontSize: 14, fontWeight: '600', color: P.muted },
+  modeTxtActive: { color: P.terra, fontWeight: '800' },
+
   // ── Fields ──
   fieldZone:  { marginBottom: 24 },
   fieldLabel: { fontSize: 12, fontWeight: '700', color: P.muted, marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.5 },

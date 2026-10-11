@@ -36,7 +36,9 @@ const STEPS = [
 ];
 
 export default function RegisterStep2Screen({ navigation, route }) {
-  const { phone, verified, formData: step1Data } = route.params || {};
+  const { identifier, phone, verified, formData: step1Data } = route.params || {};
+  // Identifiant vérifié par OTP (téléphone ou email)
+  const verifiedIdentifier = identifier || phone;
   const { register } = useAuth();
   const { isDark, theme } = useAppTheme();
   const insets = useSafeAreaInsets();
@@ -80,7 +82,7 @@ export default function RegisterStep2Screen({ navigation, route }) {
   }, []);
 
   useEffect(() => {
-    if (!verified || !phone || !step1Data) {
+    if (!verified || !verifiedIdentifier || !step1Data) {
       setAlert({
         visible: true,
         type: 'error',
@@ -89,7 +91,7 @@ export default function RegisterStep2Screen({ navigation, route }) {
         buttons: [{ text: 'OK', onPress: () => navigation.replace('Register') }],
       });
     }
-  }, [verified, phone, step1Data, navigation]);
+  }, [verified, verifiedIdentifier, step1Data, navigation]);
 
   // Calcul des étapes visibles selon le type de compte
   const visibleSteps = STEPS.filter(s => {
@@ -293,8 +295,8 @@ export default function RegisterStep2Screen({ navigation, route }) {
 
       const userData = {
         name:         step1Data.name,
-        phone:        step1Data.phone,
-        whatsapp:     step1Data.whatsapp || step1Data.phone,
+        phone:        step1Data.phone || undefined,
+        whatsapp:     step1Data.whatsapp || step1Data.phone || undefined,
         email:        step1Data.email || undefined,
         password:     step1Data.password,
         businessType: form.businessType,

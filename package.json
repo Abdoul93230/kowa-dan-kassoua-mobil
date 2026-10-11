@@ -9,6 +9,9 @@
     "web": "expo start --web",
     "build:apk": "eas build --platform android --profile preview",
     "build:prod": "eas build --platform android --profile production",
+    "build:ios": "eas build --platform ios --profile production",
+    "build:ios:preview": "eas build --platform ios --profile preview",
+    "build:all": "eas build --platform all --profile production",
     "update:preview": "eas update --channel preview --platform android --message \"OTA preview update\"",
     "update:production": "eas update --channel production --platform android --message \"OTA production update\""
   },

@@ -29,6 +29,12 @@
     }
   },
   "submit": {
-    "production": {}
+    "production": {
+      "ios": {
+        "appleId": "taktak.ganingaba@gmail.com",
+        "ascAppId": "6818821961",
+        "appleTeamId": "X346G6JB29"
+      }
+    }
   }
 }

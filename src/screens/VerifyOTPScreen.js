@@ -29,6 +29,7 @@ export default function VerifyOTPScreen({ navigation, route }) {
   const isRegister       = type === 'register';
   const isQuickRegister  = type === 'quick-register';
   const displayIdentifier = phone || identifier;
+  const isEmailIdentifier = String(displayIdentifier || '').includes('@');
 
   const [code,             setCode]             = useState(['', '', '', '', '', '']);
   const [loading,          setLoading]          = useState(false);
@@ -101,7 +102,7 @@ export default function VerifyOTPScreen({ navigation, route }) {
         const result = await verifyOTP(displayIdentifier, full);
         if (result.success && result.data.verified) {
           navigation.replace('RegisterStep2', {
-            phone: displayIdentifier, verified: true, formData,
+            identifier: displayIdentifier, verified: true, formData,
           });
         }
       } else if (isQuickRegister) {
@@ -111,7 +112,7 @@ export default function VerifyOTPScreen({ navigation, route }) {
           const { quickRegister } = await import('../api/auth');
           const regResult = await quickRegister({
             name: formData.name,
-            phone: displayIdentifier
+            identifier: displayIdentifier
           });
           
           if (regResult.success) {
@@ -196,7 +197,7 @@ export default function VerifyOTPScreen({ navigation, route }) {
     setLoading(true);
     setError('');
     try {
-      const result = isRegister
+      const result = (isRegister || isQuickRegister)
         ? await sendOTP(displayIdentifier)
         : await forgotPassword(displayIdentifier);
       if (result.success) {
@@ -278,7 +279,7 @@ export default function VerifyOTPScreen({ navigation, route }) {
             </View>
                 <Text style={[s.heroTitle, { color: theme.text }]}>Vérification</Text>
                 <Text style={[s.heroSub, { color: theme.textMuted }]}>
-              Code envoyé au{'\n'}
+              {isEmailIdentifier ? 'Code envoyé par email à' : 'Code envoyé au'}{'\n'}
               <Text style={s.heroPhone}>{displayIdentifier}</Text>
             </Text>
           </View>
