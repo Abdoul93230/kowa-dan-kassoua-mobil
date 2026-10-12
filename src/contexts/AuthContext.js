@@ -1,7 +1,7 @@
 import React, { createContext, useState, useContext, useEffect } from 'react';
 import { DeviceEventEmitter } from 'react-native';
 import Constants from 'expo-constants';
-import { login as apiLogin, register as apiRegister, getProfile, registerPushToken } from '../api/auth';
+import { login as apiLogin, register as apiRegister, getProfile, registerPushToken, logoutSession } from '../api/auth';
 import {
   saveAccessToken,
   saveRefreshToken,
@@ -84,7 +84,14 @@ export const AuthProvider = ({ children }) => {
       setIsAuthenticated(false);
       console.log('ℹ️ Session expirée — état auth réinitialisé');
     });
-    return () => subscription.remove();
+    // Jeton d'accès renouvelé par l'intercepteur : le socket se reconnecte avec le nouveau
+    const refreshed = DeviceEventEmitter.addListener('auth:token_refreshed', (newToken) => {
+      if (newToken) setToken(newToken);
+    });
+    return () => {
+      subscription.remove();
+      refreshed.remove();
+    };
   }, []);
 
   const loadUser = async () => {
@@ -210,6 +217,7 @@ export const AuthProvider = ({ children }) => {
 
   const logout = async () => {
     try {
+      await logoutSession(); // ferme la session de ce téléphone côté serveur
       await clearAllData();
       setToken(null);
       setUser(null);

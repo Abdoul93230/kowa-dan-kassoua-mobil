@@ -1,197 +1,180 @@
-import React, { useEffect, useMemo, useState } from 'react';
+// ─── Toutes les catégories ───────────────────────────────────────────────────
+// Grille 2 colonnes, recherche instantanée (catégories + sous-catégories).
+
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  View,
-  Text,
-  StyleSheet,
-  StatusBar,
-  TouchableOpacity,
-  TextInput,
-  ActivityIndicator,
-  FlatList,
-  RefreshControl,
+  View, Text, StyleSheet, TextInput, FlatList, RefreshControl, Pressable, useWindowDimensions,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { LinearGradient } from 'expo-linear-gradient';
 import { Feather } from '@expo/vector-icons';
 import { getCategories } from '../api/categories';
 import { useAppTheme } from '../contexts/ThemeContext';
 import { MOBILE_COLORS as P } from '../theme/colors';
+import PressableScale from '../components/home/PressableScale';
+import { categoryEmoji } from '../components/home/CategoryRail';
+import { SkeletonGroup, Bone } from '../components/home/Skeleton';
 
-const iconToEmoji = {
-  Smartphone: '📱',
-  UtensilsCrossed: '🍔',
-  Home: '🏠',
-  Car: '🚗',
-  Shirt: '👕',
-  Wrench: '🔧',
-  Laptop: '💻',
-  Dumbbell: '🏋️',
-  Baby: '👶',
-  PawPrint: '🐾',
-  Book: '📚',
-  Palette: '🎨',
-  Briefcase: '💼',
-  Gamepad2: '🎮',
-  HardHat: '⛑️',
-  Package: '📦',
-  MoreHorizontal: '•••',
-};
+const GAP = 12;
+const fold = (v) => String(v || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+const countOf = (cat) => Number(cat?.totalCount ?? ((cat?.productsCount || 0) + (cat?.servicesCount || 0))) || 0;
 
-const getEmoji = (icon, fallback) => fallback || iconToEmoji[icon] || '📦';
-
-function CategoryCard({ item, onPress, theme, isDark }) {
-  const total = Number(item?.totalCount || 0);
-  const subcategories = Array.isArray(item?.subcategories) ? item.subcategories : [];
+function CategoryCard({ cat, width, onPress, query }) {
+  const { theme, isDark } = useAppTheme();
+  const subs = Array.isArray(cat.subcategories) ? cat.subcategories : [];
+  const count = countOf(cat);
+  // Si la recherche correspond à une sous-catégorie, on la montre en premier
+  const q = fold(query).trim();
+  const ordered = q ? [...subs].sort((a, b) => Number(fold(b.name).includes(q)) - Number(fold(a.name).includes(q))) : subs;
+  const preview = ordered.slice(0, 2).map((sub) => sub.name).join(', ');
 
   return (
-    <TouchableOpacity style={[s.card, { backgroundColor: theme.surface, borderColor: theme.border, shadowColor: theme.shadow }]} onPress={onPress} activeOpacity={0.85}>
-      <LinearGradient colors={isDark ? [theme.surfaceAlt, theme.surface] : ['#FFE9DE', theme.surface]} style={s.cardHead}>
-        <View style={[s.iconWrap, { backgroundColor: theme.surface, borderColor: isDark ? theme.border : 'rgba(236,90,19,0.18)' }]}>
-          <Text style={s.iconTxt}>{getEmoji(item?.icon, item?.emoji)}</Text>
+    <PressableScale
+      onPress={onPress}
+      scaleTo={0.96}
+      style={[s.card, { width, backgroundColor: theme.surface, borderColor: theme.border }, !isDark && s.cardShadow]}
+      accessibilityLabel={cat.name}
+    >
+      <View style={s.cardTop}>
+        <View style={[s.emojiBox, { backgroundColor: isDark ? 'rgba(236,90,19,0.14)' : P.orange50 }]}>
+          <Text style={s.emoji}>{categoryEmoji(cat)}</Text>
         </View>
-        <View style={{ flex: 1 }}>
-          <Text style={[s.cardTitle, { color: theme.text }]} numberOfLines={1}>{item?.name || 'Catégorie'}</Text>
-          <Text style={[s.cardDesc, { color: theme.textMuted }]} numberOfLines={2}>{item?.description || 'Explorez les annonces de cette catégorie.'}</Text>
+        <View style={[s.countPill, { backgroundColor: theme.glass }]}>
+          <Text style={[s.countTxt, { color: theme.textMuted }]}>{count}</Text>
         </View>
-        <Feather name="chevron-right" size={18} color={isDark ? P.amber : P.terra} />
-      </LinearGradient>
-
-      <View style={s.cardBody}>
-        <View style={[s.statPill, { backgroundColor: isDark ? 'rgba(236,90,19,0.18)' : P.peachSoft }]}>
-          <Text style={[s.statPillTxt, { color: isDark ? P.amber : P.terra }]}>{total.toLocaleString()} annonces</Text>
-        </View>
-
-        {subcategories.length > 0 && (
-          <View style={s.subWrap}>
-            {subcategories.slice(0, 3).map((sub) => (
-              <View key={sub?._id || sub?.slug || sub?.name} style={[s.subChip, { backgroundColor: theme.surfaceAlt, borderColor: theme.border }]}>
-                <Text style={[s.subChipTxt, { color: theme.textMuted }]} numberOfLines={1}>{sub?.name || 'Sous-catégorie'}</Text>
-              </View>
-            ))}
-          </View>
-        )}
       </View>
-    </TouchableOpacity>
+      <Text style={[s.name, { color: theme.text }]} numberOfLines={2}>{cat.name}</Text>
+      <Text style={[s.subs, { color: theme.textSoft }]} numberOfLines={1}>
+        {preview ? `${preview}${subs.length > 2 ? ` +${subs.length - 2}` : ''}` : `${count} annonce${count > 1 ? 's' : ''}`}
+      </Text>
+    </PressableScale>
   );
 }
 
 export default function CategoriesScreen({ navigation }) {
   const insets = useSafeAreaInsets();
+  const { width } = useWindowDimensions();
   const { isDark, theme } = useAppTheme();
   const [categories, setCategories] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [status, setStatus] = useState('loading');
   const [refreshing, setRefreshing] = useState(false);
   const [query, setQuery] = useState('');
 
-  const fetchCategories = async () => {
+  const cardW = (width - 32 - GAP) / 2;
+  const accent = isDark ? P.amber : P.terra;
+
+  const fetchCategories = useCallback(async () => {
     try {
       const res = await getCategories();
-      const direct = res?.data;
-      const list = Array.isArray(direct) ? direct : Array.isArray(direct?.data) ? direct.data : [];
+      const list = Array.isArray(res?.data) ? res.data : [];
       setCategories(list);
+      setStatus('ready');
     } catch (error) {
-      console.error('Erreur chargement categories:', error);
-      setCategories([]);
+      setStatus((prev) => (prev === 'ready' ? prev : 'error'));
     } finally {
-      setLoading(false);
       setRefreshing(false);
     }
-  };
-
-  useEffect(() => {
-    fetchCategories();
   }, []);
 
+  useEffect(() => { fetchCategories(); }, [fetchCategories]);
+
   const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
+    const q = fold(query).trim();
     if (!q) return categories;
-    return categories.filter((cat) => {
-      const name = String(cat?.name || '').toLowerCase();
-      const desc = String(cat?.description || '').toLowerCase();
-      const hasSub = (cat?.subcategories || []).some((sub) => String(sub?.name || '').toLowerCase().includes(q));
-      return name.includes(q) || desc.includes(q) || hasSub;
-    });
+    return categories.filter((cat) =>
+      fold(cat.name).includes(q) ||
+      fold(cat.description).includes(q) ||
+      (cat.subcategories || []).some((sub) => fold(sub.name).includes(q))
+    );
   }, [categories, query]);
 
-  const totalSubs = categories.reduce((acc, cat) => acc + ((cat?.subcategories || []).length || 0), 0);
+  const totalAds = useMemo(() => categories.reduce((acc, cat) => acc + countOf(cat), 0), [categories]);
+
+  const header = (
+    <View style={[s.header, { paddingTop: insets.top + 6, backgroundColor: isDark ? theme.screen : theme.surface, borderBottomColor: theme.border }]}>
+      <View style={s.headerRow}>
+        <PressableScale onPress={() => navigation.goBack()} scaleTo={0.9} style={[s.iconBtn, { backgroundColor: theme.glass }]} accessibilityLabel="Retour">
+          <Feather name="arrow-left" size={20} color={theme.text} />
+        </PressableScale>
+        <View style={{ flex: 1 }}>
+          <Text style={[s.title, { color: theme.text }]}>Catégories</Text>
+          <Text style={[s.subtitle, { color: theme.textSoft }]}>
+            {status === 'ready' ? `${categories.length} univers · ${totalAds} annonces` : 'Chargement…'}
+          </Text>
+        </View>
+      </View>
+      <View style={[s.search, { backgroundColor: isDark ? theme.surface : 'rgba(17,24,39,0.05)', borderColor: query ? accent : 'transparent' }]}>
+        <Feather name="search" size={17} color={query ? accent : theme.textSoft} />
+        <TextInput
+          style={[s.searchInput, { color: theme.text }]}
+          placeholder="Rechercher une catégorie…"
+          placeholderTextColor={theme.textSoft}
+          value={query}
+          onChangeText={setQuery}
+          autoCorrect={false}
+          returnKeyType="search"
+        />
+        {query ? (
+          <Pressable onPress={() => setQuery('')} hitSlop={10} accessibilityLabel="Effacer">
+            <Feather name="x-circle" size={17} color={theme.textSoft} />
+          </Pressable>
+        ) : null}
+      </View>
+    </View>
+  );
 
   return (
-    <View style={[s.screen, { backgroundColor: theme.screen }]}> 
-      <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} backgroundColor="transparent" translucent />
+    <View style={[s.screen, { backgroundColor: theme.screen }]}>
+      {header}
 
-      <LinearGradient colors={theme.header} style={[s.header, { paddingTop: (insets.top || 0) + 4 }]}>
-        <TouchableOpacity style={[s.backBtn, { backgroundColor: theme.cardSoft, borderColor: theme.border }]} onPress={() => navigation.goBack()} activeOpacity={0.8}>
-          <Text style={[s.backTxt, { color: theme.text }]}>←</Text>
-        </TouchableOpacity>
-        <Text style={[s.headerTitle, { color: theme.text }]}>Toutes les catégories</Text>
-        <Text style={[s.headerSub, { color: theme.textMuted }]}>Explorez les univers disponibles</Text>
-
-        <View style={[s.searchWrap, { backgroundColor: theme.surface, borderColor: theme.border }]}> 
-          <Feather name="search" size={16} color={theme.iconMuted} />
-          <TextInput
-            style={[s.searchInput, { color: theme.inputText }]}
-            placeholder="Rechercher une catégorie..."
-            placeholderTextColor={theme.inputPlaceholder}
-            value={query}
-            onChangeText={setQuery}
-          />
-          {query.length > 0 && (
-            <TouchableOpacity onPress={() => setQuery('')} activeOpacity={0.7}>
-              <Text style={[s.clearTxt, { color: theme.textMuted }]}>✕</Text>
-            </TouchableOpacity>
-          )}
-        </View>
-
-        <View style={[s.statsRow, { backgroundColor: theme.glass, borderColor: theme.border }]}>
-          <View style={s.statBox}>
-            <Text style={[s.statNum, { color: theme.text }]}>{categories.length}</Text>
-            <Text style={[s.statLbl, { color: theme.textMuted }]}>Catégories</Text>
+      {status === 'loading' ? (
+        <SkeletonGroup>
+          <View style={[s.list, s.skeleton]}>
+            {Array.from({ length: 8 }).map((_, i) => (
+              <Bone key={i} width={cardW} height={128} radius={20} style={{ marginBottom: GAP }} />
+            ))}
           </View>
-          <View style={[s.statDivider, { backgroundColor: theme.divider }]} />
-          <View style={s.statBox}>
-            <Text style={[s.statNum, { color: theme.text }]}>{totalSubs}</Text>
-            <Text style={[s.statLbl, { color: theme.textMuted }]}>Sous-catégories</Text>
-          </View>
-        </View>
-      </LinearGradient>
-
-      {loading ? (
-        <View style={s.loadingWrap}>
-          <ActivityIndicator size="large" color={P.terra} />
-          <Text style={s.loadingTxt}>Chargement des catégories...</Text>
-        </View>
+        </SkeletonGroup>
       ) : (
         <FlatList
           data={filtered}
-          keyExtractor={(item, index) => String(item?._id || item?.slug || index)}
-          contentContainerStyle={{ padding: 16, paddingBottom: 24 + Math.max(insets.bottom, 8) }}
+          keyExtractor={(item) => String(item._id || item.slug)}
+          numColumns={2}
+          columnWrapperStyle={{ justifyContent: 'space-between', marginBottom: GAP }}
+          contentContainerStyle={[s.list, { paddingBottom: insets.bottom + 32 }, filtered.length === 0 && { flexGrow: 1 }]}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="on-drag"
+          showsVerticalScrollIndicator={false}
           renderItem={({ item }) => (
             <CategoryCard
-              item={item}
-              theme={theme}
-              isDark={isDark}
-              onPress={() => navigation.navigate('CategoryProducts', {
-                categorySlug: item?.slug,
-                categoryName: item?.name,
-              })}
+              cat={item}
+              width={cardW}
+              query={query}
+              onPress={() => navigation.navigate('CategoryProducts', { categorySlug: item.slug, categoryName: item.name })}
             />
           )}
           refreshControl={
-            <RefreshControl
-              refreshing={refreshing}
-              onRefresh={() => {
-                setRefreshing(true);
-                fetchCategories();
-              }}
-              colors={[P.terra]}
-              tintColor={P.terra}
-            />
+            <RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); fetchCategories(); }} colors={[P.terra]} tintColor={P.terra} />
           }
           ListEmptyComponent={
-            <View style={s.emptyWrap}>
-              <Text style={s.emptyEmoji}>🔍</Text>
-              <Text style={s.emptyTitle}>Aucune catégorie</Text>
-              <Text style={s.emptySub}>Essayez avec un autre mot-clé.</Text>
+            <View style={s.empty}>
+              <View style={[s.emptyIcon, { backgroundColor: theme.glass }]}>
+                <Feather name={status === 'error' ? 'wifi-off' : 'search'} size={28} color={theme.textMuted} />
+              </View>
+              <Text style={[s.emptyTitle, { color: theme.text }]}>
+                {status === 'error' ? 'Connexion impossible' : `Aucune catégorie pour « ${query} »`}
+              </Text>
+              {status === 'error' ? (
+                <PressableScale onPress={() => { setStatus('loading'); fetchCategories(); }} style={[s.emptyBtn, { backgroundColor: P.terra }]}>
+                  <Text style={s.emptyBtnTxt}>Réessayer</Text>
+                </PressableScale>
+              ) : (
+                <PressableScale
+                  onPress={() => navigation.navigate('AllProducts', { q: query.trim() })}
+                  style={[s.emptyBtn, { backgroundColor: P.terra }]}
+                >
+                  <Text style={s.emptyBtnTxt}>Chercher « {query.trim()} » dans les annonces</Text>
+                </PressableScale>
+              )}
             </View>
           }
         />
@@ -201,102 +184,28 @@ export default function CategoriesScreen({ navigation }) {
 }
 
 const s = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: P.surface },
-  header: { paddingHorizontal: 14, paddingBottom: 10 },
-  backBtn: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: 'rgba(255,255,255,0.18)',
-    borderWidth: 1,
-    borderColor: 'transparent',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 8,
-  },
-  backTxt: { color: P.white, fontSize: 16, fontWeight: '700' },
-  headerTitle: { color: P.white, fontSize: 20, fontWeight: '900', marginBottom: 2 },
-  headerSub: { color: 'rgba(255,255,255,0.65)', fontSize: 11, marginBottom: 10 },
-  searchWrap: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: P.white,
-    borderWidth: 1,
-    borderColor: 'transparent',
-    borderRadius: 10,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    gap: 6,
-  },
-  searchInput: { flex: 1, fontSize: 13, color: P.charcoal },
-  clearTxt: { color: P.muted, fontSize: 13, fontWeight: '700' },
-  statsRow: {
-    marginTop: 8,
-    borderRadius: 10,
-    backgroundColor: 'rgba(255,255,255,0.12)',
-    borderWidth: 1,
-    borderColor: 'transparent',
-    paddingVertical: 6,
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  statBox: { flex: 1, alignItems: 'center' },
-  statNum: { fontSize: 17, fontWeight: '900', color: P.amber },
-  statLbl: { fontSize: 9, color: 'rgba(255,255,255,0.72)', fontWeight: '600' },
-  statDivider: { width: 1, height: 22, backgroundColor: 'rgba(255,255,255,0.2)' },
-
-  card: {
-    backgroundColor: P.white,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: P.dim,
-    overflow: 'hidden',
-    marginBottom: 12,
-    shadowColor: P.charcoal,
-    shadowOpacity: 0.08,
-    shadowOffset: { width: 0, height: 4 },
-    shadowRadius: 10,
-    elevation: 3,
-  },
-  cardHead: { flexDirection: 'row', alignItems: 'center', padding: 12, gap: 10 },
-  iconWrap: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: P.white,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: 'rgba(236,90,19,0.18)',
-  },
-  iconTxt: { fontSize: 20 },
-  cardTitle: { color: P.charcoal, fontSize: 15, fontWeight: '800', marginBottom: 2 },
-  cardDesc: { color: P.muted, fontSize: 11, lineHeight: 15 },
-  cardBody: { paddingHorizontal: 12, paddingBottom: 12 },
-  statPill: {
-    alignSelf: 'flex-start',
-    backgroundColor: P.peachSoft,
-    borderRadius: 12,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    marginBottom: 8,
-  },
-  statPillTxt: { color: P.terra, fontSize: 11, fontWeight: '700' },
-  subWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
-  subChip: {
-    backgroundColor: P.surface,
-    borderRadius: 12,
-    paddingHorizontal: 8,
-    paddingVertical: 5,
-    borderWidth: 1,
-    borderColor: P.dim,
-  },
-  subChipTxt: { color: P.muted, fontSize: 10, fontWeight: '600', maxWidth: 130 },
-
-  loadingWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 10 },
-  loadingTxt: { color: P.muted, fontSize: 13, fontWeight: '600' },
-  emptyWrap: { alignItems: 'center', paddingVertical: 48 },
-  emptyEmoji: { fontSize: 42, marginBottom: 10 },
-  emptyTitle: { fontSize: 18, fontWeight: '800', color: P.charcoal, marginBottom: 4 },
-  emptySub: { fontSize: 13, color: P.muted },
+  screen: { flex: 1 },
+  header: { borderBottomWidth: StyleSheet.hairlineWidth, paddingBottom: 12 },
+  headerRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingBottom: 12 },
+  iconBtn: { width: 42, height: 42, borderRadius: 21, alignItems: 'center', justifyContent: 'center' },
+  title: { fontSize: 22, fontWeight: '900', letterSpacing: -0.5 },
+  subtitle: { fontSize: 12.5, marginTop: 1 },
+  search: { marginHorizontal: 16, height: 46, borderRadius: 14, borderWidth: 1.5, flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 14 },
+  searchInput: { flex: 1, fontSize: 15, paddingVertical: 0 },
+  list: { paddingHorizontal: 16, paddingTop: 16 },
+  skeleton: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between' },
+  card: { borderRadius: 20, borderWidth: StyleSheet.hairlineWidth, padding: 14, minHeight: 128 },
+  cardShadow: { shadowColor: '#0f172a', shadowOpacity: 0.06, shadowRadius: 12, shadowOffset: { width: 0, height: 5 }, elevation: 2 },
+  cardTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
+  emojiBox: { width: 50, height: 50, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
+  emoji: { fontSize: 25 },
+  countPill: { minWidth: 30, height: 24, borderRadius: 12, paddingHorizontal: 8, alignItems: 'center', justifyContent: 'center' },
+  countTxt: { fontSize: 12, fontWeight: '800' },
+  name: { fontSize: 15, fontWeight: '800', marginTop: 12, letterSpacing: -0.2 },
+  subs: { fontSize: 12, marginTop: 3 },
+  empty: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 32, paddingVertical: 48 },
+  emptyIcon: { width: 68, height: 68, borderRadius: 24, alignItems: 'center', justifyContent: 'center', marginBottom: 14 },
+  emptyTitle: { fontSize: 17, fontWeight: '800', textAlign: 'center' },
+  emptyBtn: { marginTop: 18, paddingHorizontal: 20, paddingVertical: 12, borderRadius: 14 },
+  emptyBtnTxt: { color: P.white, fontSize: 14, fontWeight: '800', textAlign: 'center' },
 });

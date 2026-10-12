@@ -5,10 +5,10 @@
 import React, { useState, useRef, useEffect } from 'react';
 import {
   View, Text, StyleSheet, TextInput, TouchableOpacity,
-  ScrollView, StatusBar, Animated, KeyboardAvoidingView,
-  Platform, ActivityIndicator, Modal, Image,
+  ScrollView, Animated, Platform, ActivityIndicator, Modal, Image,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { KeyboardAwareView, KeyboardAwareScrollView, FormKeyboardToolbar } from '../components/Keyboard';
 import { LinearGradient } from 'expo-linear-gradient';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useAuth } from '../contexts/AuthContext';
@@ -208,11 +208,9 @@ export default function LoginScreen({ navigation, route }) {
   };
 
   return (
-    <KeyboardAvoidingView
+    <KeyboardAwareView
       style={[s.container, { backgroundColor: theme.screen }]}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'padding'}
     >
-      <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} backgroundColor="transparent" translucent />
 
       {/* ── HEADER ardoise ── */}
       <LinearGradient
@@ -250,7 +248,7 @@ export default function LoginScreen({ navigation, route }) {
       </LinearGradient>
 
       {/* ── CONTENU ── */}
-      <ScrollView
+      <KeyboardAwareScrollView
         style={{ flex: 1 }}
         contentContainerStyle={s.scrollContent}
         keyboardShouldPersistTaps="handled"
@@ -347,7 +345,7 @@ export default function LoginScreen({ navigation, route }) {
                   placeholderTextColor={theme.inputPlaceholder}
                   value={phone}
                   onChangeText={handlePhoneChange}
-                  keyboardType="phone-pad"
+                  textContentType="telephoneNumber" autoComplete="tel" keyboardType="phone-pad"
                 />
               </View>
             ) : (
@@ -357,7 +355,7 @@ export default function LoginScreen({ navigation, route }) {
                 placeholderTextColor={theme.inputPlaceholder}
                 value={email}
                 onChangeText={v => { setEmail(v); setError(''); }}
-                keyboardType="email-address"
+                textContentType="emailAddress" autoComplete="email" keyboardType="email-address"
                 autoCapitalize="none"
               />
             )}
@@ -368,12 +366,14 @@ export default function LoginScreen({ navigation, route }) {
             <Text style={[s.fieldLabel, { color: theme.textMuted }]}>Mot de passe</Text>
             <View style={s.pwdWrap}>
               <TextInput
+                returnKeyType="go"
+                onSubmitEditing={() => handleLogin()}
                 style={[s.pwdInput, { color: theme.text }]}
                 placeholder="••••••••"
                 placeholderTextColor={theme.inputPlaceholder}
                 value={password}
                 onChangeText={v => { setPassword(v); setError(''); }}
-                secureTextEntry={!showPwd}
+                textContentType="password" autoComplete="password" secureTextEntry={!showPwd}
                 autoCapitalize="none"
               />
               <TouchableOpacity style={s.eyeBtn} onPress={() => setShowPwd(p => !p)}>
@@ -416,7 +416,7 @@ export default function LoginScreen({ navigation, route }) {
           ) : null}
 
         </Animated.View>
-      </ScrollView>
+      </KeyboardAwareScrollView>
 
       {/* ── FOOTER bouton ── */}
       <View style={[s.footer, { backgroundColor: theme.screen, borderTopColor: theme.divider, paddingBottom: Math.max(insets.bottom, 12) + 4 }]}>
@@ -503,7 +503,9 @@ export default function LoginScreen({ navigation, route }) {
           </View>
         </View>
       </Modal>
-    </KeyboardAvoidingView>
+      {/* Barre ‹ › OK collée au clavier (le bouton du bas reste en place) */}
+      <FormKeyboardToolbar />
+    </KeyboardAwareView>
   );
 }
 

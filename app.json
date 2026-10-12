@@ -55,7 +55,8 @@
       ],
       "expo-font",
       "expo-audio",
-      "expo-asset"
+      "expo-asset",
+      "expo-image"
     ],
     "extra": {
       "eas": {

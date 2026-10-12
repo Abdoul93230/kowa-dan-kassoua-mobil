@@ -5,13 +5,12 @@ import {
   DeviceEventEmitter,
   Dimensions,
   FlatList,
-  Image,
+  Keyboard,
   KeyboardAvoidingView,
   Modal,
   PanResponder,
   Platform,
   ScrollView,
-  StatusBar,
   StyleSheet,
   Text,
   TextInput,
@@ -19,17 +18,16 @@ import {
   TouchableWithoutFeedback,
   View,
 } from 'react-native';
-import {
-  createAudioPlayer,
-  RecordingPresets,
-  requestRecordingPermissionsAsync,
-  setAudioModeAsync,
-  useAudioRecorder,
-} from 'expo-audio';
+import { Image } from 'expo-image';
+import { peekCache, writeCache } from '../api/cache';
+import ChatComposer from '../components/chat/ChatComposer';
+import VoiceMessageBubble from '../components/chat/VoiceMessageBubble';
+import { configureVoicePlayback, stopVoicePlayback } from '../components/chat/voicePlayback';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import { useHeaderHeight } from '@react-navigation/elements';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { ChatKeyboardView, doneAccessory } from '../components/Keyboard';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useAuth } from '../contexts/AuthContext';
 import { useAppTheme } from '../contexts/ThemeContext';
@@ -47,8 +45,7 @@ import {
 import { checkReviewEligibility, createReview } from '../api/reviews';
 import { useSocket } from '../hooks/useSocket';
 import { MOBILE_COLORS as P } from '../theme/colors';
-
-const WAVE_BARS = Array.from({ length: 24 }, (_, i) => i);
+import { sizedImage } from '../utils/format';
 
 function normalizeId(value) {
   if (!value) return '';
@@ -314,7 +311,7 @@ function ReviewBottomSheet({
                 borderWidth: 1, borderColor: 'rgba(236,90,19,0.15)',
               }}>
                 <Image
-                  source={{ uri: item.image || 'https://via.placeholder.com/56' }}
+                  source={{ uri: sizedImage(item.image, 56) || 'https://via.placeholder.com/56' }}
                   style={{ width: 56, height: 56, borderRadius: 12 }}
                 />
                 <View style={{ flex: 1 }}>
@@ -383,7 +380,7 @@ function ReviewBottomSheet({
                 placeholderTextColor={theme.textMuted}
                 value={reviewComment}
                 onChangeText={setReviewComment}
-                multiline
+                {...doneAccessory} multiline
                 numberOfLines={3}
                 maxLength={500}
               />
@@ -440,28 +437,39 @@ export default function ConversationScreen({ route, navigation }) {
   const { user, token, isAuthenticated } = useAuth();
   const { isDark, theme } = useAppTheme();
 
-  const [conversation, setConversation] = useState(null);
-  const [messages, setMessages] = useState([]);
-  const [loading, setLoading] = useState(true);
+  // Réouverture instantanée : derniers messages gardés en mémoire pour la session,
+  // et en-tête pré-rempli depuis la liste des conversations
+  const currentUserKey = String(user?.id || user?._id || '');
+  const messagesCacheKey = `messages:${currentUserKey}:${conversationId}`;
+  const cachedThread = peekCache(messagesCacheKey)?.data;
+  const listConversation = cachedThread?.conversation
+    || peekCache(`conversations:${currentUserKey}`)?.data?.items?.find((conv) => String(conv.id) === String(conversationId))
+    || null;
+
+  const [conversation, setConversation] = useState(listConversation);
+  const [messages, setMessages] = useState(cachedThread?.messages || []);
+  const [loading, setLoading] = useState(!cachedThread);
   const [loadingOlder, setLoadingOlder] = useState(false);
-  const [hasMoreMessages, setHasMoreMessages] = useState(false);
-  const [currentPage, setCurrentPage] = useState(1);
+  const [hasMoreMessages, setHasMoreMessages] = useState(Boolean(cachedThread?.hasMore));
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
   const [sendingVoice, setSendingVoice] = useState(false);
   const [dealActionLoading, setDealActionLoading] = useState(false);
   const [ownerClosureLoading, setOwnerClosureLoading] = useState(false);
-  const [isRecording, setIsRecording] = useState(false);
-  const [recordingMs, setRecordingMs] = useState(0);
-  const [playingMessageId, setPlayingMessageId] = useState('');
-  const [audioStates, setAudioStates] = useState({});
-  const [audioTrackWidths, setAudioTrackWidths] = useState({});
   const [typingUsers, setTypingUsers] = useState({});
   const [reviewEligible, setReviewEligible] = useState(false);
   const [checkingReviewEligibility, setCheckingReviewEligibility] = useState(false);
   const [reviewModalVisible, setReviewModalVisible] = useState(false);
   const [reviewRating, setReviewRating] = useState(0);
   const [reviewComment, setReviewComment] = useState('');
+
+  // Clavier ouvert : garder les derniers messages visibles au-dessus de la zone de saisie
+  useEffect(() => {
+    const sub = Keyboard.addListener('keyboardDidShow', () => {
+      flatListRef.current?.scrollToOffset({ offset: 0, animated: true });
+    });
+    return () => sub.remove();
+  }, []);
   const [submittingReview, setSubmittingReview] = useState(false);
   const [error, setError] = useState('');
   const [alert, setAlert] = useState({
@@ -486,11 +494,15 @@ export default function ConversationScreen({ route, navigation }) {
 
   const typingTimeoutRef = useRef(null);
   const flatListRef = useRef(null);
-  const recordingIntervalRef = useRef(null);
-  const playingSoundRef = useRef(null);
-  const playingMessageIdRef = useRef('');
+  const messagesRef = useRef([]);
+  messagesRef.current = messages;
+  // Liste inversée : le plus récent en premier (affiché en bas)
+  const listData = useMemo(() => [...messages].reverse(), [messages]);
+  // Dans une liste inversée, « le plus récent » est à l'offset 0
+  const scrollToLatest = useCallback((animated = true) => {
+    flatListRef.current?.scrollToOffset({ offset: 0, animated });
+  }, []);
   const initialScrollDoneRef = useRef(false);
-  const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
   const styles = useMemo(() => createStyles(theme, isDark), [theme, isDark]);
 
   const {
@@ -500,7 +512,6 @@ export default function ConversationScreen({ route, navigation }) {
     joinConversation,
     leaveConversation,
     sendRealtimeMessage,
-    markMessageAsRead,
     startTyping,
     stopTyping,
     isUserOnline,
@@ -509,6 +520,25 @@ export default function ConversationScreen({ route, navigation }) {
     token,
   });
 
+  // Lecture : UN appel groupé pour toute la conversation (avant : un événement socket par
+  // message non lu, chacun déclenchant plusieurs écritures et un rechargement du badge).
+  // Le serveur pousse ensuite le nouveau total de non-lus : le badge se met à jour seul.
+  const markReadTimerRef = useRef(null);
+  const markAsRead = useCallback((delayMs = 0) => {
+    if (!conversationId) return;
+    if (markReadTimerRef.current) clearTimeout(markReadTimerRef.current);
+    markReadTimerRef.current = setTimeout(() => {
+      markReadTimerRef.current = null;
+      markConversationAsRead(conversationId).catch(() => { });
+      DeviceEventEmitter.emit('conversation:read', { conversationId });
+    }, delayMs);
+  }, [conversationId]);
+
+  useEffect(() => () => {
+    if (markReadTimerRef.current) clearTimeout(markReadTimerRef.current);
+  }, []);
+
+  // Rechargement silencieux : la conversation reste affichée pendant la mise à jour
   const loadConversation = useCallback(async () => {
     if (!conversationId) return;
 
@@ -523,33 +553,34 @@ export default function ConversationScreen({ route, navigation }) {
       const loadedMessages = messagesResponse?.data || [];
 
       setConversation(loadedConversation);
-      setMessages(loadedMessages);
-      setCurrentPage(1);
+      // Garder les messages arrivés en direct (ou en cours d'envoi) pendant le chargement
+      setMessages((prev) => {
+        const loadedIds = new Set(loadedMessages.map((m) => String(m.id)));
+        const newest = loadedMessages[loadedMessages.length - 1];
+        const newestTime = newest ? new Date(newest.timestamp).getTime() : 0;
+        const live = prev.filter((m) => !loadedIds.has(String(m.id)) && new Date(m.timestamp).getTime() > newestTime);
+        return live.length ? [...loadedMessages, ...live] : loadedMessages;
+      });
       setHasMoreMessages(Boolean(messagesResponse?.pagination?.hasMore));
 
-      await markConversationAsRead(conversationId);
-      DeviceEventEmitter.emit('unreadCount:refresh');
-
-      loadedMessages
-        .filter((msg) => {
-          return !isCurrentUserMessage(msg, user, currentUserIdSet) && !msg.read;
-        })
-        .forEach((msg) => {
-          markMessageAsRead(msg.id, conversationId);
-        });
+      const hasUnread = Number(loadedConversation?.unreadCount || 0) > 0
+        || loadedMessages.some((msg) => !msg.read && !isCurrentUserMessage(msg, user, currentUserIdSet));
+      if (hasUnread) markAsRead();
     } catch (e) {
       setError(e?.response?.data?.message || 'Impossible de charger la conversation');
     } finally {
       setLoading(false);
     }
-  }, [conversationId, currentUserIdSet, markMessageAsRead, navigation]);
+  }, [conversationId, currentUserIdSet, markAsRead]);
 
+  // Messages plus anciens : curseur = id du plus ancien message affiché
   const loadOlderMessages = useCallback(async () => {
     if (!conversationId || loadingOlder || !hasMoreMessages) return;
+    const oldest = messagesRef.current.find((m) => /^[0-9a-fA-F]{24}$/.test(String(m.id)));
+    if (!oldest) return;
     try {
       setLoadingOlder(true);
-      const nextPage = currentPage + 1;
-      const response = await getMessages(conversationId, nextPage);
+      const response = await getMessages(conversationId, { before: oldest.id });
       const older = response?.data || [];
       if (older.length > 0) {
         setMessages((prev) => {
@@ -557,17 +588,25 @@ export default function ConversationScreen({ route, navigation }) {
           const unique = older.filter((m) => !existingIds.has(String(m.id)));
           return [...unique, ...prev];
         });
-        setCurrentPage(nextPage);
-        setHasMoreMessages(Boolean(response?.pagination?.hasMore));
-      } else {
-        setHasMoreMessages(false);
       }
+      setHasMoreMessages(Boolean(response?.pagination?.hasMore) && older.length > 0);
     } catch (e) {
       // silently ignore pagination errors
     } finally {
       setLoadingOlder(false);
     }
-  }, [conversationId, currentPage, hasMoreMessages, loadingOlder]);
+  }, [conversationId, hasMoreMessages, loadingOlder]);
+
+  // Derniers messages gardés en mémoire : la prochaine ouverture est instantanée
+  useEffect(() => {
+    if (!conversationId || loading) return;
+    const recent = messages.slice(-60);
+    writeCache(messagesCacheKey, {
+      messages: recent,
+      hasMore: hasMoreMessages || messages.length > recent.length,
+      conversation,
+    });
+  }, [conversation, conversationId, hasMoreMessages, loading, messages, messagesCacheKey]);
 
   useFocusEffect(
     useCallback(() => {
@@ -580,7 +619,7 @@ export default function ConversationScreen({ route, navigation }) {
         });
         return;
       }
-      setLoading(true);
+      if (!messagesRef.current.length) setLoading(true);
       loadConversation();
     }, [loadConversation, isAuthenticated, navigation, conversationId])
   );
@@ -599,11 +638,9 @@ export default function ConversationScreen({ route, navigation }) {
         return [...prev, message];
       });
 
+      // Plusieurs messages reçus d'affilée → un seul appel « lu »
       if (!isCurrentUserMessage(message, user, currentUserIdSet)) {
-        markMessageAsRead(message.id, conversationId);
-        markConversationAsRead(conversationId)
-          .then(() => DeviceEventEmitter.emit('unreadCount:refresh'))
-          .catch(() => { });
+        markAsRead(800);
       }
     };
 
@@ -694,30 +731,24 @@ export default function ConversationScreen({ route, navigation }) {
     isConnected,
     joinConversation,
     leaveConversation,
-    markMessageAsRead,
+    markAsRead,
     off,
     on,
   ]);
 
-  // Auto-scroll au chargement initial et à chaque nouvel message
-
+  // Nouveau message envoyé par nous → retour en bas de la conversation.
+  // (Liste inversée : à l'ouverture, on est déjà sur les plus récents sans défilement.)
+  const lastMessage = messages[messages.length - 1];
+  const lastMessageId = lastMessage ? String(lastMessage.id) : '';
+  const lastIsMine = lastMessage ? isCurrentUserMessage(lastMessage, user, currentUserIdSet) : false;
   useEffect(() => {
-    if (messages.length === 0) return;
-    const timer = setTimeout(() => {
-      if (flatListRef.current && messages.length > 0) {
-        flatListRef.current.scrollToEnd({ animated: false });
-        initialScrollDoneRef.current = true;
-      }
-    }, 200);
-    return () => clearTimeout(timer);
-  }, [messages.length]);
+    if (lastMessageId && lastIsMine) scrollToLatest(true);
+  }, [lastMessageId, lastIsMine, scrollToLatest]);
 
-  // Auto-scroll quand l'interlocuteur commence à taper
+  // L'interlocuteur écrit : l'indicateur apparaît en bas
   useEffect(() => {
-    if (Object.keys(typingUsers).length > 0) {
-      flatListRef.current?.scrollToEnd({ animated: true });
-    }
-  }, [typingUsers]);
+    if (Object.keys(typingUsers).length > 0) scrollToLatest(true);
+  }, [typingUsers, scrollToLatest]);
 
   // Vérifier l'éligibilité à laisser un avis (si conversation fermée par vendeur)
   useEffect(() => {
@@ -747,127 +778,42 @@ export default function ConversationScreen({ route, navigation }) {
     checkEligibility();
   }, [conversation?.closedByOwner, conversation?.item?.id]);
 
-  const stopAudioPlayback = useCallback(async () => {
-    const currentId = playingMessageIdRef.current;
-    const player = playingSoundRef.current;
+  const stopAudioPlayback = useCallback(() => stopVoicePlayback(), []);
 
-    playingSoundRef.current = null;
-    setPlayingMessageId('');
-    playingMessageIdRef.current = '';
-
-    if (player) {
-      try {
-        player.pause();
-        player.remove();
-      } catch (e) {
-        // No-op: just ensure local state resets.
-      }
-    }
-
-    if (currentId) {
-      setAudioStates((prev) => ({
-        ...prev,
-        [currentId]: {
-          ...(prev[currentId] || {}),
-          isPlaying: false,
-        },
-      }));
-    }
+  // Lecteur vocal : enchaîne le vocal suivant s'il suit directement, erreurs en alerte
+  useEffect(() => {
+    configureVoicePlayback({
+      getNext: (messageId) => {
+        const list = messagesRef.current;
+        const index = list.findIndex((m) => String(m.id) === messageId);
+        const next = index >= 0 ? list[index + 1] : null;
+        return next?.type === 'audio' && next?.attachments?.[0] ? next : null;
+      },
+      onError: (message) => setAlert({
+        visible: true,
+        type: 'error',
+        title: 'Erreur',
+        message,
+        buttons: [{ text: 'OK', onPress: () => { } }],
+      }),
+    });
+    return () => configureVoicePlayback();
   }, []);
 
   useEffect(() => {
     return () => {
       if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
-      if (recordingIntervalRef.current) clearInterval(recordingIntervalRef.current);
       stopAudioPlayback();
     };
   }, [stopAudioPlayback]);
 
-  const startVoiceRecording = async () => {
-    if (isRecording || sendingVoice) return;
-
-    try {
-      const permission = await requestRecordingPermissionsAsync();
-      if (!permission.granted) {
-        setAlert({
-          visible: true,
-          type: 'warning',
-          title: 'Micro requis',
-          message: 'Activez le microphone pour envoyer un message vocal.',
-          buttons: [{ text: 'OK', onPress: () => { } }],
-        });
-        return;
-      }
-
-      await setAudioModeAsync({
-        allowsRecording: true,
-        playsInSilentMode: true,
-        interruptionMode: 'duckOthers',
-      });
-
-      await recorder.prepareToRecordAsync();
-      recorder.record();
-
-      setRecordingMs(0);
-      setIsRecording(true);
-
-      if (recordingIntervalRef.current) clearInterval(recordingIntervalRef.current);
-      recordingIntervalRef.current = setInterval(() => {
-        try {
-          setRecordingMs(Math.floor((recorder.currentTime || 0) * 1000));
-        } catch (e) {
-          // Ignore status sampling errors while recording.
-        }
-      }, 250);
-    } catch (e) {
-      setAlert({
-        visible: true,
-        type: 'error',
-        title: 'Erreur',
-        message: 'Impossible de demarrer l\'enregistrement vocal.',
-        buttons: [{ text: 'OK', onPress: () => { } }],
-      });
-      setIsRecording(false);
-    }
-  };
-
-  const cancelVoiceRecording = async () => {
-    if (!recorder.isRecording) {
-      setIsRecording(false);
-      setRecordingMs(0);
-      return;
-    }
-
-    try {
-      await recorder.stop();
-    } catch (e) {
-      // Ignore stopping errors on cancellation.
-    } finally {
-      await setAudioModeAsync({
-        allowsRecording: false,
-        playsInSilentMode: true,
-        interruptionMode: 'duckOthers',
-      });
-      if (recordingIntervalRef.current) clearInterval(recordingIntervalRef.current);
-      recordingIntervalRef.current = null;
-      setIsRecording(false);
-      setRecordingMs(0);
-    }
-  };
-
-  const stopAndSendVoiceRecording = async () => {
-    if (!recorder.isRecording || !conversationId || sendingVoice) return;
+  // Envoi d'un message vocal enregistré par <ChatComposer>
+  const sendVoice = async (uri, durationMs) => {
+    if (!conversationId || !uri) return;
 
     try {
       setSendingVoice(true);
-      await recorder.stop();
-      const uri = recorder.uri;
-
-      if (!uri) {
-        throw new Error('Aucun fichier vocal disponible');
-      }
-
-      const response = await sendVoiceMessage(conversationId, uri);
+      const response = await sendVoiceMessage(conversationId, uri, durationMs);
       const voiceMessage = response?.data;
 
       if (voiceMessage) {
@@ -886,15 +832,6 @@ export default function ConversationScreen({ route, navigation }) {
         buttons: [{ text: 'OK', onPress: () => { } }],
       });
     } finally {
-      await setAudioModeAsync({
-        allowsRecording: false,
-        playsInSilentMode: true,
-        interruptionMode: 'duckOthers',
-      });
-      if (recordingIntervalRef.current) clearInterval(recordingIntervalRef.current);
-      recordingIntervalRef.current = null;
-      setIsRecording(false);
-      setRecordingMs(0);
       setSendingVoice(false);
     }
   };
@@ -917,9 +854,7 @@ export default function ConversationScreen({ route, navigation }) {
   };
 
   const onComposerFocus = () => {
-    setTimeout(() => {
-      flatListRef.current?.scrollToEnd({ animated: true });
-    }, 100);
+    setTimeout(() => scrollToLatest(true), 100);
   };
 
   const onSend = async () => {
@@ -958,20 +893,6 @@ export default function ConversationScreen({ route, navigation }) {
     }
   };
 
-  const formatRecordTime = useCallback((ms = 0) => {
-    const total = Math.floor(ms / 1000);
-    const mm = String(Math.floor(total / 60)).padStart(2, '0');
-    const ss = String(total % 60).padStart(2, '0');
-    return `${mm}:${ss}`;
-  }, []);
-
-  const formatAudioTime = useCallback((ms = 0) => {
-    const total = Math.floor(ms / 1000);
-    const mm = String(Math.floor(total / 60));
-    const ss = String(total % 60).padStart(2, '0');
-    return `${mm}:${ss}`;
-  }, []);
-
   const peer = getOtherParticipant(conversation, currentUserId);
   const headerDealStatus = conversation?.deal?.status || 'open';
   const headerDealLabel = (getDealPresentation(headerDealStatus) || {}).label || 'Aucune clôture';
@@ -1000,129 +921,9 @@ export default function ConversationScreen({ route, navigation }) {
     });
   }, [navigation, peer?.businessName, peer?.name, theme, peerIsOnline, isConnected]);
 
-  const onPressAudioMessage = useCallback(
-    async (message) => {
-      const audioUrl = message?.attachments?.[0];
-      if (!audioUrl) return;
-
-      const messageId = String(message.id);
-
-      const current = playingSoundRef.current;
-      if (current && playingMessageIdRef.current === messageId) {
-        try {
-          if (current.playing) {
-            current.pause();
-            setAudioStates((prev) => ({
-              ...prev,
-              [messageId]: {
-                ...(prev[messageId] || {}),
-                isPlaying: false,
-              },
-            }));
-          } else {
-            current.play();
-            setAudioStates((prev) => ({
-              ...prev,
-              [messageId]: {
-                ...(prev[messageId] || {}),
-                isPlaying: true,
-              },
-            }));
-          }
-          return;
-        } catch (e) {
-          await stopAudioPlayback();
-        }
-      }
-
-      try {
-        await stopAudioPlayback();
-
-        await setAudioModeAsync({
-          allowsRecording: false,
-          playsInSilentMode: true,
-          interruptionMode: 'duckOthers',
-        });
-
-        const player = createAudioPlayer(audioUrl, { updateInterval: 100 });
-
-        playingSoundRef.current = player;
-        setPlayingMessageId(messageId);
-        playingMessageIdRef.current = messageId;
-
-        player.addListener('playbackStatusUpdate', (status) => {
-          setAudioStates((prev) => ({
-            ...prev,
-            [messageId]: {
-              ...(prev[messageId] || {}),
-              positionMs: Math.round((status?.currentTime || 0) * 1000),
-              durationMs: Math.round((status?.duration || 0) * 1000),
-              isPlaying: !!status?.playing,
-              isBuffering: !!status?.isBuffering,
-            },
-          }));
-
-          if (status?.didJustFinish) {
-            setAudioStates((prev) => ({
-              ...prev,
-              [messageId]: {
-                ...(prev[messageId] || {}),
-                positionMs: 0,
-                isPlaying: false,
-              },
-            }));
-            stopAudioPlayback();
-          }
-        });
-
-        player.play();
-      } catch (e) {
-        setAlert({
-          visible: true,
-          type: 'error',
-          title: 'Erreur',
-          message: 'Impossible de lire ce message vocal.',
-          buttons: [{ text: 'OK', onPress: () => { } }],
-        });
-        await stopAudioPlayback();
-      }
-    },
-    [stopAudioPlayback]
-  );
-
-  const onSeekAudioMessage = useCallback(
-    async (messageId, event) => {
-      const trackWidth = audioTrackWidths[messageId];
-      const state = audioStates[messageId] || {};
-      const durationMs = state.durationMs || 0;
-
-      if (!trackWidth || !durationMs) return;
-      if (!playingSoundRef.current || playingMessageIdRef.current !== messageId) return;
-
-      const locationX = event?.nativeEvent?.locationX || 0;
-      const ratio = Math.max(0, Math.min(1, locationX / trackWidth));
-      const target = Math.floor(durationMs * ratio);
-
-      try {
-        await playingSoundRef.current.seekTo(target / 1000);
-        setAudioStates((prev) => ({
-          ...prev,
-          [messageId]: {
-            ...(prev[messageId] || {}),
-            positionMs: target,
-          },
-        }));
-      } catch (e) {
-        // Ignore seek errors.
-      }
-    },
-    [audioStates, audioTrackWidths]
-  );
-
   const typingLabel = Object.values(typingUsers)[0] || '';
   const peerId = peer?.id || peer?._id;
   const peerIsOnline = peerId ? isUserOnline(String(peerId)) : false;
-  const hasText = text.trim().length > 0;
   const conversationItem = conversation?.item || null;
   const conversationItemId = normalizeId(conversationItem?.id);
   const canOpenConversationItem = Boolean(conversationItemId);
@@ -1414,7 +1215,7 @@ export default function ConversationScreen({ route, navigation }) {
   }, [conversationId, dealActionLoading, conversation, applyDealTransition]);
 
   const renderMessage = ({ item, index }) => {
-    const prevItem = index > 0 ? messages[index - 1] : null;
+    const prevItem = listData[index + 1] || null; // liste inversée
     const showDateSeparator = !isSameDay(item?.timestamp, prevItem?.timestamp);
 
     // Render system messages (closure/reopen) as centered small lines
@@ -1437,12 +1238,6 @@ export default function ConversationScreen({ route, navigation }) {
 
     const mine = isCurrentUserMessage(item, user, currentUserIdSet);
     const isAudio = item?.type === 'audio' && item?.attachments?.[0];
-    const messageId = String(item.id);
-    const audioState = audioStates[messageId] || {};
-    const isPlayingThis = audioState.isPlaying || false;
-    const positionMs = audioState.positionMs || 0;
-    const durationMs = audioState.durationMs || 0;
-    const progressPct = durationMs > 0 ? Math.min(100, (positionMs / durationMs) * 100) : 0;
 
     return (
       <View>
@@ -1457,7 +1252,7 @@ export default function ConversationScreen({ route, navigation }) {
           <View style={styles.avatarSlot}>
             {!mine ? (
               peer?.avatar ? (
-                <Image source={{ uri: peer.avatar }} style={styles.peerAvatar} />
+                <Image source={{ uri: sizedImage(peer.avatar, 40) }} style={styles.peerAvatar} />
               ) : (
                 <View style={styles.peerAvatarFallback}>
                   <Text style={styles.peerAvatarFallbackText}>{(peer?.name || 'U').slice(0, 1).toUpperCase()}</Text>
@@ -1468,70 +1263,14 @@ export default function ConversationScreen({ route, navigation }) {
 
           <View style={[styles.bubble, mine ? styles.bubbleMine : styles.bubbleOther]}>
             {isAudio ? (
-              <View style={styles.audioWrap}>
-                <View style={styles.audioMainRow}>
-                  <TouchableOpacity
-                    onPress={() => onPressAudioMessage(item)}
-                    activeOpacity={0.85}
-                    style={styles.audioPlayBtn}
-                  >
-                    <Ionicons
-                      name={isPlayingThis ? 'pause' : 'play'}
-                      size={17}
-                      color={mine ? '#fff' : P.orange500}
-                    />
-                  </TouchableOpacity>
-
-                  <TouchableOpacity
-                    activeOpacity={0.9}
-                    style={styles.audioTrack}
-                    onLayout={(e) => {
-                      const width = e.nativeEvent.layout.width;
-                      setAudioTrackWidths((prev) => ({ ...prev, [messageId]: width }));
-                    }}
-                    onPress={(e) => onSeekAudioMessage(messageId, e)}
-                  >
-                    <View style={styles.audioWaveRow}>
-                      {WAVE_BARS.map((bar) => {
-                        const threshold = ((bar + 1) / WAVE_BARS.length) * 100;
-                        const active = progressPct >= threshold;
-                        return (
-                          <View
-                            key={bar}
-                            style={[
-                              styles.audioWaveBar,
-                              { height: 6 + ((bar * 5) % 12) },
-                              active
-                                ? { backgroundColor: mine ? 'rgba(255,255,255,0.92)' : P.orange500 }
-                                : styles.audioWaveBarInactive,
-                            ]}
-                          />
-                        );
-                      })}
-                    </View>
-                    <View
-                      style={[
-                        styles.audioTrackHead,
-                        {
-                          left: `${progressPct}%`,
-                          backgroundColor: mine ? '#fff' : P.orange500,
-                        },
-                      ]}
-                    />
-                  </TouchableOpacity>
-                </View>
-
-                <View style={styles.audioMetaRow}>
-                  <Ionicons
-                    name="mic"
-                    size={11}
-                    color={mine ? 'rgba(255,255,255,0.88)' : 'rgba(255,255,255,0.7)'}
-                  />
-                  <Text style={[styles.audioTimeText, mine ? styles.messageTextMine : styles.messageTextOther]}>
-                    {formatAudioTime(positionMs)} / {formatAudioTime(durationMs)}
-                  </Text>
-                </View>
-              </View>
+              <VoiceMessageBubble
+                message={item}
+                mine={mine}
+                accent={mine ? '#fff' : P.orange500}
+                trackColor={mine ? 'rgba(255,255,255,0.38)' : (isDark ? 'rgba(255,255,255,0.22)' : 'rgba(0,0,0,0.18)')}
+                textStyle={mine ? styles.messageTextMine : styles.messageTextOther}
+                playBtnStyle={styles.audioPlayBtn}
+              />
             ) : (
               <Text style={[styles.messageText, mine ? styles.messageTextMine : styles.messageTextOther]}>
                 {item.content || ''}
@@ -1556,7 +1295,6 @@ export default function ConversationScreen({ route, navigation }) {
   if (loading) {
     return (
       <LinearGradient colors={theme.shell} style={styles.container}>
-        <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} backgroundColor="transparent" translucent />
         <View style={styles.center}>
           <ActivityIndicator size="large" color={P.amber} />
         </View>
@@ -1566,12 +1304,8 @@ export default function ConversationScreen({ route, navigation }) {
 
   return (
     <LinearGradient colors={theme.shell} style={styles.container}>
-      <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} backgroundColor="transparent" translucent />
-      <KeyboardAvoidingView
-        style={styles.container}
-        behavior={Platform.OS === 'ios' ? 'padding' : 'padding'}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? headerHeight : headerHeight + 24}
-      >
+      {/* Mesure réelle de l'écran (sous l'en-tête) : plus de décalage codé en dur */}
+      <ChatKeyboardView style={styles.container}>
         {error ? (
           <View style={styles.connectionBannerWrap}>
             <Text style={styles.errorText}>{error}</Text>
@@ -1643,30 +1377,32 @@ export default function ConversationScreen({ route, navigation }) {
 
         <FlatList
           ref={flatListRef}
-          data={messages}
+          data={listData}
+          inverted
           renderItem={renderMessage}
           keyExtractor={(item) => String(item.id)}
-          contentContainerStyle={[styles.messagesContainer, { paddingBottom: 8 }]}
+          contentContainerStyle={[styles.messagesContainer, { paddingTop: 8 }]}
           keyboardShouldPersistTaps="always"
           keyboardDismissMode="none"
-          onContentSizeChange={() => {
-            if (!loadingOlder) {
-              flatListRef.current?.scrollToEnd({ animated: false });
-            }
+          // Virtualisation : seuls les messages proches de l'écran sont rendus
+          initialNumToRender={15}
+          maxToRenderPerBatch={10}
+          windowSize={11}
+          // Arrivé en haut (fin de la liste inversée) : messages plus anciens, sans saut de position
+          onEndReached={() => {
+            if (hasMoreMessages && !loadingOlder) loadOlderMessages();
           }}
-          onLayout={() => {
-            if (!loadingOlder) {
-              flatListRef.current?.scrollToEnd({ animated: false });
-            }
-          }}
-          onScrollBeginDrag={() => { initialScrollDoneRef.current = true; }}
-          onScroll={({ nativeEvent }) => {
-            if (nativeEvent.contentOffset.y < 60 && hasMoreMessages && !loadingOlder) {
-              loadOlderMessages();
-            }
-          }}
-          scrollEventThrottle={200}
+          onEndReachedThreshold={0.3}
+          // Liste inversée : l'en-tête s'affiche en bas (indicateur de saisie),
+          // le pied en haut (chargement des messages plus anciens)
           ListHeaderComponent={
+            typingLabel ? (
+              <View style={styles.typingWrap}>
+                <Text style={styles.typingText}>{typingLabel} est en train d'ecrire...</Text>
+              </View>
+            ) : null
+          }
+          ListFooterComponent={
             loadingOlder ? (
               <View style={styles.loadOlderWrap}>
                 <ActivityIndicator size="small" color={P.amber} />
@@ -1679,80 +1415,30 @@ export default function ConversationScreen({ route, navigation }) {
               </TouchableOpacity>
             ) : null
           }
-          ListFooterComponent={
-            typingLabel ? (
-              <View style={styles.typingWrap}>
-                <Text style={styles.typingText}>{typingLabel} est en train d'ecrire...</Text>
-              </View>
-            ) : null
-          }
         />
 
-        {!reviewModalVisible && <View style={[styles.composerWrap, { paddingBottom: Math.max(insets.bottom, 8) }]}>
-          <View style={styles.composerInner}>
-            <TextInput
-              value={text}
-              onChangeText={onComposerChange}
-              onFocus={onComposerFocus}
-              placeholder="Ecrivez un message..."
-              placeholderTextColor={theme.textMuted}
-              style={styles.input}
-              multiline
-              maxLength={2000}
-              editable={!sending && !sendingVoice && !isRecording}
-            />
-            <TouchableOpacity
-              onPress={isRecording ? cancelVoiceRecording : startVoiceRecording}
-              disabled={sending || sendingVoice || hasText}
-              activeOpacity={0.85}
-              style={[
-                styles.voiceBtn,
-                styles.voiceBtnMain,
-                isRecording && styles.voiceBtnActive,
-                (sending || sendingVoice || hasText) && styles.sendBtnDisabled,
-              ]}
-            >
-              <Ionicons name={isRecording ? 'square' : 'mic'} size={18} color={theme.surface} />
-            </TouchableOpacity>
-            {hasText ? (
-              <TouchableOpacity
-                onPress={onSend}
-                disabled={sending || sendingVoice || isRecording}
-                activeOpacity={0.85}
-                style={[styles.sendBtn, (sending || sendingVoice || isRecording) && styles.sendBtnDisabled]}
-              >
-                {sending ? (
-                  <ActivityIndicator size="small" color={theme.surface} />
-                ) : (
-                  <Ionicons name="send" size={17} color={theme.surface} />
-                )}
-              </TouchableOpacity>
-            ) : null}
-          </View>
-          {isRecording ? (
-            <View style={styles.recordRow}>
-              <View style={styles.recordStatusWrap}>
-                <View style={styles.recordDot} />
-                <Text style={styles.recordTimerText}>{formatRecordTime(recordingMs)}</Text>
-              </View>
-              <TouchableOpacity onPress={cancelVoiceRecording} style={styles.recordCancelBtn}>
-                <Text style={styles.recordCancelText}>Annuler</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                onPress={stopAndSendVoiceRecording}
-                disabled={sendingVoice}
-                style={[styles.recordSendBtn, sendingVoice && styles.sendBtnDisabled]}
-              >
-                {sendingVoice ? (
-                  <ActivityIndicator size="small" color={theme.surface} />
-                ) : (
-                  <Ionicons name="send" size={16} color={theme.surface} />
-                )}
-              </TouchableOpacity>
-            </View>
-          ) : null}
-        </View>}
-      </KeyboardAvoidingView>
+        {/* Zone de saisie façon WhatsApp (texte + message vocal maintenu/verrouillé) */}
+        {!reviewModalVisible ? (
+          <ChatComposer
+            value={text}
+            onChangeText={onComposerChange}
+            onFocus={onComposerFocus}
+            onSendText={onSend}
+            sendingText={sending}
+            onSendVoice={sendVoice}
+            onRecordingStart={stopAudioPlayback}
+            onError={(message) => setAlert({
+              visible: true,
+              type: 'warning',
+              title: 'Message vocal',
+              message,
+              buttons: [{ text: 'OK', onPress: () => { } }],
+            })}
+            bottomInset={insets.bottom}
+            disabled={sendingVoice}
+          />
+        ) : null}
+      </ChatKeyboardView>
 
       <AlertModal
         visible={alert.visible}
@@ -2128,83 +1814,13 @@ function createStyles(theme, isDark) {
       fontSize: 15,
       lineHeight: 21,
     },
-    audioWrap: {
-      minWidth: 230,
-      maxWidth: 280,
-      gap: 6,
-    },
-    audioMainRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 8,
-    },
     audioPlayBtn: {
-      width: 32,
-      height: 32,
-      borderRadius: 16,
+      width: 36,
+      height: 36,
+      borderRadius: 18,
       alignItems: 'center',
       justifyContent: 'center',
       backgroundColor: theme.overlay,
-    },
-    audioTrack: {
-      flex: 1,
-      height: 24,
-      borderRadius: 12,
-      overflow: 'hidden',
-      backgroundColor: theme.overlay,
-      borderWidth: 1,
-      borderColor: theme.border,
-      paddingHorizontal: 8,
-      justifyContent: 'center',
-    },
-    audioWaveRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'space-between',
-      gap: 2,
-    },
-    audioWaveBar: {
-      width: 3,
-      borderRadius: 2,
-    },
-    audioWaveBarInactive: {
-      backgroundColor: theme.textMuted,
-      opacity: 0.35,
-    },
-    audioTrackHead: {
-      position: 'absolute',
-      top: 5,
-      width: 3,
-      height: 14,
-      borderRadius: 2,
-      marginLeft: -1,
-    },
-    audioTrackProgress: {
-      height: '100%',
-      borderRadius: 99,
-    },
-    audioMessageBtn: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 8,
-    },
-    audioMessageBtnIcon: {
-      fontSize: 13,
-      fontWeight: '800',
-    },
-    audioMessageBtnText: {
-      fontSize: 14,
-      fontWeight: '700',
-    },
-    audioTimeText: {
-      fontSize: 10,
-      fontWeight: '600',
-      opacity: 0.85,
-    },
-    audioMetaRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 4,
     },
     messageTextMine: {
       color: theme.surface,

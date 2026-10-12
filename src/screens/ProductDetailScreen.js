@@ -1,576 +1,366 @@
-// ─── ProductDetailScreen v3 PREMIUM ─ TakTak Niger ────────────────────────
-// Design irrésistible — sombre, impactant, cohérent avec l'app
+// ─── Fiche annonce (produit ou service) — TakTak Niger ───────────────────────
+// Galerie immersive (étirement, parallaxe, plein écran), en-tête qui se solidifie
+// au défilement, infos clés en un coup d'œil, vendeur, avis, annonces similaires,
+// et barre d'action fixe. Contact uniquement via la messagerie de l'app.
 
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  View, Text, StyleSheet, ScrollView, Image, TouchableOpacity,
-  Dimensions, StatusBar, Animated, Share, Linking, ActivityIndicator,
-  TextInput,
+  View, Text, StyleSheet, Pressable, Animated, Share, ActivityIndicator, FlatList, Platform, StatusBar,
+  useWindowDimensions,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
-import { BlurView } from 'expo-blur';
+import { Feather, Ionicons } from '@expo/vector-icons';
+import * as Haptics from 'expo-haptics';
 import { apiClient } from '../api/auth';
-import { checkFavorite, toggleFavorite } from '../api/favorites';
 import { createReview, getProductReviews, markReviewHelpful, checkReviewEligibility } from '../api/reviews';
 import { toggleProductStatus } from '../api/products';
 import { useAuth } from '../contexts/AuthContext';
 import { useAppTheme } from '../contexts/ThemeContext';
+import { useFavorites } from '../hooks/useFavorites';
 import AlertModal from '../components/AlertModal';
+import Sheet, { SheetTextInput } from '../components/Sheet';
+import ImageGallery from '../components/product/ImageGallery';
+import ProductCard from '../components/home/ProductCard';
+import PressableScale from '../components/home/PressableScale';
+import { SkeletonGroup, Bone } from '../components/home/Skeleton';
 import { MOBILE_COLORS as P } from '../theme/colors';
+import { formatCompact, formatPrice, getCityName, getInitials, getProductId, sizedImage, timeAgo } from '../utils/format';
 
-const { width, height } = Dimensions.get('window');
-const HERO_H = height * 0.52;
+const CONDITIONS = {
+  new: { label: 'Neuf', icon: 'star' },
+  used: { label: 'Occasion', icon: 'refresh-cw' },
+  refurbished: { label: 'Reconditionné', icon: 'tool' },
+};
+const STATUS_BANNERS = {
+  sold: { icon: 'check-circle', text: 'Cette annonce est marquée comme vendue.' },
+  expired: { icon: 'clock', text: 'Cette annonce a expiré.' },
+  pending: { icon: 'eye-off', text: 'Cette annonce est désactivée : elle n\'est plus visible.' },
+};
+const RATING_LABELS = ['', 'Décevant', 'Moyen', 'Correct', 'Très bien', 'Excellent'];
+const REVIEW_MAX = 1000;
 
-// ─── HELPERS ──────────────────────────────────────────────────────────────────
-const getCityName = (loc) => loc ? loc.split(',')[0].trim() : 'Niger';
-const getInitials = (name) => {
-  if (!name) return '??';
-  const p = name.trim().split(' ');
-  return p.length >= 2 ? (p[0][0] + p[1][0]).toUpperCase() : name.substring(0, 2).toUpperCase();
+const tap = () => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+const sinceLabel = (date) => {
+  const t = timeAgo(date);
+  return t === 'Récent' ? 'Récemment' : `Il y a ${t}`;
+};
+const relativeDate = (value) => {
+  if (!value) return 'Récemment';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return 'Récemment';
+  const days = Math.floor((Date.now() - date.getTime()) / 86400000);
+  if (days < 7) return sinceLabel(value);
+  return date.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', year: 'numeric' });
 };
 
-const formatRelativeDate = (dateString) => {
-  if (!dateString) return 'Récemment';
-  const date = new Date(dateString);
-  const now = new Date();
-  const diffMs = now - date;
-  const minutes = Math.floor(diffMs / 60000);
-  const hours = Math.floor(diffMs / 3600000);
-  const days = Math.floor(diffMs / 86400000);
-
-  if (minutes < 1) return 'À l\'instant';
-  if (minutes < 60) return `Il y a ${minutes} min`;
-  if (hours < 24) return `Il y a ${hours}h`;
-  if (days < 7) return `Il y a ${days}j`;
-  return date.toLocaleDateString('fr-FR');
-};
-
-
-
-// Theme Config dynamique — bleu service identique au web (blue-600 = #2563EB)
-const getThemeConfig = (isService) => ({
-  typeBadge: { backgroundColor: 'rgba(37,99,235,0.9)' },
-  secBar: ['#2563EB', '#60A5FA'],
-  sellerAvatarGrad: ['#2563EB', '#1E40AF'],
-  sellerArrow: { backgroundColor: '#DBEAFE', borderColor: 'rgba(37,99,235,0.2)' },
-  sellerArrowTxt: { color: '#2563EB' },
-  meetupInner: { backgroundColor: '#DBEAFE', borderColor: 'rgba(37,99,235,0.18)' },
-  meetupAccent: { backgroundColor: '#2563EB' },
-  cBtnGrad: ['#2563EB', '#1E40AF'],
-  cBtnMain: { shadowColor: '#2563EB', shadowOpacity: 0.42, elevation: 10 },
-  priceAccentColors: ['transparent', '#2563EB', 'transparent'],
-  heroLocRow: { backgroundColor: '#EFF6FF', borderWidth: 1, borderColor: 'rgba(37,99,235,0.14)' },
-  heroLocRowProduct: { backgroundColor: 'rgba(236,90,19,0.08)', borderWidth: 1, borderColor: 'rgba(236,90,19,0.14)' },
-  heroLocDot: { color: '#2563EB' },
-  heroLocDotProduct: { color: P.terra },
-  heroLocTxt: { color: '#1E40AF' },
-  heroLocTxtProduct: { color: P.terra },
-  priceAmount: { color: '#2563EB' },
-  loadLogoBox: { shadowColor: '#2563EB' },
-  loadRing: { borderColor: 'rgba(37,99,235,0.28)' },
-  notFoundBtn: { shadowColor: '#2563EB' },
-  headerBg: { borderBottomColor: 'rgba(37,99,235,0.2)' },
-});
-
-// ─── SPRING PRESS HOOK ────────────────────────────────────────────────────────
-function useSpringPress() {
-  const scale = useRef(new Animated.Value(1)).current;
-  return {
-    scale,
-    onPressIn:  () => Animated.spring(scale, { toValue: 0.95, useNativeDriver: true, speed: 40 }).start(),
-    onPressOut: () => Animated.spring(scale, { toValue: 1,    useNativeDriver: true, speed: 40 }).start(),
-  };
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// CAROUSEL IMAGES — immersif plein écran
-// ─────────────────────────────────────────────────────────────────────────────
-function ImageCarousel({ images }) {
-  const [idx, setIdx] = useState(0);
-  const scrollX = useRef(new Animated.Value(0)).current;
-
-  useEffect(() => {
-    const id = scrollX.addListener(({ value }) => setIdx(Math.round(value / width)));
-    return () => scrollX.removeListener(id);
-  }, []);
-
+// ─── Petits composants ────────────────────────────────────────────────────────
+function Stars({ value = 0, size = 14, color = P.gold, gap = 2 }) {
   return (
-    <View style={s.hero}>
-      <Animated.ScrollView
-        horizontal pagingEnabled
-        showsHorizontalScrollIndicator={false}
-        onScroll={Animated.event([{ nativeEvent: { contentOffset: { x: scrollX } } }], { useNativeDriver: false })}
-        scrollEventThrottle={16}
-        decelerationRate="fast"
-      >
-        {images.map((img, i) => (
-          <View key={i} style={{ width, height: HERO_H }}>
-            <Image
-              source={{ uri: img || 'https://via.placeholder.com/400x500/1f2937/ec5a13?text=MH' }}
-              style={{ width: '100%', height: '100%' }}
-              resizeMode="cover"
-            />
-          </View>
-        ))}
-      </Animated.ScrollView>
-
-      {/* Gradient bas — fondu vers fond sombre */}
-      <LinearGradient
-        colors={['transparent', 'rgba(17,24,39,0.5)', '#111827']}
-        style={s.heroGrad}
-      />
-
-      {/* Compteur images — top right */}
-      <View style={s.imgCounter}>
-        <Text style={s.imgCounterTxt}>{idx + 1}/{images.length}</Text>
-      </View>
-
-      {/* Dots indicateurs */}
-      {images.length > 1 && (
-        <View style={s.dotsRow}>
-          {images.map((_, i) => {
-            const w = scrollX.interpolate({
-              inputRange: [(i - 1) * width, i * width, (i + 1) * width],
-              outputRange: [5, 20, 5],
-              extrapolate: 'clamp',
-            });
-            const op = scrollX.interpolate({
-              inputRange: [(i - 1) * width, i * width, (i + 1) * width],
-              outputRange: [0.3, 1, 0.3],
-              extrapolate: 'clamp',
-            });
-            return <Animated.View key={i} style={[s.dot, { width: w, opacity: op }]} />;
-          })}
-        </View>
-      )}
-    </View>
-  );
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// SECTION avec accent orange latéral
-// ─────────────────────────────────────────────────────────────────────────────
-function Section({ title, children, isService, appTheme }) {
-  const d = getThemeConfig(isService);
-  return (
-    <View style={[s.section, { backgroundColor: appTheme.surface }]}> 
-      <View style={s.secHeadRow}>
-        <LinearGradient colors={isService ? d.secBar : [P.orange500, P.orange300]} style={s.secBar} />
-        <Text style={[s.secTitle, { color: appTheme.text }]}>{title}</Text>
-      </View>
-      {children}
-    </View>
-  );
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// SPEC TABLE
-// ─────────────────────────────────────────────────────────────────────────────
-function SpecTable({ rows, appTheme }) {
-  return (
-    <View style={[s.specTable, { borderColor: appTheme.border }]}>
-      {rows.filter(Boolean).map((row, i) => (
-        <View key={i} style={[
-          s.specRow,
-          {
-            backgroundColor: i % 2 === 0 ? appTheme.surfaceAlt : appTheme.surface,
-            borderBottomColor: appTheme.border,
-          },
-        ]}>
-          <Text style={[s.specLabel, { color: appTheme.textMuted }]}>{row.label}</Text>
-          <Text style={[s.specValue, { color: appTheme.text }]}>{row.value}</Text>
-        </View>
+    <View style={{ flexDirection: 'row', gap }}>
+      {[1, 2, 3, 4, 5].map((i) => (
+        <Ionicons
+          key={i}
+          name={value >= i ? 'star' : value >= i - 0.5 ? 'star-half' : 'star-outline'}
+          size={size}
+          color={color}
+        />
       ))}
     </View>
   );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// VENDEUR CARD — premium dark
-// ─────────────────────────────────────────────────────────────────────────────
-function SellerCard({ seller, onPress, isService, appTheme }) {
-  const d = getThemeConfig(isService);
-  const { scale, onPressIn, onPressOut } = useSpringPress();
-
+// Bouton d'en-tête : translucide sur la photo, puis plein quand l'en-tête devient opaque
+function HeaderButton({ renderIcon, onPress, solid, theme, label }) {
+  const onPhoto = solid.interpolate({ inputRange: [0, 1], outputRange: [1, 0] });
   return (
-    <TouchableOpacity activeOpacity={1} onPress={onPress} onPressIn={onPressIn} onPressOut={onPressOut}>
-      <Animated.View style={[s.sellerCard, { transform: [{ scale }], backgroundColor: appTheme.surfaceAlt, borderColor: appTheme.border }]}> 
-
-        {/* Avatar */}
-        <View style={s.sellerAvatarWrap}>
-          {seller.avatar
-            ? <Image source={{ uri: seller.avatar }} style={s.sellerAvatar} />
-            : (
-              <LinearGradient colors={isService ? d.sellerAvatarGrad : [P.orange500, P.orange700]} style={s.sellerAvatar}>
-                <Text style={s.sellerInitials}>{getInitials(seller.name)}</Text>
-              </LinearGradient>
-            )
-          }
-          <View style={s.onlineDot} />
-        </View>
-
-        {/* Infos */}
-        <View style={{ flex: 1 }}>
-          <View style={s.sellerNameRow}>
-            <Text style={[s.sellerName, { color: appTheme.text }]} numberOfLines={1}>{seller.businessName || seller.name}</Text>
-            {seller.businessType === 'professional' && (
-              <View style={s.verifiedBadge}><Text style={s.verifiedTxt}>✓</Text></View>
-            )}
-          </View>
-          <Text style={[s.sellerLoc, { color: appTheme.textMuted }]}>📍 {getCityName(seller.location)}</Text>
-          <View style={s.ratingRow}>
-            <Text style={s.ratingStars}>{'★'.repeat(Math.round(seller.rating || 0))}</Text>
-            <Text style={[s.ratingNum, { color: appTheme.text }]}>{Number(seller.rating || 0).toFixed(1)}</Text>
-            <Text style={[s.ratingCount, { color: appTheme.textMuted }]}>({seller.totalReviews || 0} avis)</Text>
-          </View>
-        </View>
-
-        {/* Flèche */}
-        <View style={[s.sellerArrow, isService && d.sellerArrow]}>
-          <Text style={[s.sellerArrowTxt, isService && d.sellerArrowTxt]}>→</Text>
-        </View>
-
-      </Animated.View>
-    </TouchableOpacity>
+    <Pressable onPress={onPress} hitSlop={8} accessibilityRole="button" accessibilityLabel={label}
+      style={({ pressed }) => [s.hBtn, pressed && { transform: [{ scale: 0.9 }] }]}>
+      <Animated.View style={[StyleSheet.absoluteFill, s.hBtnBg, { backgroundColor: 'rgba(17,24,39,0.42)', opacity: onPhoto }]} />
+      <Animated.View style={[StyleSheet.absoluteFill, s.hBtnBg, { backgroundColor: theme.surfaceAlt, borderColor: theme.border, borderWidth: StyleSheet.hairlineWidth, opacity: solid }]} />
+      <Animated.View style={[s.hBtnIcon, { opacity: onPhoto }]}>{renderIcon('#fff')}</Animated.View>
+      <Animated.View style={[s.hBtnIcon, { opacity: solid }]}>{renderIcon(theme.text)}</Animated.View>
+    </Pressable>
   );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// BOUTON CONTACT
-// ─────────────────────────────────────────────────────────────────────────────
-function ContactBtn({ icon, label, onPress, variant = 'ghost', isService }) {
-  const d = getThemeConfig(isService);
-  const { scale, onPressIn, onPressOut } = useSpringPress();
-  const isMain     = variant === 'main';
-  const isWA       = variant === 'whatsapp';
-  const isCall     = variant === 'call';
+function Card({ theme, style, children }) {
+  return <View style={[s.card, { backgroundColor: theme.surface, borderColor: theme.border }, style]}>{children}</View>;
+}
 
+function SectionTitle({ icon, title, accent, theme, right }) {
   return (
-    <TouchableOpacity activeOpacity={1} onPress={onPress} onPressIn={onPressIn} onPressOut={onPressOut}>
-      <Animated.View style={[s.cBtn, isMain && s.cBtnMain, isMain && isService && d.cBtnMain, isWA && s.cBtnWA, isCall && s.cBtnCall, { transform: [{ scale }] }]}>
-        {isMain ? (
-          <LinearGradient colors={isService ? d.sellerAvatarGrad : [P.orange500, P.orange700]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={s.cBtnGrad}>
-            <Text style={s.cBtnIconMain}>{icon}</Text>
-            <Text style={s.cBtnLabelMain}>{label}</Text>
-          </LinearGradient>
-        ) : (
-          <>
-            <Text style={[s.cBtnIcon, isWA && { color: P.whatsapp }, isCall && { color: P.amber }]}>{icon}</Text>
-            <Text style={[s.cBtnLabel, isWA && { color: P.whatsapp }, isCall && { color: P.amber }]}>{label}</Text>
-          </>
-        )}
-      </Animated.View>
-    </TouchableOpacity>
+    <View style={s.secHead}>
+      <View style={[s.secIcon, { backgroundColor: `${accent}1F` }]}>
+        <Feather name={icon} size={15} color={accent} />
+      </View>
+      <Text style={[s.secTitle, { color: theme.text }]}>{title}</Text>
+      {right}
+    </View>
   );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// ÉCRAN PRINCIPAL
+function InfoTile({ icon, label, value, accent, softBg, theme }) {
+  return (
+    <View style={[s.tile, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+      <View style={[s.tileIcon, { backgroundColor: softBg }]}>
+        <Feather name={icon} size={16} color={accent} />
+      </View>
+      <Text style={[s.tileLabel, { color: theme.textSoft }]}>{label}</Text>
+      <Text style={[s.tileValue, { color: theme.text }]} numberOfLines={2}>{value}</Text>
+    </View>
+  );
+}
+
+function Avatar({ uri, name, size, colors }) {
+  if (uri) {
+    return <Image source={{ uri: sizedImage(uri, size) }} style={{ width: size, height: size, borderRadius: size / 2 }} contentFit="cover" transition={150} />;
+  }
+  return (
+    <LinearGradient colors={colors} style={{ width: size, height: size, borderRadius: size / 2, alignItems: 'center', justifyContent: 'center' }}>
+      <Text style={{ color: '#fff', fontWeight: '800', fontSize: size * 0.36 }}>{getInitials(name)}</Text>
+    </LinearGradient>
+  );
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 export default function ProductDetailScreen({ route, navigation }) {
   const insets = useSafeAreaInsets();
-  const { isDark, theme: appTheme } = useAppTheme();
+  const { width, height: winH } = useWindowDimensions();
+  const { isDark, theme } = useAppTheme();
   const { user, isAuthenticated } = useAuth();
   const productId = String(route?.params?.productId || '').trim();
   const isValidProductId = /^[a-fA-F0-9]{24}$/.test(productId);
 
-  const [product,    setProduct]    = useState(null);
-  const [loading,    setLoading]    = useState(true);
-  const [isFavorite, setIsFavorite] = useState(false);
-  const [alert,      setAlert]      = useState({
-    visible: false,
-    type: 'info',
-    title: '',
-    message: '',
-    buttons: [{ text: 'OK', onPress: () => {} }],
-  });
+  // Affichage instantané : la carte touchée (photo, titre, prix, vendeur) est affichée
+  // tout de suite ; le détail complet la remplace dès qu'il arrive
+  const previewParam = route?.params?.preview;
+  const initialPreview = previewParam && String(previewParam.id || previewParam._id || '') === productId ? previewParam : null;
 
-  const isService = product?.type === 'service';
-  const d = getThemeConfig(isService);
-
-  // Scroll → header opacity
-  const scrollY = useRef(new Animated.Value(0)).current;
-  const scrollViewRef = useRef(null);
-  const reviewFormRef = useRef(null);
-  const headerOpacity = scrollY.interpolate({
-    inputRange: [HERO_H - 100, HERO_H - 30],
-    outputRange: [0, 1],
-    extrapolate: 'clamp',
-  });
-
-  // Animations d'entrée staggerées
-  const enters = useRef(Array.from({ length: 8 }, () => new Animated.Value(0))).current;
+  const [product, setProduct] = useState(initialPreview);
+  const [loading, setLoading] = useState(!initialPreview);
   const [reviews, setReviews] = useState([]);
   const [loadingReviews, setLoadingReviews] = useState(false);
-  const [submittingReview, setSubmittingReview] = useState(false);
-  const [ownerActionLoading, setOwnerActionLoading] = useState(false);
+  const [reviewEligible, setReviewEligible] = useState(false);
+  const [reviewOpen, setReviewOpen] = useState(false);
   const [reviewRating, setReviewRating] = useState(0);
   const [reviewComment, setReviewComment] = useState('');
-  const [reviewEligible, setReviewEligible] = useState(false);
-  const [checkingEligibility, setCheckingEligibility] = useState(false);
+  const [submittingReview, setSubmittingReview] = useState(false);
+  const [ownerActionLoading, setOwnerActionLoading] = useState(false);
+  const [similar, setSimilar] = useState([]);
+  const [descExpanded, setDescExpanded] = useState(false);
+  const [solidHeader, setSolidHeader] = useState(false);
+  const [alert, setAlert] = useState({ visible: false, type: 'info', title: '', message: '', buttons: [{ text: 'OK', onPress: () => {} }] });
 
+  const { favorites, toggleFavorite: toggleSharedFavorite } = useFavorites();
+  const isFavorite = favorites.has(productId);
+
+  const isService = product?.type === 'service';
+  const accent = isService ? P.blue600 : (isDark ? P.amber : P.terra);
+  const softBg = isService ? (isDark ? 'rgba(37,99,235,0.18)' : P.blueSoft) : (isDark ? 'rgba(236,90,19,0.16)' : P.orange50);
+  const gradient = isService ? [P.blue600, P.blueDark] : [P.orange500, P.orange700];
+
+  // ─── Défilement : en-tête et galerie animés sur le thread natif ────────────
+  const HERO_H = Math.round(Math.min(Math.max(winH * 0.5, 320), 520));
+  const scrollY = useRef(new Animated.Value(0)).current;
+  const solidRef = useRef(false);
+  const solid = scrollY.interpolate({ inputRange: [HERO_H - 150, HERO_H - 80], outputRange: [0, 1], extrapolate: 'clamp' });
+  const onScroll = useMemo(() => Animated.event(
+    [{ nativeEvent: { contentOffset: { y: scrollY } } }],
+    {
+      useNativeDriver: true,
+      listener: (e) => {
+        const next = e.nativeEvent.contentOffset.y > HERO_H - 115;
+        if (next !== solidRef.current) {
+          solidRef.current = next;
+          setSolidHeader(next);
+        }
+      },
+    }
+  ), [scrollY, HERO_H]);
+
+  const enter = useRef(new Animated.Value(0)).current;
   const runEntrance = useCallback(() => {
-    Animated.stagger(70,
-      enters.map(a => Animated.spring(a, { toValue: 1, tension: 70, friction: 10, useNativeDriver: true }))
-    ).start();
-  }, []);
+    Animated.spring(enter, { toValue: 1, useNativeDriver: true, tension: 60, friction: 11 }).start();
+  }, [enter]);
 
-  const fetchProduct = async () => {
+  // ─── Données ─────────────────────────────────────────────────────────────────
+  const fetchProduct = useCallback(async () => {
     if (!isValidProductId) {
       setLoading(false);
       setProduct(null);
       return;
     }
-
     try {
       const res = await apiClient.get(`/products/${productId}`);
-      setProduct(res.data.data || res.data);
-      if (isAuthenticated) {
-        try {
-          const isFav = await checkFavorite(productId);
-          setIsFavorite(isFav);
-        } catch (err) {
-          console.error('Erreur checkFavorite:', err.message);
-        }
-      }
+      setProduct(res.data?.data || res.data);
     } catch (e) {
-      console.error(e);
-    }
-    finally {
+      // Annonce supprimée ou retirée : on n'affiche pas l'aperçu périmé
+      if (e?.response?.status === 404) setProduct(null);
+      else console.error(e);
+    } finally {
       setLoading(false);
-      setTimeout(runEntrance, 80);
+      if (!initialPreview) setTimeout(runEntrance, 60);
     }
-  };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [productId, isValidProductId]);
 
-  const fetchReviews = async () => {
-    if (!isValidProductId) {
-      setReviews([]);
-      return;
-    }
-
+  const fetchReviews = useCallback(async () => {
+    if (!isValidProductId) return;
     try {
       setLoadingReviews(true);
       const response = await getProductReviews(productId, 1, 5);
       setReviews(response?.data || []);
     } catch (error) {
-      console.error('❌ Erreur chargement avis:', error?.message || error);
       setReviews([]);
     } finally {
       setLoadingReviews(false);
     }
-  };
+  }, [productId, isValidProductId]);
 
-  const checkReviewEligibilityStatus = async () => {
+  const checkEligibility = useCallback(async () => {
     if (!isValidProductId || !isAuthenticated) {
       setReviewEligible(false);
       return;
     }
-
     try {
-      setCheckingEligibility(true);
       const response = await checkReviewEligibility(productId);
-      setReviewEligible(response?.eligible || false);
+      setReviewEligible(Boolean(response?.eligible));
     } catch (error) {
-      console.error('❌ Erreur vérification éligibilité:', error);
       setReviewEligible(false);
-    } finally {
-      setCheckingEligibility(false);
     }
-  };
+  }, [productId, isValidProductId, isAuthenticated]);
 
-  useEffect(() => { fetchProduct(); }, [productId, isValidProductId]);
-  useEffect(() => { fetchReviews(); }, [productId, isValidProductId]);
-  useEffect(() => { checkReviewEligibilityStatus(); }, [productId, isValidProductId, isAuthenticated]);
-
-  // Scroller vers le formulaire d'avis si demandé
+  useEffect(() => { fetchProduct(); }, [fetchProduct]);
+  useEffect(() => { fetchReviews(); }, [fetchReviews]);
+  useEffect(() => { checkEligibility(); }, [checkEligibility]);
   useEffect(() => {
-    if (route?.params?.scrollToReviewForm && reviewFormRef.current && scrollViewRef.current) {
-      // Utiliser measure pour obtenir la position exacte du formulaire
-      setTimeout(() => {
-        reviewFormRef.current?.measureInWindow((x, y, width, height) => {
-          if (scrollViewRef.current) {
-            scrollViewRef.current.scrollTo({ y: Math.max(0, y - 100), animated: true });
-          }
-        });
-      }, 300);
+    if (initialPreview) runEntrance();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Ouverture directe du formulaire d'avis (depuis une notification de clôture)
+  const autoReviewRef = useRef(false);
+  useEffect(() => {
+    if (route?.params?.scrollToReviewForm && reviewEligible && !autoReviewRef.current) {
+      autoReviewRef.current = true;
+      setReviewOpen(true);
     }
   }, [route?.params?.scrollToReviewForm, reviewEligible]);
 
-  const handleMarkHelpful = async (reviewId) => {
+  // Annonces similaires (même catégorie, sinon même vendeur) — format carte, sans comptage
+  const sellerId = String(product?.seller?.id || product?.seller?._id || product?.sellerId || '');
+  const similarKey = product ? `${product.categorySlug || product.type || ''}|${sellerId}` : '';
+  useEffect(() => {
+    if (!similarKey) return undefined;
+    let alive = true;
+    (async () => {
+      try {
+        const card = { limit: 12, view: 'card', withTotal: '0' };
+        const res = await apiClient.get('/products', {
+          params: { ...card, ...(product.categorySlug ? { categorySlug: product.categorySlug } : { type: product.type }) },
+        });
+        let list = (res.data?.data || []).filter((it) => getProductId(it) !== productId);
+        if (list.length < 3 && sellerId) {
+          const more = await apiClient.get('/products', { params: { ...card, seller: sellerId } });
+          const seen = new Set(list.map(getProductId));
+          list = [...list, ...(more.data?.data || []).filter((it) => getProductId(it) !== productId && !seen.has(getProductId(it)))];
+        }
+        if (alive) setSimilar(list.slice(0, 10));
+      } catch (e) {
+        // section facultative
+      }
+    })();
+    return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [similarKey]);
+
+  // ─── Actions ────────────────────────────────────────────────────────────────
+  const showAlert = (type, title, message, buttons) =>
+    setAlert({ visible: true, type, title, message, buttons: buttons || [{ text: 'OK', onPress: () => {} }] });
+
+  const requireAuth = (pendingAction) => {
+    navigation.navigate('QuickAuth', { pendingAction, returnScreen: 'ProductDetail', returnParams: { productId } });
+  };
+
+  const handleToggleFavorite = () => {
+    if (!isValidProductId) return;
+    if (!isAuthenticated) return requireAuth({ type: 'favorite', productId });
+    tap();
+    toggleSharedFavorite({ id: productId });
+  };
+
+  const handleShare = async () => {
+    if (!product) return;
     try {
-      await markReviewHelpful(reviewId);
-      await fetchReviews();
-    } catch (error) {
-      console.error('❌ Erreur avis utile:', error?.message || error);
+      await Share.share({ message: `${product.title} — ${formatPrice(product.price)}\n${getCityName(product.location)} · Voir sur TakTak` });
+    } catch (e) {
+      // partage annulé
     }
   };
 
+  const currentUserId = String(user?.id || user?._id || '');
+  const isOwnListing = Boolean(isAuthenticated && sellerId && currentUserId && sellerId === currentUserId);
+
+  // Contact uniquement via la messagerie de l'app (pas de WhatsApp ni d'appel direct)
+  const handleMessage = () => {
+    if (!isValidProductId || !sellerId) return;
+    if (!isAuthenticated) return requireAuth({ type: 'message', sellerId, productId });
+    if (isOwnListing) {
+      return showAlert('warning', 'Annonce personnelle', 'Vous ne pouvez pas discuter avec vous-même : c\'est votre annonce.');
+    }
+    tap();
+    navigation.navigate('MainTabs', {
+      screen: 'Messages',
+      params: { screen: 'MessagesList', params: { sellerId, productId } },
+    });
+  };
+
+  const openSeller = () => {
+    if (sellerId) navigation.navigate('SellerProfile', { sellerId });
+  };
+
+  const openReviewForm = () => {
+    if (!isAuthenticated) return requireAuth({ type: 'review', productId });
+    if (isOwnListing) return showAlert('warning', 'Action impossible', 'Vous ne pouvez pas évaluer votre propre annonce.');
+    setReviewOpen(true);
+  };
+
   const handleSubmitReview = async () => {
-    if (!isValidProductId) {
-      setAlert({
-        visible: true,
-        type: 'error',
-        title: 'Annonce indisponible',
-        message: 'Identifiant produit invalide. Veuillez rouvrir cette annonce.',
-        buttons: [{ text: 'Fermer', onPress: () => {} }],
-      });
-      return;
-    }
-
-    if (!isAuthenticated) {
-      navigation.navigate('QuickAuth', {
-        pendingAction: { type: 'review', productId },
-        returnScreen: 'ProductDetail',
-        returnParams: { productId },
-      });
-      return;
-    }
-
-    const sellerId = String(product?.seller?.id || product?.seller?._id || '');
-    const currentUserId = String(user?.id || '');
-    if (sellerId && currentUserId && sellerId === currentUserId) {
-      setAlert({
-        visible: true,
-        type: 'warning',
-        title: 'Action impossible',
-        message: 'Vous ne pouvez pas évaluer votre propre annonce.',
-        buttons: [{ text: 'Fermer', onPress: () => {} }],
-      });
-      return;
-    }
-
     if (!reviewRating || !reviewComment.trim()) {
-      setAlert({
-        visible: true,
-        type: 'warning',
-        title: 'Avis incomplet',
-        message: 'Choisissez une note et écrivez un commentaire.',
-        buttons: [{ text: 'Fermer', onPress: () => {} }],
-      });
-      return;
+      return showAlert('warning', 'Avis incomplet', 'Choisissez une note et écrivez un commentaire.');
     }
-
-    if (reviewComment.trim().length > 1000) {
-      setAlert({
-        visible: true,
-        type: 'warning',
-        title: 'Commentaire trop long',
-        message: 'Le commentaire ne peut pas dépasser 1000 caractères.',
-        buttons: [{ text: 'Fermer', onPress: () => {} }],
-      });
-      return;
-    }
-
     try {
       setSubmittingReview(true);
-      await createReview({
-        productId,
-        rating: reviewRating,
-        comment: reviewComment.trim(),
-      });
-
+      await createReview({ productId, rating: reviewRating, comment: reviewComment.trim() });
+      setReviewOpen(false);
       setReviewRating(0);
       setReviewComment('');
+      setReviewEligible(false);
       await Promise.all([fetchReviews(), fetchProduct()]);
-
-      setAlert({
-        visible: true,
-        type: 'success',
-        title: 'Merci',
-        message: 'Votre avis a été publié avec succès.',
-        buttons: [{ text: 'OK', onPress: () => {} }],
-      });
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+      showAlert('success', 'Merci !', 'Votre avis a été publié.');
     } catch (error) {
-      setAlert({
-        visible: true,
-        type: 'error',
-        title: 'Erreur',
-        message: error?.message || 'Impossible de publier votre avis.',
-        buttons: [{ text: 'Fermer', onPress: () => {} }],
-      });
+      showAlert('error', 'Erreur', error?.message || 'Impossible de publier votre avis.');
     } finally {
       setSubmittingReview(false);
     }
   };
 
-  const handleToggleFavorite = async () => {
-    if (!isValidProductId) return;
-
-    if (!isAuthenticated) {
-      navigation.navigate('QuickAuth', {
-        pendingAction: { type: 'favorite', productId },
-        returnScreen: 'ProductDetail',
-        returnParams: { productId },
-      });
-      return;
-    }
+  const handleMarkHelpful = async (reviewId) => {
+    tap();
+    // Mise à jour immédiate, puis synchronisation
+    setReviews((prev) => prev.map((r) => (r.id === reviewId ? { ...r, helpful: (r.helpful || 0) + 1, _voted: true } : r)));
     try {
-      await toggleFavorite(productId, isFavorite);
-      setIsFavorite(!isFavorite);
-    } catch (e) { console.error(e); }
-  };
-
-  const handleShare = async () => {
-    if (!product) return;
-    await Share.share({ message: `${product.title} — ${product.price ? parseInt(product.price).toLocaleString() + ' FCFA' : 'Prix à discuter'}\nVoir sur TakTak` });
-  };
-
-  const handleContact = (type) => {
-    const seller = product?.seller;
-    if (!seller) return;
-    if (type === 'whatsapp' && seller.contactInfo?.whatsapp)
-      Linking.openURL(`whatsapp://send?phone=${seller.contactInfo.whatsapp}`);
-    if (type === 'call' && (seller.contactInfo?.phone || seller.phone))
-      Linking.openURL(`tel:${seller.contactInfo?.phone || seller.phone}`);
-    if (type === 'message') {
-      if (!isValidProductId) return;
-
-      if (!isAuthenticated) {
-        navigation.navigate('QuickAuth', {
-          pendingAction: { type: 'message', sellerId: seller.id || seller._id, productId },
-          returnScreen: 'ProductDetail',
-          returnParams: { productId },
-        });
-        return;
-      }
-      const sellerId = seller.id || seller._id;
-      if (!sellerId) return;
-
-      // Vérifier si c'est le même utilisateur
-      const currentUserId = String(user?.id || '');
-      const sellerIdStr = String(sellerId || '');
-      if (currentUserId && sellerIdStr && currentUserId === sellerIdStr) {
-        setAlert({
-          visible: true,
-          type: 'warning',
-          title: 'Annonce personnelle',
-          message: 'Vous ne pouvez pas discuter avec vous-même. Ceci est votre propre produit.',
-          buttons: [{ text: 'Fermer', onPress: () => {} }],
-        });
-        return;
-      }
-
-      navigation.navigate('MainTabs', {
-        screen: 'Messages',
-        params: {
-          screen: 'MessagesList',
-          params: {
-            sellerId,
-            productId,
-          },
-        },
-      });
+      await markReviewHelpful(reviewId);
+    } catch (error) {
+      fetchReviews();
     }
   };
 
   const handleOwnerEdit = () => {
-    navigation.navigate('MainTabs', {
-      screen: 'Publish',
-      params: {
-        editItem: product,
-      },
-    });
+    navigation.navigate('MainTabs', { screen: 'Publish', params: { editItem: product } });
   };
 
   const handleOwnerToggleStatus = async () => {
@@ -579,467 +369,519 @@ export default function ProductDetailScreen({ route, navigation }) {
       setOwnerActionLoading(true);
       const wasActive = product?.status === 'active';
       await toggleProductStatus(productId);
-
       if (wasActive) {
-        setAlert({
-          visible: true,
-          type: 'success',
-          title: 'Annonce désactivée',
-          message: 'Votre annonce a été désactivée. Vous allez revenir à l\'accueil.',
-          buttons: [{
-            text: 'Aller à l\'accueil',
-            onPress: () => {
-              navigation.navigate('MainTabs', { screen: 'Home' });
-            },
-          }],
-        });
+        showAlert('success', 'Annonce désactivée', 'Votre annonce n\'est plus visible. Vous allez revenir à l\'accueil.', [
+          { text: 'Aller à l\'accueil', onPress: () => navigation.navigate('MainTabs', { screen: 'Home' }) },
+        ]);
       } else {
         await fetchProduct();
-        setAlert({
-          visible: true,
-          type: 'success',
-          title: 'Statut mis à jour',
-          message: 'Le statut de votre annonce a été mis à jour.',
-          buttons: [{ text: 'OK', onPress: () => {} }],
-        });
+        showAlert('success', 'Annonce réactivée', 'Votre annonce est de nouveau visible.');
       }
     } catch (error) {
-      setAlert({
-        visible: true,
-        type: 'error',
-        title: 'Erreur',
-        message: error?.message || 'Impossible de changer le statut.',
-        buttons: [{ text: 'Fermer', onPress: () => {} }],
-      });
+      showAlert('error', 'Erreur', error?.message || 'Impossible de changer le statut.');
     } finally {
       setOwnerActionLoading(false);
     }
   };
 
-  // ── Loading ────────────────────────────────────────────────────────────────
+  // ─── Chargement (sans aperçu) ───────────────────────────────────────────────
   if (loading) {
     return (
-      <LinearGradient colors={appTheme.shell} style={s.loadScreen}>
-        <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} backgroundColor="transparent" translucent />
-        <Image
-          source={require('../../Branding/flogo-removebg-preview.png')}
-          style={{ width: 160, height: 160, resizeMode: 'contain' }}
-        />
-        <ActivityIndicator size="large" color={isService ? P.blue100 : P.amber} style={{ marginTop: 40 }} />
-      </LinearGradient>
+      <View style={[s.screen, { backgroundColor: theme.screen }]}>
+        <SkeletonGroup>
+          <Bone width={width} height={HERO_H} radius={0} />
+          <View style={{ padding: 20, gap: 12, marginTop: -24 }}>
+            <Bone width={width - 40} height={150} radius={24} />
+            <View style={{ flexDirection: 'row', gap: 12 }}>
+              <Bone width={(width - 52) / 2} height={92} radius={18} />
+              <Bone width={(width - 52) / 2} height={92} radius={18} />
+            </View>
+            <Bone width={width - 40} height={84} radius={20} />
+          </View>
+        </SkeletonGroup>
+        <Pressable onPress={() => navigation.goBack()} style={[s.loadingBack, { top: insets.top + 8 }]} accessibilityLabel="Retour">
+          <Feather name="arrow-left" size={20} color="#fff" />
+        </Pressable>
+      </View>
     );
   }
 
-  // ── Not found ──────────────────────────────────────────────────────────────
+  // ─── Introuvable ─────────────────────────────────────────────────────────────
   if (!product) {
     return (
-      <LinearGradient colors={appTheme.shell} style={s.notFound}>
-        <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} backgroundColor="transparent" translucent />
-        <Text style={{ fontSize: 64 }}>😕</Text>
-        <Text style={[s.notFoundTitle, { color: appTheme.text }]}>Annonce introuvable</Text>
-        <Text style={[s.notFoundSub, { color: appTheme.textMuted }]}>Cette annonce a peut-être été supprimée.</Text>
-        <TouchableOpacity style={s.notFoundBtn} onPress={() => navigation.goBack()} activeOpacity={0.85}>
-          <LinearGradient colors={isService ? d.sellerAvatarGrad : [P.orange500, P.orange700]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={[s.notFoundBtnGrad, isService && d.notFoundBtn]}>
-            <Text style={s.notFoundBtnTxt}>← Retourner</Text>
-          </LinearGradient>
-        </TouchableOpacity>
-      </LinearGradient>
+      <View style={[s.screen, s.center, { backgroundColor: theme.screen, padding: 32 }]}>
+        <View style={[s.notFoundIcon, { backgroundColor: isDark ? 'rgba(236,90,19,0.16)' : P.orange50 }]}>
+          <Feather name="search" size={30} color={P.terra} />
+        </View>
+        <Text style={[s.notFoundTitle, { color: theme.text }]}>Annonce introuvable</Text>
+        <Text style={[s.notFoundSub, { color: theme.textMuted }]}>Elle a peut-être été vendue, retirée ou supprimée.</Text>
+        <PressableScale onPress={() => navigation.goBack()} style={[s.notFoundBtn, { backgroundColor: P.terra }]}>
+          <Feather name="arrow-left" size={16} color="#fff" />
+          <Text style={s.notFoundBtnTxt}>Retour</Text>
+        </PressableScale>
+      </View>
     );
   }
 
-  // Préparer les données
-  const images = product.images?.filter(Boolean).length > 0
-    ? product.images
-    : [product.mainImage].filter(Boolean);
-  if (!images.length) images.push(null);
+  // ─── Données dérivées ────────────────────────────────────────────────────────
+  const images = (product.images?.filter(Boolean).length ? product.images : [product.mainImage]).filter(Boolean);
+  const seller = product.seller || null;
+  const condition = !isService ? CONDITIONS[product.condition] : null;
+  const categoryName = product.category?.name || (typeof product.category === 'string' && product.category !== 'Catégorie non disponible' ? product.category : '');
+  const description = String(product.description || '').trim();
+  const descIsLong = description.length > 260 || description.split('\n').length > 5;
+  const specs = Object.entries(product.specifications || {}).filter(([k, v]) => k && v);
+  const days = Array.isArray(product.availability?.days) ? product.availability.days.filter(Boolean) : [];
+  const hours = product.availability?.openingTime
+    ? `${product.availability.openingTime}${product.availability.closingTime ? ` – ${product.availability.closingTime}` : ''}`
+    : '';
+  const serviceArea = Array.isArray(product.serviceArea) ? product.serviceArea.filter(Boolean) : [];
+  const delivery = product.delivery || {};
+  const deliveryAreas = Array.isArray(delivery.areas) ? delivery.areas.filter(Boolean) : [];
+  const rating = Number(product.rating || 0);
+  const totalReviews = Number(product.totalReviews || 0);
+  const statusBanner = product.status && product.status !== 'active' ? STATUS_BANNERS[product.status] : null;
+  const hasPrice = formatPrice(product.price) !== 'Prix à discuter';
 
-  const sellerId = String(product?.seller?.id || product?.seller?._id || '');
-  const currentUserId = String(user?.id || '');
-  const isOwnListing = Boolean(isAuthenticated && sellerId && currentUserId && sellerId === currentUserId);
+  const tiles = (isService ? [
+    categoryName && { icon: 'grid', label: 'Catégorie', value: product.subcategory ? `${categoryName} · ${product.subcategory}` : categoryName },
+    { icon: 'map-pin', label: 'Zone', value: serviceArea.length ? serviceArea.join(', ') : getCityName(product.location) },
+    hours && { icon: 'clock', label: 'Horaires', value: hours },
+    { icon: 'calendar', label: 'Publié', value: sinceLabel(product.createdAt) },
+  ] : [
+    condition && { icon: condition.icon, label: 'État', value: condition.label },
+    categoryName && { icon: 'grid', label: 'Catégorie', value: product.subcategory ? `${categoryName} · ${product.subcategory}` : categoryName },
+    { icon: 'truck', label: 'Livraison', value: delivery.available ? (delivery.cost ? formatPrice(delivery.cost) : 'Disponible') : 'Main propre' },
+    { icon: 'calendar', label: 'Publié', value: sinceLabel(product.createdAt) },
+  ]).filter(Boolean);
 
-  const specRows = [
-    { label: 'Type',        value: isService ? 'Service' : 'Produit' },
-    !isService && product.condition && {
-      label: 'État',
-      value: product.condition === 'new' ? '✨ Neuf' : product.condition === 'used' ? '🔄 Occasion' : '🔧 Reconditionné',
-    },
-    // !isService && product.quantity && { label: 'Quantité', value: String(product.quantity) },
-    product.category?.name && { label: 'Catégorie', value: product.category.name },
-    product.subcategory     && { label: 'Sous-catégorie', value: product.subcategory },
-  ].filter(Boolean);
+  const enterStyle = {
+    opacity: enter,
+    transform: [{ translateY: enter.interpolate({ inputRange: [0, 1], outputRange: [28, 0] }) }],
+  };
 
-  const postDate = product.createdAt
-    ? new Date(product.createdAt).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' })
-    : product.postedTime || 'Récent';
-
-  // ── Rendu ──────────────────────────────────────────────────────────────────
+  // ─── Rendu ───────────────────────────────────────────────────────────────────
   return (
-    <View style={[s.screen, { backgroundColor: appTheme.screen }]}>
-      <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} backgroundColor="transparent" translucent />
+    <View style={[s.screen, { backgroundColor: theme.screen }]}>
+      {/* Icônes de la barre d'état lisibles sur la photo (iOS ; Android garde sa barre colorée) */}
+      {Platform.OS === 'ios' ? (
+        <StatusBar barStyle={solidHeader ? (isDark ? 'light-content' : 'dark-content') : 'light-content'} animated />
+      ) : null}
 
-      {/* ══ HEADER FLOTTANT ══════════════════════════════════════════════ */}
-      <View style={[s.header, { paddingTop: (insets.top || 0) + 8 }]} pointerEvents="box-none">
-        {/* Fond qui apparaît au scroll */}
-        <Animated.View style={[StyleSheet.absoluteFill, s.headerBg, { backgroundColor: appTheme.surface, borderBottomColor: appTheme.border }, isService && d.headerBg, { opacity: headerOpacity }]} />
-
-        {/* Bouton retour */}
-        <TouchableOpacity style={s.hBtn} onPress={() => navigation.goBack()} activeOpacity={0.85}>
-          <BlurView intensity={30} tint={isDark ? 'dark' : 'light'} style={s.hBtnBlur}>
-            <Text style={[s.hBtnTxt, { color: appTheme.text }]}>←</Text>
-          </BlurView>
-        </TouchableOpacity>
-
-        {/* Titre au scroll */}
-        <Animated.Text style={[s.hTitle, { opacity: headerOpacity, color: appTheme.text }]} numberOfLines={1}>
-          {product.title}
-        </Animated.Text>
-
-        {/* Actions droite */}
-        <View style={s.hRight}>
-          <TouchableOpacity style={s.hBtn} onPress={handleShare} activeOpacity={0.85}>
-            <BlurView intensity={30} tint={isDark ? 'dark' : 'light'} style={s.hBtnBlur}>
-              <Text style={[s.hBtnTxt, { color: appTheme.text }]}>↗</Text>
-            </BlurView>
-          </TouchableOpacity>
-          <TouchableOpacity style={s.hBtn} onPress={handleToggleFavorite} activeOpacity={0.85}>
-            <BlurView intensity={30} tint={isDark ? 'dark' : 'light'} style={[s.hBtnBlur, isFavorite && s.hBtnFavBlur]}>
-              <Text style={[s.hBtnTxt, isFavorite && s.hBtnFavTxt]}>
-                {isFavorite ? '♥' : '♡'}
-              </Text>
-            </BlurView>
-          </TouchableOpacity>
-        </View>
-      </View>
-
-      {/* ══ SCROLL PRINCIPAL ═════════════════════════════════════════════ */}
       <Animated.ScrollView
-        ref={scrollViewRef}
-        style={{ flex: 1 }}
-        contentContainerStyle={{ paddingBottom: 90 + Math.max(insets.bottom, 16) }}
         showsVerticalScrollIndicator={false}
-        onScroll={Animated.event(
-          [{ nativeEvent: { contentOffset: { y: scrollY } } }],
-          { useNativeDriver: false }
-        )}
+        onScroll={onScroll}
         scrollEventThrottle={16}
+        contentContainerStyle={{ paddingBottom: 110 + insets.bottom }}
       >
+        <ImageGallery
+          images={images}
+          height={HERO_H}
+          scrollY={scrollY}
+          fallbackIcon={isService ? 'tool' : 'package'}
+          fallbackColor={isDark ? theme.iconMuted : P.orange300}
+          fallbackBg={isDark ? theme.surfaceAlt : P.orange50}
+        />
 
-        {/* ── HERO IMAGE ──────────────────────────────────────────────── */}
-        <ImageCarousel images={images} />
-
-        {/* ── BLOC TITRE — chevauchement hero ─────────────────────────── */}
-        <Animated.View style={[
-          s.titleBlock,
-          { backgroundColor: appTheme.surface, borderColor: appTheme.border, shadowColor: appTheme.shadow },
-          {
-            opacity: enters[0],
-            transform: [{ translateY: enters[0].interpolate({ inputRange: [0, 1], outputRange: [24, 0] }) }],
-          },
-        ]}>
-          {/* Badge type */}
-          <View style={[s.typeBadge, { backgroundColor: isService ? 'rgba(59,130,246,0.9)' : 'rgba(236,90,19,0.9)' }]}>
-            <Text style={s.typeBadgeTxt}>{isService ? '🛠 Service' : '📦 Produit'}</Text>
-          </View>
-
-          <Text style={[s.heroTitle, { color: appTheme.text }]}>{product.title}</Text>
-
-          {/* Localisation + date */}
-          <View style={s.heroMeta}>
-            <View style={[s.heroLocRow, isService ? d.heroLocRow : d.heroLocRowProduct]}>
-              <Text style={[s.heroLocDot, isService ? d.heroLocDot : d.heroLocDotProduct]}>●</Text>
-              <Text style={[s.heroLocTxt, isService ? d.heroLocTxt : d.heroLocTxtProduct]}>{getCityName(product.location)}</Text>
-            </View>
-            <Text style={[s.heroDate, { color: appTheme.textMuted }]}>Publié le {postDate}</Text>
-          </View>
-        </Animated.View>
-
-        {/* ── PRIX + STATS — fond sombre ──────────────────────────────── */}
-        <Animated.View style={[
-          s.priceBlock,
-          { backgroundColor: appTheme.surface, borderColor: appTheme.border, shadowColor: appTheme.shadow },
-          {
-            opacity: enters[1],
-            transform: [{ translateY: enters[1].interpolate({ inputRange: [0, 1], outputRange: [20, 0] }) }],
-          },
-        ]}>
-          <View style={s.priceRow}>
-            <View>
-              <Text style={[s.priceMeta, { color: appTheme.textMuted }]}>Prix demandé</Text>
-              {product.price ? (
-                <View style={s.priceAmountRow}>
-                  <Text style={[s.priceAmount, isService && d.priceAmount]}>{parseInt(product.price).toLocaleString('fr-FR')}</Text>
-                  <Text style={[s.priceCurrency, { color: appTheme.textMuted }]}> FCFA</Text>
+        <Animated.View style={[s.body, { backgroundColor: theme.screen }, enterStyle]}>
+          {/* ── En-tête de l'annonce ───────────────────────────────────────── */}
+          <Card theme={theme} style={s.headCard}>
+            <View style={s.badges}>
+              <View style={[s.badge, { backgroundColor: isService ? P.blue600 : P.terra }]}>
+                <Feather name={isService ? 'tool' : 'package'} size={11} color="#fff" />
+                <Text style={s.badgeTxtOn}>{isService ? 'Service' : 'Produit'}</Text>
+              </View>
+              {condition ? (
+                <View style={[s.badge, { backgroundColor: softBg }]}>
+                  <Text style={[s.badgeTxt, { color: accent }]}>{condition.label}</Text>
                 </View>
-              ) : (
-                <Text style={[s.priceNego, { color: appTheme.textMuted }]}>Prix à discuter</Text>
-              )}
+              ) : null}
+              {product.promoted || product.featured ? (
+                <View style={[s.badge, { backgroundColor: isDark ? 'rgba(245,158,11,0.18)' : P.amberSoft }]}>
+                  <Feather name="zap" size={11} color={P.gold} />
+                  <Text style={[s.badgeTxt, { color: isDark ? P.gold : P.amberDark }]}>À la une</Text>
+                </View>
+              ) : null}
             </View>
 
-            {/* Mini stats pills */}
-            <View style={s.miniStats}>
-              <View style={s.miniStat}>
-                <Text style={s.miniStatIcon}>👁</Text>
-                <Text style={[s.miniStatVal, { color: appTheme.textMuted }]}>{product.views || 0}</Text>
+            <Text style={[s.title, { color: theme.text }]}>{product.title}</Text>
+
+            <View style={s.priceRow}>
+              <Text style={[s.price, { color: hasPrice ? accent : theme.textMuted }]}>{formatPrice(product.price)}</Text>
+              {isService && hasPrice ? <Text style={[s.priceHint, { color: theme.textSoft }]}>à partir de</Text> : null}
+            </View>
+
+            <View style={[s.metaRow, { borderTopColor: theme.border }]}>
+              <View style={s.meta}>
+                <Feather name="map-pin" size={13} color={accent} />
+                <Text style={[s.metaTxt, { color: theme.textMuted }]} numberOfLines={1}>{getCityName(product.location)}</Text>
               </View>
-              <View style={s.miniStat}>
-                <Text style={s.miniStatIcon}>♡</Text>
-                <Text style={[s.miniStatVal, { color: appTheme.textMuted }]}>{product.favorites || 0}</Text>
+              <View style={s.meta}>
+                <Feather name="clock" size={13} color={theme.textSoft} />
+                <Text style={[s.metaTxt, { color: theme.textMuted }]}>{sinceLabel(product.createdAt)}</Text>
+              </View>
+              <View style={s.meta}>
+                <Feather name="eye" size={13} color={theme.textSoft} />
+                <Text style={[s.metaTxt, { color: theme.textMuted }]}>{formatCompact(product.views || 0)} vues</Text>
               </View>
             </View>
+          </Card>
+
+          {/* Annonce non visible (le propriétaire est seul à la voir) */}
+          {statusBanner ? (
+            <View style={[s.banner, { backgroundColor: isDark ? 'rgba(245,158,11,0.14)' : P.amberSoft }]}>
+              <Feather name={statusBanner.icon} size={16} color={isDark ? P.gold : P.amberDark} />
+              <Text style={[s.bannerTxt, { color: isDark ? P.gold : P.amberDark }]}>{statusBanner.text}</Text>
+            </View>
+          ) : null}
+
+          {/* ── Infos clés ─────────────────────────────────────────────────── */}
+          <View style={s.tiles}>
+            {tiles.map((t) => (
+              <InfoTile key={t.label} {...t} accent={accent} softBg={softBg} theme={theme} />
+            ))}
           </View>
 
-          {/* Ligne accent */}
-          <LinearGradient
-            colors={isService ? d.priceAccentColors : ['transparent', P.terra, 'transparent']}
-            start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
-            style={s.priceAccentLine}
-          />
-        </Animated.View>
-
-        {/* ── VENDEUR ─────────────────────────────────────────────────── */}
-        {product.seller && (
-          <Animated.View style={{
-            opacity: enters[2],
-            transform: [{ translateY: enters[2].interpolate({ inputRange: [0, 1], outputRange: [20, 0] }) }],
-          }}>
-            <Section title="Annonceur" isService={isService} appTheme={appTheme}>
-              <SellerCard
-                seller={product.seller}
-                onPress={() => navigation.navigate('SellerProfile', { sellerId: product.seller.id })}
-                isService={isService}
-                appTheme={appTheme}
-              />
-            </Section>
-          </Animated.View>
-        )}
-
-        {/* ── DESCRIPTION ─────────────────────────────────────────────── */}
-        <Animated.View style={{
-          opacity: enters[3],
-          transform: [{ translateY: enters[3].interpolate({ inputRange: [0, 1], outputRange: [20, 0] }) }],
-        }}>
-          <Section title="Description" isService={isService} appTheme={appTheme}>
-            <View style={[s.descCard, { backgroundColor: appTheme.surfaceAlt, borderColor: appTheme.border }]}>
-              <Text style={[s.descText, { color: appTheme.text }]}>{product.description}</Text>
-            </View>
-          </Section>
-        </Animated.View>
-
-        {/* ── DÉTAILS ─────────────────────────────────────────────────── */}
-        <Animated.View style={{
-          opacity: enters[4],
-          transform: [{ translateY: enters[4].interpolate({ inputRange: [0, 1], outputRange: [20, 0] }) }],
-        }}>
-          <Section title="Détails" isService={isService} appTheme={appTheme}>
-            <SpecTable rows={specRows} appTheme={appTheme} />
-          </Section>
-        </Animated.View>
-
-        {/* ── CARACTÉRISTIQUES ────────────────────────────────────────── */}
-        {product.specifications && Object.keys(product.specifications).length > 0 && (
-          <Animated.View style={{
-            opacity: enters[5],
-            transform: [{ translateY: enters[5].interpolate({ inputRange: [0, 1], outputRange: [20, 0] }) }],
-          }}>
-            <Section title="Caractéristiques" isService={isService} appTheme={appTheme}>
-              <SpecTable rows={Object.entries(product.specifications).map(([k, v]) => ({ label: k, value: v }))} appTheme={appTheme} />
-            </Section>
-          </Animated.View>
-        )}
-
-        {/* ── DISPONIBILITÉ (service) ──────────────────────────────────── */}
-        {isService && product.availability && (
-          <Animated.View style={{
-            opacity: enters[5],
-            transform: [{ translateY: enters[5].interpolate({ inputRange: [0, 1], outputRange: [20, 0] }) }],
-          }}>
-            <Section title="Disponibilité" isService={isService} appTheme={appTheme}>
-              <View style={[s.availCard, { backgroundColor: appTheme.surfaceAlt, borderColor: appTheme.border }]}>
-                {product.availability.days?.length > 0 && (
-                  <View style={s.availRow}>
-                    <Text style={s.availIcon}>📅</Text>
-                    <Text style={[s.availTxt, { color: appTheme.text }]}>{product.availability.days.join(' · ')}</Text>
-                  </View>
-                )}
-                {product.availability.openingTime && (
-                  <View style={s.availRow}>
-                    <Text style={s.availIcon}>🕐</Text>
-                    <Text style={[s.availTxt, { color: appTheme.text }]}>{product.availability.openingTime} — {product.availability.closingTime}</Text>
-                  </View>
-                )}
-              </View>
-            </Section>
-          </Animated.View>
-        )}
-
-        {/* ── AVIS / ÉVALUATIONS ───────────────────────────────────────── */}
-        <Animated.View style={{
-          opacity: enters[6],
-          transform: [{ translateY: enters[6].interpolate({ inputRange: [0, 1], outputRange: [20, 0] }) }],
-        }}>
-          <Section title="Avis & évaluations" isService={isService} appTheme={appTheme}>
-            <View style={[s.reviewHeaderCard, { backgroundColor: appTheme.surfaceAlt, borderColor: appTheme.border }]}> 
-              <View style={s.reviewHeaderLeft}>
-                <Text style={[s.reviewHeaderScore, { color: appTheme.text }]}>{(product.rating || 0).toFixed(1)}</Text>
-                <Text style={[s.reviewHeaderCount, { color: appTheme.textMuted }]}>{product.totalReviews || 0} avis</Text>
-              </View>
-              <View style={s.reviewHeaderRight}>
-                <Text style={s.reviewHeaderStars}>{'★'.repeat(Math.round(product.rating || 0)) || '☆☆☆☆☆'}</Text>
-                <Text style={[s.reviewHeaderSub, { color: appTheme.textMuted }]}>Ce que pensent les clients de cet annonceur</Text>
-              </View>
-            </View>
-
-            {reviewEligible ? (
-              <View ref={reviewFormRef} style={[s.reviewFormCard, { backgroundColor: appTheme.surfaceAlt, borderColor: appTheme.border }]}> 
-                <Text style={[s.reviewFormTitle, { color: appTheme.text }]}>Donnez votre note</Text>
-                <View style={s.reviewStarsRow}>
-                  {[1, 2, 3, 4, 5].map((star) => (
-                    <TouchableOpacity
-                      key={star}
-                      onPress={() => setReviewRating(star)}
-                      disabled={submittingReview}
-                      style={s.reviewStarBtn}
-                    >
-                      <Text style={[s.reviewStar, star <= reviewRating && s.reviewStarActive]}>★</Text>
-                    </TouchableOpacity>
-                  ))}
-                  {reviewRating > 0 && <Text style={s.reviewStarLabel}>{reviewRating}/5</Text>}
-                </View>
-
-                <TextInput
-                  value={reviewComment}
-                  onChangeText={setReviewComment}
-                  placeholder="Partagez votre expérience avec cet annonceur..."
-                  placeholderTextColor={appTheme.inputPlaceholder}
-                  multiline
-                  maxLength={1000}
-                  editable={!submittingReview}
-                  style={[s.reviewInput, { color: appTheme.inputText, backgroundColor: appTheme.inputBg, borderColor: appTheme.border }]}
-                />
-                <Text style={[s.reviewCounter, { color: appTheme.textMuted }]}>{reviewComment.length}/1000</Text>
-
-                <TouchableOpacity
-                  activeOpacity={0.88}
-                  onPress={handleSubmitReview}
-                  disabled={submittingReview}
-                  style={[s.reviewSubmitBtn, submittingReview && s.reviewSubmitBtnDisabled]}
-                >
-                  <LinearGradient
-                    colors={isService ? d.sellerAvatarGrad : [P.orange500, P.orange700]}
-                    start={{ x: 0, y: 0 }}
-                    end={{ x: 1, y: 0 }}
-                    style={s.reviewSubmitBtnGrad}
-                  >
-                    {submittingReview ? (
-                      <ActivityIndicator size="small" color={P.white} />
-                    ) : (
-                      <Text style={s.reviewSubmitBtnTxt}>Publier mon avis</Text>
-                    )}
-                  </LinearGradient>
-                </TouchableOpacity>
-              </View>
-            ) : null}
-
-            {loadingReviews ? (
-              <View style={s.reviewLoadingWrap}>
-                <ActivityIndicator size="small" color={isService ? P.blue100 : P.terra} />
-                <Text style={[s.reviewLoadingTxt, { color: appTheme.textMuted }]}>Chargement des avis...</Text>
-              </View>
-            ) : reviews.length > 0 ? (
-              <View style={s.reviewListWrap}>
-                <Text style={[s.reviewListTitle, { color: appTheme.text }]}>Avis récents</Text>
-                {reviews.slice(0, 5).map((review) => (
-                  <View key={review.id} style={[s.reviewItemCard, { backgroundColor: appTheme.surfaceAlt, borderColor: appTheme.border }]}>
-                    <View style={s.reviewItemHead}>
-                      <View style={s.reviewUserWrap}>
-                        {review.userAvatar ? (
-                          <Image source={{ uri: review.userAvatar }} style={s.reviewAvatarImg} />
-                        ) : (
-                          <View style={s.reviewAvatar}>
-                            <Text style={s.reviewAvatarTxt}>{getInitials(review.userName)}</Text>
-                          </View>
-                        )}
-                        <View style={{ flex: 1 }}>
-                          <Text style={[s.reviewItemUser, { color: appTheme.text }]} numberOfLines={1}>{review.userName}</Text>
-                          <Text style={[s.reviewItemDate, { color: appTheme.textMuted }]}>{formatRelativeDate(review.date)}</Text>
-                        </View>
-                        <Text style={s.reviewItemStars}>{'★'.repeat(review.rating)}{'☆'.repeat(5 - review.rating)}</Text>
-                      </View>
+          {/* ── Vendeur ────────────────────────────────────────────────────── */}
+          {seller ? (
+            <PressableScale onPress={openSeller} scaleTo={0.98} accessibilityLabel={`Voir le profil de ${seller.businessName || seller.name}`}>
+              <Card theme={theme} style={s.sellerCard}>
+                <View>
+                  <Avatar uri={seller.avatar} name={seller.businessName || seller.name} size={54} colors={gradient} />
+                  {seller.verified ? (
+                    <View style={[s.verified, { borderColor: theme.surface }]}>
+                      <Feather name="check" size={10} color="#fff" />
                     </View>
-                    <Text style={[s.reviewItemComment, { color: appTheme.text }]} numberOfLines={2}>{review.comment}</Text>
-                    <TouchableOpacity onPress={() => handleMarkHelpful(review.id)} style={[s.reviewHelpfulBtn, { backgroundColor: appTheme.surface, borderColor: appTheme.border }]}> 
-                      <Text style={[s.reviewHelpfulTxt, { color: appTheme.textMuted }]}>👍 Utile{review.helpful > 0 ? ` (${review.helpful})` : ''}</Text>
-                    </TouchableOpacity>
-                  </View>
-                ))}
-              </View>
-            ) : (
-              <View style={[s.reviewEmptyCard, { backgroundColor: appTheme.surfaceAlt, borderColor: appTheme.border }]}>
-                <Text style={[s.reviewEmptyTitle, { color: appTheme.text }]}>Aucun avis pour le moment</Text>
-                <Text style={[s.reviewEmptyTxt, { color: appTheme.textMuted }]}>Soyez le premier à évaluer cet annonceur.</Text>
-              </View>
-            )}
-          </Section>
-        </Animated.View>
+                  ) : null}
+                </View>
+                <View style={{ flex: 1, gap: 3 }}>
+                  <Text style={[s.sellerName, { color: theme.text }]} numberOfLines={1}>{seller.businessName || seller.name}</Text>
+                  {/* Note du vendeur : absente de l'aperçu, affichée dès que le détail arrive */}
+                  {seller.rating != null ? (
+                    <View style={s.sellerLine}>
+                      <Ionicons name="star" size={12} color={P.gold} />
+                      <Text style={[s.sellerMeta, { color: theme.text }]}>{Number(seller.rating || 0).toFixed(1)}</Text>
+                      <Text style={[s.sellerMeta, { color: theme.textSoft }]}>({seller.totalReviews || 0} avis)</Text>
+                      {seller.totalListings ? (
+                        <Text style={[s.sellerMeta, { color: theme.textSoft }]}>· {seller.totalListings} annonce{seller.totalListings > 1 ? 's' : ''}</Text>
+                      ) : null}
+                    </View>
+                  ) : null}
+                  <Text style={[s.sellerMeta, { color: theme.textSoft }]} numberOfLines={1}>
+                    {seller.memberSince && seller.memberSince !== 'Récemment' ? `Membre depuis ${seller.memberSince}` : 'Membre TakTak'}
+                    {seller.location ? ` · ${getCityName(seller.location)}` : ''}
+                  </Text>
+                </View>
+                <View style={[s.chevron, { backgroundColor: softBg }]}>
+                  <Feather name="chevron-right" size={18} color={accent} />
+                </View>
+              </Card>
+            </PressableScale>
+          ) : null}
 
-        {/* ── NOTE MISE EN RELATION ────────────────────────────────────── */}
-        <Animated.View style={[
-          s.meetupNote,
-          {
-            opacity: enters[7],
-            transform: [{ translateY: enters[7].interpolate({ inputRange: [0, 1], outputRange: [16, 0] }) }],
-          },
-        ]}>
-          <View style={[s.meetupInner, isService && d.meetupInner]}>
-            {/* Accent bar gauche */}
-            <View style={[s.meetupAccent, isService && d.meetupAccent]} />
-            <Text style={s.meetupIcon}>🤝</Text>
-            <View style={{ flex: 1 }}>
-              <Text style={[s.meetupTitle, { color: appTheme.text }]}>Mise en relation directe</Text>
-              <Text style={[s.meetupSub, { color: appTheme.textMuted }]}>Contactez l'annonceur et convenez d'un lieu entre vous.</Text>
+          {/* ── Description ────────────────────────────────────────────────── */}
+          {description ? (
+            <Card theme={theme}>
+              <SectionTitle icon="align-left" title="Description" accent={accent} theme={theme} />
+              <Text style={[s.desc, { color: theme.textMuted }]} numberOfLines={descExpanded || !descIsLong ? undefined : 6}>
+                {description}
+              </Text>
+              {descIsLong ? (
+                <Pressable onPress={() => setDescExpanded((v) => !v)} hitSlop={8} style={s.more}>
+                  <Text style={[s.moreTxt, { color: accent }]}>{descExpanded ? 'Réduire' : 'Lire la suite'}</Text>
+                  <Feather name={descExpanded ? 'chevron-up' : 'chevron-down'} size={15} color={accent} />
+                </Pressable>
+              ) : null}
+            </Card>
+          ) : null}
+
+          {/* ── Caractéristiques ───────────────────────────────────────────── */}
+          {specs.length > 0 ? (
+            <Card theme={theme}>
+              <SectionTitle icon="list" title="Caractéristiques" accent={accent} theme={theme} />
+              {specs.map(([label, value], i) => (
+                <View key={label} style={[s.specRow, i > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: theme.border }]}>
+                  <Text style={[s.specLabel, { color: theme.textSoft }]}>{label}</Text>
+                  <Text style={[s.specValue, { color: theme.text }]}>{String(value)}</Text>
+                </View>
+              ))}
+            </Card>
+          ) : null}
+
+          {/* ── Livraison (produit) ────────────────────────────────────────── */}
+          {!isService && delivery.available ? (
+            <Card theme={theme}>
+              <SectionTitle icon="truck" title="Livraison" accent={accent} theme={theme} />
+              <Text style={[s.desc, { color: theme.textMuted }]}>
+                {delivery.cost ? `Livraison possible pour ${formatPrice(delivery.cost)}.` : 'Livraison possible — à convenir avec le vendeur.'}
+                {delivery.estimatedTime ? ` Délai : ${delivery.estimatedTime}.` : ''}
+              </Text>
+              {deliveryAreas.length ? (
+                <View style={s.chips}>
+                  {deliveryAreas.map((area) => (
+                    <View key={area} style={[s.chip, { backgroundColor: softBg }]}>
+                      <Text style={[s.chipTxt, { color: accent }]}>{area}</Text>
+                    </View>
+                  ))}
+                </View>
+              ) : null}
+            </Card>
+          ) : null}
+
+          {/* ── Disponibilité (service) ────────────────────────────────────── */}
+          {isService && (days.length || hours) ? (
+            <Card theme={theme}>
+              <SectionTitle icon="calendar" title="Disponibilité" accent={accent} theme={theme} />
+              {days.length ? (
+                <View style={s.chips}>
+                  {days.map((day) => (
+                    <View key={day} style={[s.chip, { backgroundColor: softBg }]}>
+                      <Text style={[s.chipTxt, { color: accent }]}>{day}</Text>
+                    </View>
+                  ))}
+                </View>
+              ) : null}
+              {hours ? (
+                <View style={[s.hoursRow, { marginTop: days.length ? 12 : 0 }]}>
+                  <Feather name="clock" size={15} color={accent} />
+                  <Text style={[s.hoursTxt, { color: theme.text }]}>{hours}</Text>
+                </View>
+              ) : null}
+            </Card>
+          ) : null}
+
+          {/* ── Sécurité ───────────────────────────────────────────────────── */}
+          <View style={[s.safety, { backgroundColor: isDark ? 'rgba(34,197,94,0.10)' : '#F0FDF4', borderColor: isDark ? 'rgba(34,197,94,0.25)' : '#BBF7D0' }]}>
+            <View style={s.safetyHead}>
+              <Feather name="shield" size={17} color={P.greenDark} />
+              <Text style={[s.safetyTitle, { color: theme.text }]}>{isService ? 'Réservez en toute confiance' : 'Achetez en toute sécurité'}</Text>
             </View>
+            {(isService ? [
+              'Convenez du prix et du délai par écrit dans la messagerie',
+              'Demandez des exemples de réalisations avant de vous engager',
+              'Ne payez jamais l\'intégralité avant la prestation',
+            ] : [
+              'Rencontrez-vous dans un lieu public et fréquenté',
+              'Vérifiez l\'article avant de payer',
+              'Ne payez jamais à l\'avance',
+            ]).map((tip) => (
+              <View key={tip} style={s.safetyRow}>
+                <Feather name="check" size={14} color={P.greenDark} />
+                <Text style={[s.safetyTxt, { color: theme.textMuted }]}>{tip}</Text>
+              </View>
+            ))}
           </View>
-        </Animated.View>
 
+          {/* ── Avis ───────────────────────────────────────────────────────── */}
+          <Card theme={theme}>
+            <SectionTitle
+              icon="message-square"
+              title="Avis"
+              accent={accent}
+              theme={theme}
+              right={totalReviews ? <Text style={[s.secCount, { color: theme.textSoft }]}>{totalReviews}</Text> : null}
+            />
+
+            <View style={[s.ratingBox, { backgroundColor: theme.surfaceAlt }]}>
+              <Text style={[s.ratingBig, { color: theme.text }]}>{rating.toFixed(1)}</Text>
+              <View style={{ flex: 1, gap: 4 }}>
+                <Stars value={rating} size={16} />
+                <Text style={[s.ratingSub, { color: theme.textSoft }]}>
+                  {totalReviews ? `${totalReviews} avis vérifié${totalReviews > 1 ? 's' : ''}` : 'Pas encore d\'avis'}
+                </Text>
+              </View>
+              {reviewEligible ? (
+                <PressableScale onPress={openReviewForm} style={[s.writeBtn, { backgroundColor: accent }]}>
+                  <Feather name="edit-3" size={14} color="#fff" />
+                  <Text style={s.writeBtnTxt}>Noter</Text>
+                </PressableScale>
+              ) : null}
+            </View>
+
+            {loadingReviews && reviews.length === 0 ? (
+              <ActivityIndicator style={{ marginTop: 16 }} color={accent} />
+            ) : reviews.length ? (
+              reviews.slice(0, 5).map((review, i) => (
+                <View key={review.id} style={[s.review, i > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: theme.border }]}>
+                  <View style={s.reviewHead}>
+                    <Avatar uri={review.userAvatar} name={review.userName} size={36} colors={[P.orange400, P.orange600]} />
+                    <View style={{ flex: 1 }}>
+                      <Text style={[s.reviewName, { color: theme.text }]} numberOfLines={1}>{review.userName}</Text>
+                      <Text style={[s.reviewDate, { color: theme.textSoft }]}>{relativeDate(review.date)}</Text>
+                    </View>
+                    <Stars value={review.rating} size={12} gap={1} />
+                  </View>
+                  {review.comment ? (
+                    <Text style={[s.reviewTxt, { color: theme.textMuted }]}>{review.comment}</Text>
+                  ) : null}
+                  <Pressable
+                    onPress={() => !review._voted && handleMarkHelpful(review.id)}
+                    disabled={review._voted}
+                    hitSlop={6}
+                    style={[s.helpful, { borderColor: review._voted ? accent : theme.border }]}
+                  >
+                    <Feather name="thumbs-up" size={12} color={review._voted ? accent : theme.textSoft} />
+                    <Text style={[s.helpfulTxt, { color: review._voted ? accent : theme.textSoft }]}>
+                      Utile{review.helpful ? ` · ${review.helpful}` : ''}
+                    </Text>
+                  </Pressable>
+                </View>
+              ))
+            ) : (
+              <Text style={[s.emptyReviews, { color: theme.textSoft }]}>
+                Les avis apparaissent après une affaire conclue via la messagerie TakTak.
+              </Text>
+            )}
+          </Card>
+
+          {/* ── Annonces similaires ────────────────────────────────────────── */}
+          {similar.length ? (
+            <View style={{ marginTop: 6 }}>
+              <View style={[s.secHead, { paddingHorizontal: 4 }]}>
+                <View style={[s.secIcon, { backgroundColor: `${accent}1F` }]}>
+                  <Feather name="layers" size={15} color={accent} />
+                </View>
+                <Text style={[s.secTitle, { color: theme.text }]}>Annonces similaires</Text>
+              </View>
+              <FlatList
+                data={similar}
+                horizontal
+                keyExtractor={getProductId}
+                showsHorizontalScrollIndicator={false}
+                style={{ marginHorizontal: -16 }}
+                contentContainerStyle={{ paddingHorizontal: 16, gap: 10 }}
+                renderItem={({ item }) => (
+                  <ProductCard
+                    item={item}
+                    width={156}
+                    imageHeight={150}
+                    isFavorite={favorites.has(getProductId(item))}
+                    onPress={() => navigation.push('ProductDetail', { productId: getProductId(item), preview: item })}
+                    onToggleFavorite={() => (isAuthenticated ? toggleSharedFavorite(item) : requireAuth({ type: 'favorite', productId: getProductId(item) }))}
+                  />
+                )}
+              />
+            </View>
+          ) : null}
+        </Animated.View>
       </Animated.ScrollView>
 
-      {/* ══ FOOTER CONTACT ═══════════════════════════════════════════════ */}
-      <View style={[s.footer, { paddingBottom: Math.max(insets.bottom + 10, 18) }]}>
-        {/* Fondu blanc vers le haut */}
-        <LinearGradient
-          colors={isDark ? ['rgba(17,24,39,0)', appTheme.surface] : ['rgba(249,250,251,0)', appTheme.surface]}
-          style={s.footerFade}
+      {/* ══ En-tête flottant ═══════════════════════════════════════════════════ */}
+      <View style={[s.header, { paddingTop: insets.top + 6 }]} pointerEvents="box-none">
+        <Animated.View
           pointerEvents="none"
+          style={[StyleSheet.absoluteFill, { backgroundColor: theme.surface, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: theme.border, opacity: solid }]}
         />
-        <View style={[s.footerContent, { backgroundColor: appTheme.surface, borderTopColor: appTheme.border }]}> 
-          {isOwnListing ? (
-            <View style={s.ownerActionsRow}>
-              <TouchableOpacity
-                style={[s.ownerActionGhost, { backgroundColor: appTheme.surfaceAlt, borderColor: appTheme.border }]}
-                onPress={handleOwnerEdit}
-                activeOpacity={0.75}
-              >
-                <Text style={[s.ownerActionGhostTxt, { color: appTheme.text }]}>Modifier</Text>
-              </TouchableOpacity>
+        <HeaderButton
+          label="Retour"
+          solid={solid}
+          theme={theme}
+          onPress={() => navigation.goBack()}
+          renderIcon={(color) => <Feather name="arrow-left" size={20} color={color} />}
+        />
+        <Animated.Text style={[s.hTitle, { color: theme.text, opacity: solid }]} numberOfLines={1}>{product.title}</Animated.Text>
+        <HeaderButton
+          label="Partager"
+          solid={solid}
+          theme={theme}
+          onPress={handleShare}
+          renderIcon={(color) => <Feather name="share-2" size={18} color={color} />}
+        />
+        {!isOwnListing ? (
+          <HeaderButton
+            label={isFavorite ? 'Retirer des favoris' : 'Ajouter aux favoris'}
+            solid={solid}
+            theme={theme}
+            onPress={handleToggleFavorite}
+            renderIcon={(color) => <Ionicons name={isFavorite ? 'heart' : 'heart-outline'} size={20} color={isFavorite ? P.terra : color} />}
+          />
+        ) : null}
+      </View>
 
-              <TouchableOpacity
-                style={[s.ownerActionToggle, product.status === 'active' ? s.ownerActionToggleOff : s.ownerActionToggleOn]}
+      {/* ══ Barre d'action ═════════════════════════════════════════════════════ */}
+      <View style={[s.footer, { paddingBottom: Math.max(insets.bottom, 12), backgroundColor: theme.surface, borderTopColor: theme.border }]}>
+        {isOwnListing ? (
+          <>
+            <PressableScale onPress={handleOwnerEdit} style={[s.ghostBtn, { borderColor: theme.border, backgroundColor: theme.surfaceAlt }]} accessibilityLabel="Modifier l'annonce">
+              <Feather name="edit-2" size={16} color={theme.text} />
+              <Text style={[s.ghostBtnTxt, { color: theme.text }]}>Modifier</Text>
+            </PressableScale>
+            <View style={{ flex: 1 }}>
+              <PressableScale
                 onPress={handleOwnerToggleStatus}
                 disabled={ownerActionLoading || product.status === 'sold'}
-                activeOpacity={0.75}
+                style={[s.mainBtn, { backgroundColor: product.status === 'active' ? P.errorDark : P.greenDark, opacity: product.status === 'sold' ? 0.5 : 1 }]}
               >
-                {ownerActionLoading ? (
-                  <ActivityIndicator size="small" color={P.white} />
-                ) : (
-                  <Text style={s.ownerActionToggleTxt}>{product.status === 'active' ? 'Désactiver' : 'Activer'}</Text>
+                {ownerActionLoading ? <ActivityIndicator color="#fff" /> : (
+                  <>
+                    <Feather name={product.status === 'active' ? 'eye-off' : 'eye'} size={16} color="#fff" />
+                    <Text style={s.mainBtnTxt}>{product.status === 'active' ? 'Désactiver' : 'Réactiver'}</Text>
+                  </>
                 )}
-              </TouchableOpacity>
+              </PressableScale>
             </View>
-          ) : (
-            <ContactBtn icon="✉️" label="Envoyer un message" variant="main" onPress={() => handleContact('message')} isService={isService} />
-          )}
-        </View>
+          </>
+        ) : (
+          <>
+            <View style={{ flex: 1 }}>
+              <Text style={[s.footerPrice, { color: hasPrice ? theme.text : theme.textMuted }]} numberOfLines={1}>{formatPrice(product.price)}</Text>
+              <Text style={[s.footerSub, { color: theme.textSoft }]} numberOfLines={1}>
+                {seller ? `par ${seller.businessName || seller.name}` : getCityName(product.location)}
+              </Text>
+            </View>
+            <PressableScale onPress={handleMessage} accessibilityLabel="Contacter l'annonceur par message">
+              <LinearGradient colors={gradient} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={s.mainBtn}>
+                <Feather name="message-circle" size={18} color="#fff" />
+                <Text style={s.mainBtnTxt}>{isService ? 'Demander un devis' : 'Contacter'}</Text>
+              </LinearGradient>
+            </PressableScale>
+          </>
+        )}
       </View>
+
+      {/* ══ Formulaire d'avis (panneau natif, clavier géré) ═══════════════════ */}
+      <Sheet
+        visible={reviewOpen}
+        onClose={() => setReviewOpen(false)}
+        title="Votre avis"
+        footer={(
+          <PressableScale onPress={handleSubmitReview} disabled={submittingReview || !reviewRating || !reviewComment.trim()}>
+            <LinearGradient
+              colors={gradient}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 0 }}
+              style={[s.mainBtn, { opacity: !reviewRating || !reviewComment.trim() ? 0.5 : 1 }]}
+            >
+              {submittingReview ? <ActivityIndicator color="#fff" /> : <Text style={s.mainBtnTxt}>Publier mon avis</Text>}
+            </LinearGradient>
+          </PressableScale>
+        )}
+      >
+        <Text style={[s.sheetSub, { color: theme.textMuted }]}>
+          Comment s'est passée votre expérience avec {seller?.businessName || seller?.name || 'cet annonceur'} ?
+        </Text>
+        <View style={s.pickStars}>
+          {[1, 2, 3, 4, 5].map((n) => (
+            <Pressable key={n} onPress={() => { tap(); setReviewRating(n); }} hitSlop={6} accessibilityLabel={`${n} étoile${n > 1 ? 's' : ''}`}>
+              <Ionicons name={n <= reviewRating ? 'star' : 'star-outline'} size={38} color={n <= reviewRating ? P.gold : theme.iconMuted} />
+            </Pressable>
+          ))}
+        </View>
+        <Text style={[s.pickLabel, { color: reviewRating ? accent : theme.textSoft }]}>
+          {reviewRating ? RATING_LABELS[reviewRating] : 'Touchez une étoile'}
+        </Text>
+        <SheetTextInput
+          value={reviewComment}
+          onChangeText={setReviewComment}
+          placeholder="Qualité, ponctualité, communication…"
+          placeholderTextColor={theme.inputPlaceholder}
+          multiline
+          maxLength={REVIEW_MAX}
+          editable={!submittingReview}
+          style={[s.reviewInput, { color: theme.text, backgroundColor: theme.surfaceAlt, borderColor: theme.border }]}
+        />
+        <Text style={[s.counter, { color: theme.textSoft }]}>{reviewComment.length}/{REVIEW_MAX}</Text>
+      </Sheet>
 
       <AlertModal
         visible={alert.visible}
@@ -1047,7 +889,7 @@ export default function ProductDetailScreen({ route, navigation }) {
         title={alert.title}
         message={alert.message}
         buttons={alert.buttons}
-        onDismiss={() => setAlert({ ...alert, visible: false })}
+        onDismiss={() => setAlert((a) => ({ ...a, visible: false }))}
       />
     </View>
   );
@@ -1055,218 +897,109 @@ export default function ProductDetailScreen({ route, navigation }) {
 
 // ─── STYLES ───────────────────────────────────────────────────────────────────
 const s = StyleSheet.create({
+  screen: { flex: 1 },
+  center: { alignItems: 'center', justifyContent: 'center' },
 
-  screen: { flex: 1, backgroundColor: P.surface },
+  // En-tête flottant
+  header: { position: 'absolute', top: 0, left: 0, right: 0, flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 12, paddingBottom: 8, zIndex: 10 },
+  hBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
+  hBtnBg: { borderRadius: 20 },
+  hBtnIcon: { position: 'absolute' },
+  hTitle: { flex: 1, fontSize: 16, fontWeight: '800', letterSpacing: -0.3, textAlign: 'center', marginHorizontal: 4 },
+  loadingBack: { position: 'absolute', left: 12, width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(17,24,39,0.42)' },
 
-  // ── Loading ──────────────────────────────────────────────────────────────────
-  loadScreen:   { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  loadRingWrap: { position: 'relative', alignItems: 'center', justifyContent: 'center', marginBottom: 20 },
-  loadLogoBox:  { width: 72, height: 72, borderRadius: 22, justifyContent: 'center', alignItems: 'center', shadowColor: P.terra, shadowOpacity: 0.5, shadowOffset: { width: 0, height: 8 }, shadowRadius: 20, elevation: 12 },
-  loadRing:     { position: 'absolute', width: 96, height: 96, borderRadius: 48, borderWidth: 1.5, borderColor: 'rgba(236,90,19,0.3)' },
-  loadLogoTxt:  { fontSize: 38, fontWeight: '900', color: P.white },
-  loadBrand:    { fontSize: 28, fontWeight: '900', color: P.white, letterSpacing: -1 },
-  loadSub:      { fontSize: 13, color: 'rgba(255,255,255,0.4)', marginTop: 6 },
+  // Corps (chevauche la galerie)
+  body: { marginTop: -26, borderTopLeftRadius: 28, borderTopRightRadius: 28, paddingHorizontal: 16, paddingTop: 16, gap: 12 },
+  card: { borderRadius: 22, borderWidth: StyleSheet.hairlineWidth, padding: 16 },
 
-  // ── Not found ─────────────────────────────────────────────────────────────
-  notFound:        { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 40 },
-  notFoundTitle:   { fontSize: 22, fontWeight: '900', color: P.white, marginTop: 16, marginBottom: 8, letterSpacing: -0.5 },
-  notFoundSub:     { fontSize: 14, color: 'rgba(255,255,255,0.45)', textAlign: 'center', lineHeight: 21, marginBottom: 28 },
-  notFoundBtn:     { borderRadius: 14, overflow: 'hidden', shadowColor: P.terra, shadowOpacity: 0.35, shadowOffset: { width: 0, height: 5 }, shadowRadius: 12, elevation: 7 },
-  notFoundBtnGrad: { paddingVertical: 14, paddingHorizontal: 28 },
-  notFoundBtnTxt:  { fontSize: 15, fontWeight: '800', color: P.white },
+  headCard: { padding: 18 },
+  badges: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 12 },
+  badge: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 9, height: 24, borderRadius: 12 },
+  badgeTxtOn: { color: '#fff', fontSize: 11.5, fontWeight: '800', letterSpacing: 0.2 },
+  badgeTxt: { fontSize: 11.5, fontWeight: '800', letterSpacing: 0.2 },
+  title: { fontSize: 22, fontWeight: '900', letterSpacing: -0.6, lineHeight: 28 },
+  priceRow: { flexDirection: 'row', alignItems: 'baseline', gap: 8, marginTop: 10 },
+  price: { fontSize: 27, fontWeight: '900', letterSpacing: -0.8 },
+  priceHint: { fontSize: 12.5, fontWeight: '600' },
+  metaRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 14, marginTop: 14, paddingTop: 12, borderTopWidth: StyleSheet.hairlineWidth },
+  meta: { flexDirection: 'row', alignItems: 'center', gap: 5, maxWidth: '50%' },
+  metaTxt: { fontSize: 12.5, fontWeight: '600' },
 
-  // ── Header flottant ───────────────────────────────────────────────────────
-  header:    { position: 'absolute', top: 0, left: 0, right: 0, zIndex: 20, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, paddingBottom: 10, gap: 8 },
-  headerBg:  { backgroundColor: '#111827', borderBottomWidth: 1, borderBottomColor: 'rgba(236,90,19,0.2)' },
-  hBtn:      { width: 40, height: 40, borderRadius: 20, overflow: 'hidden' },
-  hBtnBlur:  { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  hBtnFavBlur:{ backgroundColor: 'rgba(236,90,19,0.25)' },
-  hBtnTxt:   { fontSize: 18, fontWeight: '700', color: P.white },
-  hBtnFavTxt:{ color: P.amber },
-  hTitle:    { flex: 1, fontSize: 14, fontWeight: '800', color: P.white, letterSpacing: -0.2, textAlign: 'center' },
-  hRight:    { flexDirection: 'row', gap: 8 },
+  banner: { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 14, borderRadius: 16 },
+  bannerTxt: { flex: 1, fontSize: 13, fontWeight: '700', lineHeight: 18 },
 
-  // ── Hero image ────────────────────────────────────────────────────────────
-  hero:      { width, height: HERO_H, backgroundColor: P.charcoal },
-  heroGrad:  { position: 'absolute', bottom: 0, left: 0, right: 0, height: HERO_H * 0.6 },
-  imgCounter:{ position: 'absolute', top: 14, right: 14, backgroundColor: 'rgba(17,24,39,0.55)', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 20, borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)' },
-  imgCounterTxt:{ fontSize: 11, fontWeight: '700', color: P.white },
-  dotsRow:   { position: 'absolute', bottom: 80, left: 0, right: 0, flexDirection: 'row', justifyContent: 'center', gap: 4 },
-  dot:       { height: 3, borderRadius: 1.5, backgroundColor: P.white },
+  tiles: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
+  tile: { flexGrow: 1, flexBasis: '46%', borderRadius: 18, borderWidth: StyleSheet.hairlineWidth, padding: 14, gap: 4 },
+  tileIcon: { width: 32, height: 32, borderRadius: 10, alignItems: 'center', justifyContent: 'center', marginBottom: 6 },
+  tileLabel: { fontSize: 11.5, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.5 },
+  tileValue: { fontSize: 14.5, fontWeight: '800', letterSpacing: -0.2 },
 
-  // ── Bloc titre (chevauchement) ────────────────────────────────────────────
-  titleBlock: {
-    marginTop: -60,
-    marginHorizontal: 16,
-    backgroundColor: P.white,
-    borderRadius: 20,
-    padding: 20,
-    borderWidth: 1,
-    borderColor: P.dim,
-    shadowColor: P.charcoal,
-    shadowOpacity: 0.12,
-    shadowOffset: { width: 0, height: 8 },
-    shadowRadius: 20,
-    elevation: 10,
-    zIndex: 5,
-  },
-  typeBadge:    { alignSelf: 'flex-start', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8, marginBottom: 12 },
-  typeBadgeTxt: { fontSize: 11, fontWeight: '900', color: P.white },
-  heroTitle:    { fontSize: 22, fontWeight: '900', color: P.charcoal, lineHeight: 30, marginBottom: 14, letterSpacing: -0.5 },
-  heroMeta:     { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  heroLocRow:   { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 999 },
-  heroLocDot:   { fontSize: 7, color: P.terra },
-  heroLocTxt:   { fontSize: 13, fontWeight: '700', color: P.terra },
-  heroDate:     { fontSize: 11, color: P.muted, fontWeight: '500' },
+  sellerCard: { flexDirection: 'row', alignItems: 'center', gap: 14 },
+  verified: { position: 'absolute', right: -2, bottom: -2, width: 20, height: 20, borderRadius: 10, borderWidth: 2, backgroundColor: P.blue600, alignItems: 'center', justifyContent: 'center' },
+  sellerName: { fontSize: 16, fontWeight: '800', letterSpacing: -0.3 },
+  sellerLine: { flexDirection: 'row', alignItems: 'center', gap: 4, flexWrap: 'wrap' },
+  sellerMeta: { fontSize: 12.5, fontWeight: '600' },
+  chevron: { width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center' },
 
-  // ── Prix ──────────────────────────────────────────────────────────────────
-  priceBlock:     { marginHorizontal: 16, marginTop: 12, backgroundColor: P.white, borderRadius: 20, padding: 20, borderWidth: 1, borderColor: P.dim, shadowColor: P.charcoal, shadowOpacity: 0.06, shadowOffset: { width: 0, height: 4 }, shadowRadius: 12, elevation: 4 },
-  priceRow:       { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 },
-  priceMeta:      { fontSize: 10, fontWeight: '600', color: P.muted, letterSpacing: 1.2, textTransform: 'uppercase', marginBottom: 4 },
-  priceAmountRow: { flexDirection: 'row', alignItems: 'baseline' },
-  priceAmount:    { fontSize: 32, fontWeight: '900', color: P.terra, letterSpacing: -1 },
-  priceCurrency:  { fontSize: 14, fontWeight: '600', color: P.muted },
-  priceNego:      { fontSize: 18, fontWeight: '700', color: P.muted },
-  miniStats:      { flexDirection: 'row', gap: 10 },
-  miniStat:       { alignItems: 'center', gap: 2 },
-  miniStatIcon:   { fontSize: 16 },
-  miniStatVal:    { fontSize: 12, fontWeight: '700', color: P.muted },
-  priceAccentLine:{ height: 1.5, borderRadius: 1 },
+  secHead: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 12 },
+  secIcon: { width: 30, height: 30, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
+  secTitle: { flex: 1, fontSize: 17, fontWeight: '900', letterSpacing: -0.4 },
+  secCount: { fontSize: 14, fontWeight: '700' },
 
-  // ── Sections ──────────────────────────────────────────────────────────────
-  section:     { paddingHorizontal: 16, paddingVertical: 20, marginTop: 4, backgroundColor: P.white },
-  sectionDark: { backgroundColor: P.white },
-  secHeadRow:  { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 14 },
-  secBar:      { width: 4, height: 22, borderRadius: 2 },
-  secTitle:    { fontSize: 17, fontWeight: '900', color: P.charcoal, letterSpacing: -0.3 },
-  secTitleDark:{ color: P.charcoal },
+  desc: { fontSize: 15, lineHeight: 23 },
+  more: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 10, alignSelf: 'flex-start' },
+  moreTxt: { fontSize: 14, fontWeight: '800' },
 
-  // ── Vendeur ───────────────────────────────────────────────────────────────
-  sellerCard:      { flexDirection: 'row', alignItems: 'center', backgroundColor: P.surface, borderRadius: 18, padding: 16, borderWidth: 1, borderColor: P.dim, gap: 12 },
-  sellerAvatarWrap:{ position: 'relative' },
-  sellerAvatar:    { width: 54, height: 54, borderRadius: 27, justifyContent: 'center', alignItems: 'center' },
-  sellerInitials:  { fontSize: 20, fontWeight: '800', color: P.white },
-  onlineDot:       { position: 'absolute', bottom: 1, right: 1, width: 12, height: 12, borderRadius: 6, backgroundColor: P.green, borderWidth: 2, borderColor: P.surface },
-  sellerNameRow:   { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4 },
-  sellerName:      { fontSize: 15, fontWeight: '800', color: P.charcoal },
-  verifiedBadge:   { width: 17, height: 17, borderRadius: 9, backgroundColor: P.green, justifyContent: 'center', alignItems: 'center' },
-  verifiedTxt:     { fontSize: 10, fontWeight: '900', color: P.white },
-  sellerLoc:       { fontSize: 12, color: P.muted, marginBottom: 4 },
-  ratingRow:       { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  ratingStars:     { fontSize: 12, color: P.gold },
-  ratingNum:       { fontSize: 12, fontWeight: '800', color: P.charcoal },
-  ratingCount:     { fontSize: 11, color: P.muted },
-  sellerArrow:     { width: 32, height: 32, borderRadius: 16, backgroundColor: P.peachSoft, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: 'rgba(236,90,19,0.2)' },
-  sellerArrowTxt:  { fontSize: 14, fontWeight: '700', color: P.terra },
+  specRow: { flexDirection: 'row', justifyContent: 'space-between', gap: 16, paddingVertical: 11 },
+  specLabel: { fontSize: 14, fontWeight: '600', flexShrink: 0, maxWidth: '45%' },
+  specValue: { flex: 1, fontSize: 14, fontWeight: '700', textAlign: 'right' },
 
-  // ── Description ───────────────────────────────────────────────────────────
-  descCard: { backgroundColor: P.surface, borderRadius: 16, padding: 16, borderWidth: 1, borderColor: P.dim },
-  descText: { fontSize: 15, color: P.charcoal, lineHeight: 26 },
+  chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 4 },
+  chip: { paddingHorizontal: 12, height: 30, borderRadius: 15, justifyContent: 'center' },
+  chipTxt: { fontSize: 13, fontWeight: '700' },
+  hoursRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  hoursTxt: { fontSize: 15, fontWeight: '800' },
 
-  // ── Spec table ────────────────────────────────────────────────────────────
-  specTable:      { borderRadius: 16, overflow: 'hidden', borderWidth: 1, borderColor: P.dim },
-  specTableDark:  { borderColor: P.dim },
-  specRow:        { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 13, paddingHorizontal: 16, borderBottomWidth: 1, borderBottomColor: P.dim, backgroundColor: P.white },
-  specRowAlt:     { backgroundColor: P.surface },
-  specRowDark:    { backgroundColor: P.white, borderBottomColor: P.dim },
-  specRowDarkAlt: { backgroundColor: P.surface, borderBottomColor: P.dim },
-  specLabel:      { fontSize: 13, fontWeight: '600', color: P.muted, flex: 1 },
-  specLabelDark:  { color: P.muted },
-  specValue:      { fontSize: 13, fontWeight: '800', color: P.charcoal, textAlign: 'right', flex: 1.2 },
-  specValueDark:  { color: P.charcoal },
+  safety: { borderRadius: 20, borderWidth: 1, padding: 16, gap: 8 },
+  safetyHead: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 2 },
+  safetyTitle: { fontSize: 15, fontWeight: '900', letterSpacing: -0.2 },
+  safetyRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 8 },
+  safetyTxt: { flex: 1, fontSize: 13.5, lineHeight: 19 },
 
-  // ── Disponibilité ─────────────────────────────────────────────────────────
-  availCard: { backgroundColor: P.surface, borderRadius: 16, padding: 16, gap: 12, borderWidth: 1, borderColor: P.dim },
-  availRow:  { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  availIcon: { fontSize: 18 },
-  availTxt:  { fontSize: 14, fontWeight: '600', color: P.charcoal },
+  ratingBox: { flexDirection: 'row', alignItems: 'center', gap: 14, borderRadius: 16, padding: 14 },
+  ratingBig: { fontSize: 36, fontWeight: '900', letterSpacing: -1.2 },
+  ratingSub: { fontSize: 12.5, fontWeight: '600' },
+  writeBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 14, height: 38, borderRadius: 19 },
+  writeBtnTxt: { color: '#fff', fontSize: 13.5, fontWeight: '800' },
+  review: { paddingVertical: 14, gap: 8 },
+  reviewHead: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  reviewName: { fontSize: 14.5, fontWeight: '800' },
+  reviewDate: { fontSize: 12, marginTop: 1 },
+  reviewTxt: { fontSize: 14.5, lineHeight: 21 },
+  helpful: { flexDirection: 'row', alignItems: 'center', gap: 5, alignSelf: 'flex-start', paddingHorizontal: 10, height: 28, borderRadius: 14, borderWidth: 1 },
+  helpfulTxt: { fontSize: 12, fontWeight: '700' },
+  emptyReviews: { fontSize: 13.5, lineHeight: 19, marginTop: 12, textAlign: 'center' },
 
-  // ── Avis ─────────────────────────────────────────────────────────────────
-  reviewHeaderCard: { backgroundColor: P.surface, borderRadius: 16, borderWidth: 1, borderColor: P.dim, padding: 14, marginBottom: 12, flexDirection: 'row', alignItems: 'center', gap: 14 },
-  reviewHeaderLeft: { minWidth: 74, alignItems: 'center', justifyContent: 'center', paddingVertical: 6, borderRightWidth: 1, borderRightColor: P.dim, paddingRight: 14 },
-  reviewHeaderRight: { flex: 1 },
-  reviewHeaderScore: { fontSize: 30, fontWeight: '900', color: P.charcoal, lineHeight: 34 },
-  reviewHeaderStars: { fontSize: 17, color: P.gold, letterSpacing: 1 },
-  reviewHeaderCount: { fontSize: 12, color: P.muted, marginTop: 2, fontWeight: '700' },
-  reviewHeaderSub: { fontSize: 12, color: P.muted, marginTop: 4, lineHeight: 17 },
+  // Barre d'action
+  footer: { position: 'absolute', left: 0, right: 0, bottom: 0, flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingTop: 12, borderTopWidth: StyleSheet.hairlineWidth },
+  footerPrice: { fontSize: 18, fontWeight: '900', letterSpacing: -0.5 },
+  footerSub: { fontSize: 12, fontWeight: '600', marginTop: 1 },
+  mainBtn: { height: 52, borderRadius: 16, paddingHorizontal: 22, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 },
+  mainBtnTxt: { color: '#fff', fontSize: 15.5, fontWeight: '900', letterSpacing: -0.2 },
+  ghostBtn: { height: 52, borderRadius: 16, paddingHorizontal: 18, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, borderWidth: 1 },
+  ghostBtnTxt: { fontSize: 15, fontWeight: '800' },
 
-  reviewFormCard: { backgroundColor: P.surface, borderRadius: 16, borderWidth: 1, borderColor: P.dim, padding: 14, marginBottom: 12 },
-  reviewFormTitle: { fontSize: 14, fontWeight: '800', color: P.charcoal, marginBottom: 10 },
-  reviewStarsRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 10 },
-  reviewStarBtn: { marginRight: 6 },
-  reviewStar: { fontSize: 30, color: '#d1d5db' },
-  reviewStarActive: { color: P.gold },
-  reviewStarLabel: { marginLeft: 4, fontSize: 12, fontWeight: '700', color: P.muted },
-  reviewInput: { minHeight: 98, textAlignVertical: 'top', borderWidth: 1, borderColor: P.dim, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10, fontSize: 14, color: P.charcoal, backgroundColor: P.white },
-  reviewCounter: { alignSelf: 'flex-end', marginTop: 6, fontSize: 11, color: P.muted },
-  reviewSubmitBtn: { borderRadius: 12, overflow: 'hidden', marginTop: 10 },
-  reviewSubmitBtnDisabled: { opacity: 0.7 },
-  reviewSubmitBtnGrad: { paddingVertical: 13, alignItems: 'center', justifyContent: 'center' },
-  reviewSubmitBtnTxt: { fontSize: 14, fontWeight: '800', color: P.white },
+  // Introuvable
+  notFoundIcon: { width: 72, height: 72, borderRadius: 24, alignItems: 'center', justifyContent: 'center', marginBottom: 18 },
+  notFoundTitle: { fontSize: 21, fontWeight: '900', letterSpacing: -0.4 },
+  notFoundSub: { fontSize: 14.5, textAlign: 'center', lineHeight: 21, marginTop: 8, marginBottom: 24 },
+  notFoundBtn: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 22, height: 48, borderRadius: 14 },
+  notFoundBtnTxt: { color: '#fff', fontSize: 15, fontWeight: '800' },
 
-  reviewLoadingWrap: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 8 },
-  reviewLoadingTxt: { fontSize: 12, color: P.muted },
-  reviewListWrap: { gap: 8 },
-  reviewListTitle: { fontSize: 13, fontWeight: '800', color: P.charcoal },
-  reviewItemCard: { width: '100%', backgroundColor: P.surface, borderWidth: 1, borderColor: P.dim, borderRadius: 12, padding: 10 },
-  reviewItemHead: { marginBottom: 4 },
-  reviewUserWrap: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  reviewAvatar: { width: 32, height: 32, borderRadius: 16, backgroundColor: P.peachSoft, alignItems: 'center', justifyContent: 'center' },
-  reviewAvatarImg: { width: 32, height: 32, borderRadius: 16, backgroundColor: '#e5e7eb' },
-  reviewAvatarTxt: { fontSize: 12, fontWeight: '900', color: P.terra },
-  reviewItemUser: { fontSize: 13, fontWeight: '800', color: P.charcoal },
-  reviewItemDate: { fontSize: 11, color: P.muted, marginTop: 1 },
-  reviewItemStars: { fontSize: 12, color: P.gold },
-  reviewItemComment: { fontSize: 12.5, color: P.charcoal, lineHeight: 18 },
-  reviewHelpfulBtn: { alignSelf: 'flex-end', marginTop: 6, paddingVertical: 2, paddingHorizontal: 8, borderRadius: 999, backgroundColor: P.white, borderWidth: 1, borderColor: P.dim },
-  reviewHelpfulTxt: { fontSize: 11, color: P.muted, fontWeight: '700' },
-  reviewEmptyCard: { backgroundColor: P.surface, borderWidth: 1, borderColor: P.dim, borderRadius: 12, padding: 14 },
-  reviewEmptyTitle: { fontSize: 13, fontWeight: '800', color: P.charcoal, marginBottom: 4 },
-  reviewEmptyTxt: { fontSize: 12, color: P.muted, lineHeight: 18 },
-
-  // ── Note mise en relation ─────────────────────────────────────────────────
-  meetupNote:   { marginHorizontal: 16, marginTop: 12, borderRadius: 18, overflow: 'hidden' },
-  meetupInner:  { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 16, backgroundColor: P.peachSoft, borderWidth: 1, borderColor: 'rgba(236,90,19,0.18)', borderRadius: 18,marginBottom: 40  },
-  meetupAccent: { position: 'absolute', left: 0, top: 12, bottom: 12, width: 3, backgroundColor: P.terra, borderRadius: 2 },
-  meetupIcon:   { fontSize: 30 },
-  meetupTitle:  { fontSize: 13, fontWeight: '800', color: P.charcoal, marginBottom: 3 },
-  meetupSub:    { fontSize: 12, color: P.muted, lineHeight: 18 },
-
-  // ── Footer contact ────────────────────────────────────────────────────────
-  footer:       { position: 'absolute', bottom: 0, left: 0, right: 0 },
-  footerFade:   { position: 'absolute', top: -40, left: 0, right: 0, height: 40 },
-  footerContent:{ paddingHorizontal: 16, paddingTop: 10, backgroundColor: P.surface, borderTopWidth: 1, borderTopColor: P.dim },
-  footerRow:    { flexDirection: 'row', gap: 10 },
-
-  ownerActionsRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  ownerActionGhost: {
-    flex: 1,
-    height: 46,
-    borderRadius: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-  },
-  ownerActionGhostTxt: { fontSize: 13, fontWeight: '800' },
-  ownerActionToggle: {
-    flex: 1,
-    height: 46,
-    borderRadius: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  ownerActionToggleOff: { backgroundColor: 'rgba(239,68,68,0.92)' },
-  ownerActionToggleOn: { backgroundColor: 'rgba(34,197,94,0.92)' },
-  ownerActionToggleTxt: { fontSize: 13, fontWeight: '800', color: P.white },
-
-  // Boutons contact
-  cBtn:         { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 13, borderRadius: 14, gap: 7 },
-  cBtnWA:       { backgroundColor: 'rgba(37,211,102,0.1)', borderWidth: 1.5, borderColor: 'rgba(37,211,102,0.25)' },
-  cBtnCall:     { backgroundColor: P.peachSoft, borderWidth: 1.5, borderColor: 'rgba(236,90,19,0.2)' },
-  cBtnMain:     { overflow: 'hidden', shadowColor: P.terra, shadowOpacity: 0.35, shadowOffset: { width: 0, height: 5 }, shadowRadius: 12, elevation: 8 },
-  cBtnGrad:     { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 15, borderRadius: 14, gap: 8 },
-  cBtnIcon:     { fontSize: 17 },
-  cBtnLabel:    { fontSize: 13, fontWeight: '700' },
-  cBtnIconMain: { fontSize: 18 },
-  cBtnLabelMain:{ fontSize: 15, fontWeight: '800', color: P.white, letterSpacing: 0.2 },
+  // Panneau d'avis
+  sheetSub: { fontSize: 14.5, lineHeight: 20, textAlign: 'center' },
+  pickStars: { flexDirection: 'row', justifyContent: 'center', gap: 8, marginTop: 18 },
+  pickLabel: { textAlign: 'center', fontSize: 14, fontWeight: '800', marginTop: 8, marginBottom: 16 },
+  reviewInput: { minHeight: 120, borderRadius: 16, borderWidth: 1, padding: 14, fontSize: 15, lineHeight: 21, textAlignVertical: 'top' },
+  counter: { alignSelf: 'flex-end', fontSize: 12, marginTop: 6 },
 });

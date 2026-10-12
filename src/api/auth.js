@@ -48,35 +48,26 @@ api.interceptors.response.use(
       '/auth/refresh',
     ].includes(requestUrl);
 
+    // Requête partie sans jeton (visiteur) : rien à rafraîchir, pas de « session expirée »
+    const sentWithToken = Boolean(originalRequest?.headers?.Authorization);
+
     // Si 401 et pas déjà réessayé
-    if (error.response?.status === 401 && !originalRequest._retry && !shouldSkipRefresh) {
+    if (error.response?.status === 401 && sentWithToken && !originalRequest._retry && !shouldSkipRefresh) {
       originalRequest._retry = true;
 
       try {
-        const refreshToken = await getRefreshToken();
-        
-        if (!refreshToken) {
-          throw new Error('No refresh token');
-        }
-
-        // Appeler l'endpoint de refresh
-        const response = await axios.post(`${API_BASE_URL}/auth/refresh`, {
-          refreshToken,
-        });
-
-        const { accessToken } = response.data;
-
-        // Sauvegarder le nouveau token
-        await saveAccessToken(accessToken);
-
-        // Réessayer la requête originale
+        const accessToken = await refreshAccessToken();
+        // Réessayer la requête originale avec le nouveau jeton
         originalRequest.headers.Authorization = `Bearer ${accessToken}`;
         return api(originalRequest);
-
       } catch (refreshError) {
-        console.error('❌ Erreur refresh token:', refreshError);
-        await clearAllData();
-        DeviceEventEmitter.emit('auth:session_expired');
+        // Déconnexion seulement si le serveur refuse la session (expirée / révoquée).
+        // Réseau coupé ou serveur indisponible : on garde la session.
+        const status = refreshError?.response?.status;
+        if (refreshError?.message === 'No refresh token' || status === 400 || status === 401 || status === 403) {
+          await clearAllData();
+          DeviceEventEmitter.emit('auth:session_expired');
+        }
         return Promise.reject(refreshError);
       }
     }
@@ -84,6 +75,43 @@ api.interceptors.response.use(
     return Promise.reject(error);
   }
 );
+
+// Un seul rafraîchissement à la fois : les requêtes simultanées attendent le même résultat
+let refreshPromise = null;
+function refreshAccessToken() {
+  if (!refreshPromise) {
+    refreshPromise = (async () => {
+      const refreshToken = await getRefreshToken();
+      if (!refreshToken) throw new Error('No refresh token');
+
+      const response = await axios.post(`${API_BASE_URL}/auth/refresh`, { refreshToken }, { timeout: 20000 });
+      // Le serveur renvoie { success, data: { accessToken } }
+      const accessToken = response.data?.data?.accessToken || response.data?.accessToken;
+      if (!accessToken) throw new Error('Réponse de rafraîchissement invalide');
+
+      await saveAccessToken(accessToken);
+      // Le contexte d'auth (et donc le socket temps réel) passe au nouveau jeton
+      DeviceEventEmitter.emit('auth:token_refreshed', accessToken);
+      return accessToken;
+    })().finally(() => {
+      refreshPromise = null;
+    });
+  }
+  return refreshPromise;
+}
+
+/**
+ * Ferme la session de CET appareil côté serveur (les autres appareils restent connectés).
+ * Au mieux : une erreur réseau n'empêche pas la déconnexion locale.
+ */
+export const logoutSession = async () => {
+  try {
+    const refreshToken = await getRefreshToken();
+    if (refreshToken) await api.post('/auth/logout', { refreshToken }, { timeout: 8000 });
+  } catch (error) {
+    // déconnexion locale quand même
+  }
+};
 
 /**
  * Inscription

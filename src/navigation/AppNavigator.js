@@ -1,6 +1,6 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { NavigationContainer, getFocusedRouteNameFromRoute, DarkTheme, DefaultTheme } from '@react-navigation/native';
-import { createStackNavigator } from '@react-navigation/stack';
+import { createStackNavigator, CardStyleInterpolators } from '@react-navigation/stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { useAuth } from '../contexts/AuthContext';
 import { useAppTheme } from '../contexts/ThemeContext';
@@ -10,10 +10,26 @@ export const navigationRef = React.createRef();
 import { ActivityIndicator, View, StyleSheet, Text, TouchableOpacity, Platform, StatusBar } from 'react-native';
 import { DeviceEventEmitter } from 'react-native';
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
-import { LinearGradient } from 'expo-linear-gradient';
 import { COLORS } from '../utils/constants';
 import { MOBILE_COLORS as P } from '../theme/colors';
-import { TabBarIcon } from '../components/TabBarIcon';
+import AppTabBar from '../components/AppTabBar';
+import { KeyboardDoneAccessory } from '../components/Keyboard';
+
+// ─── Barre d'état unique de l'app ─────────────────────────────────────────────
+// Icônes foncées en clair / claires en sombre, ET fond de la couleur des en-têtes.
+// Sans fond explicite, Android (Expo Go, hors affichage bord à bord) remplit la
+// zone avec le fond de fenêtre noir : en mode clair, les icônes foncées
+// devenaient invisibles.
+function AppStatusBar() {
+  const { isDark, theme } = useAppTheme();
+  return (
+    <StatusBar
+      barStyle={isDark ? 'light-content' : 'dark-content'}
+      backgroundColor={isDark ? theme.screen : theme.surface}
+      translucent
+    />
+  );
+}
 
 // Écrans
 import LoginScreen from '../screens/LoginScreen';
@@ -31,6 +47,8 @@ import MyListingsScreen from '../screens/MyListingsScreen';
 import CategoriesScreen from '../screens/CategoriesScreen';
 import CategoryProductsScreen from '../screens/CategoryProductsScreen';
 import AllProductsScreen from '../screens/AllProductsScreen';
+import SearchScreen from '../screens/SearchScreen';
+import SecurityScreen from '../screens/SecurityScreen';
 import ProductDetailScreen from '../screens/ProductDetailScreen';
 import SellerProfileScreen from '../screens/SellerProfileScreen';
 import MessagesListScreen from '../screens/MessagesListScreen';
@@ -42,44 +60,6 @@ const Stack = createStackNavigator();
 const Tab = createBottomTabNavigator();
 const MessagesStack = createStackNavigator();
 const ProfileStack = createStackNavigator();
-const BASE_TAB_BAR_STYLE = {
-  position: 'absolute',
-  bottom: 0,
-  left: 0,
-  right: 0,
-  backgroundColor: 'transparent',
-  borderTopWidth: 0,
-  borderTopColor: 'transparent',
-  elevation: 0,
-  shadowOpacity: 0,
-};
-
-// ─── Fond sombre de la tab bar ────────────────────────────────────────────────
-function TabBarBackground() {
-  const { isDark, theme } = useAppTheme();
-
-  return (
-    <View style={StyleSheet.absoluteFill}>
-      <LinearGradient
-        colors={isDark ? theme.shell : theme.header}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 0, y: 1 }}
-        style={StyleSheet.absoluteFill}
-      />
-      {/* Ligne accent orange en haut */}
-      <LinearGradient
-        colors={['transparent', P.terra, 'transparent']}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 0 }}
-        style={{
-          position: 'absolute',
-          top: 0, left: 0, right: 0,
-          height: 1.5,
-        }}
-      />
-    </View>
-  );
-}
 
 function MessagesNavigator() {
   const { theme } = useAppTheme();
@@ -189,9 +169,6 @@ function PlaceholderScreen({ route, navigation }) {
 // ─── Navigation principale avec onglets ───────────────────────────────────────
 function MainTabs() {
   const { isAuthenticated, token, user, loading: authLoading } = useAuth();
-  const { isDark, theme } = useAppTheme();
-  const insets = useSafeAreaInsets();
-  const TAB_HEIGHT = 54 + Math.max(insets.bottom, 6);
   const [unreadCount, setUnreadCount] = useState(0);
 
   const { isConnected, on, off } = useSocket({
@@ -199,11 +176,14 @@ function MainTabs() {
     token,
   });
 
-  const loadUnreadCount = useCallback(async () => {
+  const lastUnreadFetchRef = useRef(0);
+  const loadUnreadCount = useCallback(async ({ ifOlderThanMs = 0 } = {}) => {
     if (authLoading || !isAuthenticated || !token) {
       setUnreadCount(0);
       return;
     }
+    if (ifOlderThanMs && Date.now() - lastUnreadFetchRef.current < ifOlderThanMs) return;
+    lastUnreadFetchRef.current = Date.now();
 
     try {
       const response = await getUnreadCount();
@@ -217,41 +197,27 @@ function MainTabs() {
     loadUnreadCount();
   }, [loadUnreadCount]);
 
+  // Le serveur pousse le nouveau total à chaque changement : plus besoin de le redemander
+  // (avant : un appel HTTP à chaque message reçu, lu ou conversation mise à jour)
   useEffect(() => {
     if (!isConnected) return;
 
-    const handleUnreadChanged = () => {
-      loadUnreadCount();
-    };
+    // Synchronisation à la (re)connexion : des changements ont pu être manqués hors ligne
+    loadUnreadCount({ ifOlderThanMs: 5000 });
 
-    const handleNewMessage = (message) => {
-      const currentUserId = String(user?.id || '');
-      const senderIdStr = String(message?.senderId || '');
-      if (senderIdStr && senderIdStr !== currentUserId) {
-        setUnreadCount((prev) => prev + 1);
+    const handleUnreadChanged = (payload) => {
+      if (typeof payload?.unreadCount === 'number') {
+        setUnreadCount(payload.unreadCount);
+      } else {
+        loadUnreadCount(); // ancien serveur sans total dans l'événement
       }
     };
 
-    const handleMessageRead = () => {
-      loadUnreadCount();
-    };
-
-    const handleConversationUpdated = () => {
-      loadUnreadCount();
-    };
-
     on('unreadCount:changed', handleUnreadChanged);
-    on('message:new', handleNewMessage);
-    on('message:read', handleMessageRead);
-    on('conversation:updated', handleConversationUpdated);
-
     return () => {
       off('unreadCount:changed', handleUnreadChanged);
-      off('message:new', handleNewMessage);
-      off('message:read', handleMessageRead);
-      off('conversation:updated', handleConversationUpdated);
     };
-  }, [isConnected, loadUnreadCount, off, on, user?.id]);
+  }, [isConnected, loadUnreadCount, off, on]);
 
   useEffect(() => {
     const subscription = DeviceEventEmitter.addListener('unreadCount:refresh', () => {
@@ -265,46 +231,15 @@ function MainTabs() {
 
   return (
     <Tab.Navigator
+      // Barre personnalisée : icônes, libellés et animations dans components/AppTabBar.js
+      tabBar={(props) => <AppTabBar {...props} />}
       screenOptions={{
         headerShown: false,
-        tabBarShowLabel: false,
-
-        // ── Couleurs ──────────────────────────────────────────────────────────
-        tabBarActiveTintColor:   P.amber,
-        tabBarInactiveTintColor: isDark ? 'rgba(255,255,255,0.38)' : 'rgba(17,24,39,0.42)',
-
-        // ── Style de la barre ─────────────────────────────────────────────────
-        // backgroundColor EN DUR ici — c'est lui qui écrase le blanc par défaut
-        tabBarStyle: {
-          ...BASE_TAB_BAR_STYLE,
-          backgroundColor: isDark ? '#111827' : '#ffffff',
-          height: TAB_HEIGHT,
-        },
-
-        // ── Fond personnalisé (gradient + ligne orange) ───────────────────────
-        tabBarBackground: () => <TabBarBackground />,
-
-        tabBarItemStyle: {
-          paddingTop: 2,
-          height: 50,
-          flex: 1,
-          justifyContent: 'center',
-          alignItems: 'center',
-        },
-        tabBarLabelStyle: {
-          display: 'none',
-        },
+        // La barre est en position absolue : les écrans gèrent leur marge basse
+        tabBarStyle: { position: 'absolute' },
       }}
     >
-      <Tab.Screen
-        name="Home"
-        component={ProductsListScreen}
-        options={{
-          tabBarIcon: ({ focused, color }) => (
-            <TabBarIcon name="home" focused={focused} color={color} />
-          ),
-        }}
-      />
+      <Tab.Screen name="Home" component={ProductsListScreen} />
       <Tab.Screen
         name="Favorites"
         component={FavoritesScreen}
@@ -319,21 +254,8 @@ function MainTabs() {
             }
           },
         })}
-        options={{
-          tabBarIcon: ({ focused, color }) => (
-            <TabBarIcon name="favorites" focused={focused} color={color} badge={0} />
-          ),
-        }}
       />
-      <Tab.Screen
-        name="Publish"
-        component={PublishScreen}
-        options={{
-          tabBarIcon: ({ focused }) => (
-            <TabBarIcon name="publish" focused={focused} />
-          ),
-        }}
-      />
+      <Tab.Screen name="Publish" component={PublishScreen} />
       <Tab.Screen
         name="Messages"
         component={MessagesNavigator}
@@ -350,36 +272,16 @@ function MainTabs() {
         })}
         options={({ route }) => {
           const routeName = getFocusedRouteNameFromRoute(route) || 'MessagesList';
+          // Barre masquée dans une conversation (clavier + zone de saisie)
           const hideTabBar = routeName === 'Conversation';
 
           return {
-            tabBarStyle: hideTabBar
-              ? { display: 'none' }
-              : {
-                  ...BASE_TAB_BAR_STYLE,
-                  backgroundColor: isDark ? '#111827' : '#ffffff',
-                  height: TAB_HEIGHT,
-                },
-            tabBarIcon: ({ focused, color }) => (
-              <TabBarIcon
-                name="messages"
-                focused={focused}
-                color={color}
-                badge={unreadCount > 0 ? unreadCount : 0}
-              />
-            ),
+            tabBarStyle: hideTabBar ? { display: 'none' } : { position: 'absolute' },
+            tabBarBadge: unreadCount > 0 ? unreadCount : undefined,
           };
         }}
       />
-      <Tab.Screen
-        name="Profile"
-        component={ProfileNavigator}
-        options={{
-          tabBarIcon: ({ focused, color }) => (
-            <TabBarIcon name="profile" focused={focused} color={color} />
-          ),
-        }}
-      />
+      <Tab.Screen name="Profile" component={ProfileNavigator} />
     </Tab.Navigator>
   );
 }
@@ -411,7 +313,7 @@ export default function AppNavigator() {
   if (loading) {
     return (
       <SafeAreaProvider>
-        <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} backgroundColor={theme.screen} />
+        <AppStatusBar />
         <View style={[styles.loadingContainer, { backgroundColor: theme.screen }]}>
           <ActivityIndicator size="large" color={COLORS.primary} />
         </View>
@@ -421,13 +323,27 @@ export default function AppNavigator() {
 
   return (
     <SafeAreaProvider>
-      <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} backgroundColor={theme.screen} />
+      {/* Barre d'état UNIQUE pour toute l'app (les écrans n'en déclarent plus) */}
+      <AppStatusBar />
+      {/* iOS : barre « OK » partagée par tous les claviers numériques */}
+      <KeyboardDoneAccessory />
       <NavigationContainer ref={navigationRef} theme={navigationTheme}>
         <Stack.Navigator screenOptions={{ headerShown: false }}>
           <Stack.Screen name="MainTabs" component={MainTabs} />
           <Stack.Screen name="Categories" component={CategoriesScreen} options={{ headerShown: false }} />
           <Stack.Screen name="CategoryProducts" component={CategoryProductsScreen} options={{ headerShown: false }} />
           <Stack.Screen name="AllProducts" component={AllProductsScreen} options={{ headerShown: false }} />
+          {/* Sécurité et connexion — hors onglets pour que la barre d'onglets ne couvre pas le bouton */}
+          <Stack.Screen name="Security" component={SecurityScreen} options={{ headerShown: false }} />
+          {/* Page Recherche plein écran (loupe de l'accueil) — apparition en fondu montant */}
+          <Stack.Screen
+            name="Search"
+            component={SearchScreen}
+            options={{
+              headerShown: false,
+              cardStyleInterpolator: CardStyleInterpolators.forFadeFromBottomAndroid,
+            }}
+          />
           <Stack.Screen name="ProductDetail" component={ProductDetailScreen} options={{ headerShown: false }} />
           <Stack.Screen name="SellerProfile" component={SellerProfileScreen} options={{ headerShown: false }} />
           <Stack.Screen name="Login" component={LoginScreen} options={{ presentation: Platform.OS === 'ios' ? 'modal' : 'card', headerShown: false }} />

@@ -5,8 +5,7 @@ import {
   StyleSheet,
   TouchableOpacity,
   SafeAreaView,
-  StatusBar,
-} from 'react-native';
+  } from 'react-native';
 import { useAuth } from '../contexts/AuthContext';
 import { useAppTheme } from '../contexts/ThemeContext';
 import { COLORS } from '../utils/constants';
@@ -21,7 +20,6 @@ export default function HomeScreen({ navigation }) {
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: theme.screen }]}>
-      <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} backgroundColor="transparent" translucent />
       
       <View style={styles.content}>
         {/* Header */}

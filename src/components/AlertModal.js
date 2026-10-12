@@ -95,6 +95,7 @@ export const AlertModal = React.forwardRef(({
       transparent
       animationType="none"
       onRequestClose={onDismiss}
+      statusBarTranslucent
     >
       <Animated.View
         style={[
@@ -110,7 +111,9 @@ export const AlertModal = React.forwardRef(({
         />
       </Animated.View>
 
-      <View style={styles.centeredView}>
+      {/* box-none : ce conteneur plein écran laisse passer les touches vers le fond
+          (sinon un toucher à l'extérieur de la carte ne fermait pas l'alerte) */}
+      <View style={styles.centeredView} pointerEvents="box-none">
         <Animated.View
           style={[
             styles.modalView,

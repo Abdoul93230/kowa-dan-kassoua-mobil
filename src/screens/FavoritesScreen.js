@@ -1,21 +1,31 @@
 // ─── FavoritesScreen — TakTak Niger ──────────────────────────────────────
 // Version premium redesign — moderne, bling-bling, engageant
 
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useFocusEffect } from '@react-navigation/native';
 import {
-  View, Text, StyleSheet, TouchableOpacity, Image,
-  RefreshControl, ActivityIndicator, FlatList,
-  Dimensions, Animated, StatusBar,
+  View,
+  Text,
+  StyleSheet,
+  TouchableOpacity,
+  RefreshControl,
+  ActivityIndicator,
+  FlatList,
+  Dimensions,
+  Animated,
 } from 'react-native';
+import { Image } from 'expo-image';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from 'expo-blur';
 import { Feather } from '@expo/vector-icons';
 import { useAuth } from '../contexts/AuthContext';
 import { useAppTheme } from '../contexts/ThemeContext';
-import { getMyFavorites, removeFavorite } from '../api/favorites';
+import { getMyFavorites } from '../api/favorites';
+import { useFavorites } from '../hooks/useFavorites';
 import { MOBILE_COLORS as P } from '../theme/colors';
 import AlertModal from '../components/AlertModal';
+import { sizedImage } from '../utils/format';
 
 const { width } = Dimensions.get('window');
 const CARD_WIDTH = (width - 40) / 2;
@@ -134,9 +144,9 @@ const FavoriteCard = ({ item, onPress, onRemove, index }) => {
         {/* Image container */}
         <View style={s.imageContainer}>
           <Image
-            source={{ uri: item.images?.[0] || 'https://via.placeholder.com/300' }}
+            source={{ uri: sizedImage(item.mainImage || item.images?.[0], 200) || 'https://via.placeholder.com/300' }}
             style={s.cardImg}
-            resizeMode="cover"
+            contentFit="cover"
           />
 
           <View style={s.timeBadge}>
@@ -275,6 +285,13 @@ export default function FavoritesScreen({ navigation }) {
   const insets = useSafeAreaInsets();
   const { isDark, theme } = useAppTheme();
   const { isAuthenticated } = useAuth();
+  // Favoris partagés par toute l'app : retirer ici met à jour les cœurs partout,
+  // et un favori ajouté ailleurs fait recharger cette liste au retour sur l'écran
+  const { favorites: favoriteIds, toggleFavorite: toggleSharedFavorite } = useFavorites();
+  const idsKey = useMemo(() => [...favoriteIds].sort().join(','), [favoriteIds]);
+  const idsKeyRef = useRef(idsKey);
+  idsKeyRef.current = idsKey;
+  const loadedIdsKeyRef = useRef(null);
 
   const [favorites, setFavorites] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -300,18 +317,20 @@ export default function FavoritesScreen({ navigation }) {
     }).start();
   }, []);
 
-  const loadFavorites = async (pageNum = 1, isRefresh = false) => {
+  // mode : 'initial' (squelette), 'refresh' (tirer pour rafraîchir), 'silent' (sans indicateur)
+  const loadFavorites = async (pageNum = 1, mode = 'initial') => {
     if (!isAuthenticated) { setLoading(false); return; }
     try {
-      if (isRefresh) setRefreshing(true);
-      else if (pageNum === 1) setLoading(true);
-      else setLoadingMore(true);
+      if (mode === 'refresh') setRefreshing(true);
+      else if (pageNum > 1) setLoadingMore(true);
+      else if (mode === 'initial') setLoading(true);
 
       const response = await getMyFavorites(pageNum, 20);
       if (response.success) {
         setFavorites(prev => pageNum === 1 ? response.data : [...prev, ...response.data]);
         setPage(pageNum);
         setTotalPages(response.pagination.pages);
+        if (pageNum === 1) loadedIdsKeyRef.current = idsKeyRef.current;
       }
     } catch (error) {
       setAlert({
@@ -330,7 +349,15 @@ export default function FavoritesScreen({ navigation }) {
 
   useEffect(() => { loadFavorites(1); }, [isAuthenticated]);
 
-  const onRefresh = useCallback(() => loadFavorites(1, true), []);
+  // Retour sur l'écran : rechargement silencieux seulement si les favoris ont changé ailleurs
+  useFocusEffect(useCallback(() => {
+    if (loadedIdsKeyRef.current !== null && loadedIdsKeyRef.current !== idsKeyRef.current) {
+      loadFavorites(1, 'silent');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [idsKey]));
+
+  const onRefresh = useCallback(() => loadFavorites(1, 'refresh'), []);
   const loadMore = () => { if (!loadingMore && page < totalPages) loadFavorites(page + 1); };
 
   const handleRemoveFavorite = (productId) => {
@@ -343,20 +370,12 @@ export default function FavoritesScreen({ navigation }) {
         { text: 'Annuler', onPress: () => {} },
         {
           text: 'Retirer',
-          onPress: async () => {
+          onPress: () => {
             setAlert({ ...alert, visible: false });
-            try {
-              await removeFavorite(productId);
-              setFavorites(prev => prev.filter(item => getProductId(item) !== productId));
-            } catch (error) {
-              setAlert({
-                visible: true,
-                type: 'error',
-                title: 'Erreur',
-                message: error.message || 'Impossible de retirer l\'annonce',
-                buttons: [{ text: 'OK', onPress: () => {} }],
-              });
-            }
+            // Optimiste : retrait immédiat ici et sur tous les écrans (annulé par le hook si l'API échoue)
+            toggleSharedFavorite({ id: productId });
+            setFavorites(prev => prev.filter(item => getProductId(item) !== productId));
+            loadedIdsKeyRef.current = [...favoriteIds].filter((id) => id !== productId).sort().join(',');
           },
         },
       ],
@@ -375,14 +394,15 @@ export default function FavoritesScreen({ navigation }) {
       });
       return;
     }
-    navigation.navigate('ProductDetail', { productId });
+    // Carte transmise pour un affichage instantané de la fiche
+    const preview = favorites.find((item) => getProductId(item) === productId);
+    navigation.navigate('ProductDetail', { productId, ...(preview ? { preview } : {}) });
   };
   
 
   // ─── HEADER ────────────────────────────────────────────────────────────────
   const renderHeader = () => (
     <Animated.View style={{ opacity: headerAnim, transform: [{ translateY: headerAnim.interpolate({ inputRange: [0, 1], outputRange: [-20, 0] }) }] }}>
-      <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} backgroundColor="transparent" translucent />
       <LinearGradient
         colors={theme.header}
         start={{ x: 0, y: 0 }}

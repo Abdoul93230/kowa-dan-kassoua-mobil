@@ -5,10 +5,10 @@
 import React, { useState, useRef, useEffect } from 'react';
 import {
   View, Text, StyleSheet, TextInput, TouchableOpacity,
-  ScrollView, StatusBar, Animated, KeyboardAvoidingView,
-  Platform, ActivityIndicator, Modal, Image,
+  ScrollView, Animated, Platform, ActivityIndicator, Modal, Image,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { KeyboardAwareView, KeyboardAwareScrollView, FormKeyboardToolbar } from '../components/Keyboard';
 import { LinearGradient } from 'expo-linear-gradient';
 import { forgotPassword } from '../api/auth';
 import { useAppTheme } from '../contexts/ThemeContext';
@@ -175,11 +175,9 @@ export default function ForgotPasswordScreen({ navigation, route }) {
   };
 
   return (
-    <KeyboardAvoidingView
+    <KeyboardAwareView
       style={[s.container, { backgroundColor: theme.screen }]}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'padding'}
     >
-      <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} backgroundColor="transparent" translucent />
 
       {/* ── HEADER ardoise ── identique Login/Register ───────────────── */}
       <LinearGradient
@@ -213,7 +211,7 @@ export default function ForgotPasswordScreen({ navigation, route }) {
       </LinearGradient>
 
       {/* ── CONTENU ── */}
-      <ScrollView
+      <KeyboardAwareScrollView
         style={{ flex: 1 }}
         contentContainerStyle={s.scrollContent}
         keyboardShouldPersistTaps="handled"
@@ -282,21 +280,22 @@ export default function ForgotPasswordScreen({ navigation, route }) {
                   placeholderTextColor={theme.inputPlaceholder}
                   value={phone}
                   onChangeText={handlePhoneChange}
-                  keyboardType="phone-pad"
+                  textContentType="telephoneNumber" autoComplete="tel" keyboardType="phone-pad"
                   maxLength={(country?.nationalLength || 8) + ((country?.phoneGroups?.length || 1) - 1)}
-                  autoComplete="tel"
                   autoFocus
                   editable={!loading}
                 />
               </View>
             ) : (
               <TextInput
+                returnKeyType="send"
+                onSubmitEditing={() => handleSend()}
                 style={[s.mainInput, { color: theme.text }]}
                 placeholder="exemple@email.com"
                 placeholderTextColor={theme.inputPlaceholder}
                 value={email}
                 onChangeText={v => { setEmail(v); setError(''); }}
-                keyboardType="email-address"
+                textContentType="emailAddress" autoComplete="email" keyboardType="email-address"
                 autoCapitalize="none"
                 autoFocus
                 editable={!loading}
@@ -320,7 +319,7 @@ export default function ForgotPasswordScreen({ navigation, route }) {
           </View>
 
         </Animated.View>
-      </ScrollView>
+      </KeyboardAwareScrollView>
 
       {/* ── FOOTER bouton ── identique Login/Register ────────────────── */}
       <View style={[s.footer, { backgroundColor: theme.screen, borderTopColor: theme.divider, paddingBottom: Math.max(insets.bottom, 12) + 4 }]}>
@@ -373,7 +372,9 @@ export default function ForgotPasswordScreen({ navigation, route }) {
         </View>
       </Modal>
 
-    </KeyboardAvoidingView>
+      {/* Barre ‹ › OK collée au clavier (le bouton du bas reste en place) */}
+      <FormKeyboardToolbar />
+    </KeyboardAwareView>
   );
 }
 

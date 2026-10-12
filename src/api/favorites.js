@@ -40,7 +40,8 @@ export const removeFavorite = async (productId) => {
  */
 export const getMyFavorites = async (page = 1, limit = 20) => {
   try {
-    const response = await api.get(`/favorites?page=${page}&limit=${limit}`);
+    // Format « carte » : uniquement les champs affichés dans la liste
+    const response = await api.get(`/favorites?page=${page}&limit=${limit}&view=card`);
     return response.data;
   } catch (error) {
     console.error('❌ Erreur récupération favoris:', error);

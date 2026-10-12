@@ -1,15 +1,16 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  DeviceEventEmitter,
   FlatList,
-  Image,
+  Platform,
   RefreshControl,
-  StatusBar,
   StyleSheet,
   Text,
   TouchableOpacity,
   View,
 } from 'react-native';
+import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -17,8 +18,32 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useAuth } from '../contexts/AuthContext';
 import { useAppTheme } from '../contexts/ThemeContext';
 import { createOrGetConversation, getConversations } from '../api/messaging';
+import { peekCache, writeCache } from '../api/cache';
 import { MOBILE_COLORS as P } from '../theme/colors';
 import { useSocket } from '../hooks/useSocket';
+import { sizedImage } from '../utils/format';
+
+const PAGE_SIZE = 30;
+// Le socket tient la liste à jour en direct : un rechargement complet n'est utile
+// que si les données ont plus de 30 s (ex. retour de l'app après une coupure)
+const STALE_MS = 30000;
+
+// Aperçu de liste à partir d'un message reçu en temps réel
+const toLastMessage = (message) => ({
+  id: message.id,
+  content: message.type === 'audio' ? '🎤 Message vocal' : message.content,
+  senderId: String(message.senderId || ''),
+  senderName: message.senderName,
+  timestamp: message.timestamp,
+  delivered: Boolean(message.delivered),
+  deliveredAt: message.deliveredAt || null,
+  read: Boolean(message.read),
+  readAt: message.readAt || null,
+  type: message.type,
+});
+
+// Place la conversation modifiée en tête (tri par activité, comme WhatsApp)
+const moveToTop = (list, index, updated) => [updated, ...list.slice(0, index), ...list.slice(index + 1)];
 
 function formatMessageDate(value) {
   if (!value) return '';
@@ -71,18 +96,35 @@ export default function MessagesListScreen({ navigation, route }) {
   const { isAuthenticated, user, token } = useAuth();
   const { isDark, theme } = useAppTheme();
 
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [creatingConversation, setCreatingConversation] = useState(false);
-  const [conversations, setConversations] = useState([]);
-  const [error, setError] = useState('');
-
   const currentUserId = useMemo(
     () => user?.id || user?._id || null,
     [user]
   );
 
-  const { isUserOnline, on, off } = useSocket({
+  // Dernière liste connue (mémoire) : affichée instantanément, sans spinner
+  const cacheKey = `conversations:${currentUserId || 'anonyme'}`;
+  const cached = peekCache(cacheKey)?.data;
+
+  const [loading, setLoading] = useState(!cached);
+  const [refreshing, setRefreshing] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [creatingConversation, setCreatingConversation] = useState(false);
+  const [conversations, setConversations] = useState(cached?.items || []);
+  const [hasMore, setHasMore] = useState(Boolean(cached?.hasMore));
+  const [error, setError] = useState('');
+
+  const conversationsRef = useRef(conversations);
+  conversationsRef.current = conversations;
+  const nextBeforeRef = useRef(cached?.nextBefore || null);
+  const lastLoadRef = useRef(cached ? peekCache(cacheKey).at : 0);
+  const reloadTimerRef = useRef(null);
+
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    writeCache(cacheKey, { items: conversations, hasMore, nextBefore: nextBeforeRef.current });
+  }, [cacheKey, conversations, hasMore, isAuthenticated]);
+
+  const { isUserOnline, isConnected, on, off } = useSocket({
     enabled: isAuthenticated,
     token,
   });
@@ -92,27 +134,67 @@ export default function MessagesListScreen({ navigation, route }) {
   useEffect(() => {
     if (!isAuthenticated) return;
 
+    // Conversation inconnue de la liste (nouvelle, ou au-delà des pages chargées) :
+    // un rechargement groupé plutôt qu'un par événement
+    const scheduleReload = () => {
+      if (reloadTimerRef.current) return;
+      reloadTimerRef.current = setTimeout(() => {
+        reloadTimerRef.current = null;
+        loadConversationsRef.current?.();
+      }, 600);
+    };
+
     const onConversationUpdated = (payload) => {
       const payloadConversationId = String(payload?.conversationId || payload?.id || '');
       if (!payloadConversationId) return;
 
-      setConversations((prev) =>
-        prev.map((conv) => {
-          if (String(conv.id) !== payloadConversationId) return conv;
+      const index = conversationsRef.current.findIndex((conv) => String(conv.id) === payloadConversationId);
+      if (index < 0) {
+        if (payload?.lastMessage) scheduleReload();
+        return;
+      }
 
-          return {
-            ...conv,
-            lastMessage: payload?.lastMessage || conv.lastMessage,
-            unreadCount:
-              typeof payload?.unreadCount === 'number'
-                ? payload.unreadCount
-                : conv.unreadCount,
-            status: payload?.status || conv.status,
-            deal: payload?.deal || conv.deal,
-            updatedAt: payload?.updatedAt || new Date().toISOString(),
-          };
-        })
-      );
+      setConversations((prev) => {
+        const i = prev.findIndex((conv) => String(conv.id) === payloadConversationId);
+        if (i < 0) return prev;
+        const conv = prev[i];
+        const updated = {
+          ...conv,
+          lastMessage: payload?.lastMessage || conv.lastMessage,
+          unreadCount:
+            typeof payload?.unreadCount === 'number'
+              ? payload.unreadCount
+              : conv.unreadCount,
+          status: payload?.status || conv.status,
+          deal: payload?.deal || conv.deal,
+          closedByOwner: typeof payload?.closedByOwner === 'boolean' ? payload.closedByOwner : conv.closedByOwner,
+          updatedAt: payload?.updatedAt || new Date().toISOString(),
+        };
+        // Nouveau message → en tête de liste ; simple changement d'état → reste en place
+        const newMessage = payload?.lastMessage && String(payload.lastMessage.id || '') !== String(conv.lastMessage?.id || '');
+        if (!newMessage) {
+          const next = [...prev];
+          next[i] = updated;
+          return next;
+        }
+        return moveToTop(prev, i, updated);
+      });
+    };
+
+    // Messages des conversations ouvertes (la connexion est partagée) : aperçu à jour,
+    // y compris pour nos propres messages envoyés depuis l'écran de conversation
+    const onMessageNew = (message) => {
+      const conversationId = String(message?.conversationId || '');
+      if (!conversationId || message?.type === 'system') return;
+      setConversations((prev) => {
+        const i = prev.findIndex((conv) => String(conv.id) === conversationId);
+        if (i < 0 || String(prev[i].lastMessage?.id || '') === String(message.id)) return prev;
+        return moveToTop(prev, i, {
+          ...prev[i],
+          lastMessage: toLastMessage(message),
+          updatedAt: message.timestamp || new Date().toISOString(),
+        });
+      });
     };
 
     const onMessageRead = (payload) => {
@@ -164,16 +246,31 @@ export default function MessagesListScreen({ navigation, route }) {
     };
 
     on('conversation:updated', onConversationUpdated);
+    on('message:new', onMessageNew);
     on('message:delivered', onMessageDelivered);
     on('message:read', onMessageRead);
 
+    // Conversation lue depuis son écran : badge remis à zéro sans requête
+    const readSub = DeviceEventEmitter.addListener('conversation:read', ({ conversationId } = {}) => {
+      setConversations((prev) => prev.map((conv) => (
+        String(conv.id) === String(conversationId) && conv.unreadCount ? { ...conv, unreadCount: 0 } : conv
+      )));
+    });
+
     return () => {
       off('conversation:updated', onConversationUpdated);
+      off('message:new', onMessageNew);
       off('message:delivered', onMessageDelivered);
       off('message:read', onMessageRead);
+      readSub.remove();
+      if (reloadTimerRef.current) {
+        clearTimeout(reloadTimerRef.current);
+        reloadTimerRef.current = null;
+      }
     };
   }, [isAuthenticated, off, on]);
 
+  // Première page (remplace la liste) — silencieux si une liste est déjà affichée
   const loadConversations = useCallback(async () => {
     if (!isAuthenticated) {
       setLoading(false);
@@ -183,8 +280,11 @@ export default function MessagesListScreen({ navigation, route }) {
 
     try {
       setError('');
-      const response = await getConversations();
+      const response = await getConversations({ limit: PAGE_SIZE });
       setConversations(response?.data || []);
+      nextBeforeRef.current = response?.pagination?.nextBefore || null;
+      setHasMore(Boolean(response?.pagination?.hasMore));
+      lastLoadRef.current = Date.now();
     } catch (e) {
       setError(e?.response?.data?.message || 'Impossible de charger les conversations');
     } finally {
@@ -192,6 +292,36 @@ export default function MessagesListScreen({ navigation, route }) {
       setRefreshing(false);
     }
   }, [isAuthenticated]);
+
+  const loadConversationsRef = useRef(loadConversations);
+  loadConversationsRef.current = loadConversations;
+
+  // Pages suivantes (défilement infini)
+  const loadMore = useCallback(async () => {
+    if (!hasMore || loadingMore || !nextBeforeRef.current) return;
+    try {
+      setLoadingMore(true);
+      const response = await getConversations({ limit: PAGE_SIZE, before: nextBeforeRef.current });
+      const page = response?.data || [];
+      setConversations((prev) => {
+        const seen = new Set(prev.map((conv) => String(conv.id)));
+        return [...prev, ...page.filter((conv) => !seen.has(String(conv.id)))];
+      });
+      nextBeforeRef.current = response?.pagination?.nextBefore || null;
+      setHasMore(Boolean(response?.pagination?.hasMore));
+    } catch (e) {
+      // on réessaiera au prochain défilement
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [hasMore, loadingMore]);
+
+  // Reconnexion du socket après une coupure : des événements ont pu être manqués
+  const wasConnectedRef = useRef(isConnected);
+  useEffect(() => {
+    if (isConnected && !wasConnectedRef.current && lastLoadRef.current) loadConversations();
+    wasConnectedRef.current = isConnected;
+  }, [isConnected, loadConversations]);
 
   const openConversationFromRouteParams = useCallback(async () => {
     const sellerId = route?.params?.sellerId;
@@ -216,10 +346,12 @@ export default function MessagesListScreen({ navigation, route }) {
     }
   }, [creatingConversation, isAuthenticated, navigation, route?.params?.productId, route?.params?.sellerId]);
 
+  // Au focus : pas de spinner, et pas de requête si la liste est récente (le socket l'a tenue à jour)
   useFocusEffect(
     useCallback(() => {
-      setLoading(true);
-      loadConversations();
+      if (!lastLoadRef.current || Date.now() - lastLoadRef.current > STALE_MS) {
+        loadConversations();
+      }
       openConversationFromRouteParams();
     }, [loadConversations, openConversationFromRouteParams])
   );
@@ -256,7 +388,7 @@ export default function MessagesListScreen({ navigation, route }) {
       >
         <View style={styles.avatarWrap}>
           {peer?.avatar ? (
-            <Image source={{ uri: peer.avatar }} style={styles.avatar} />
+            <Image source={{ uri: sizedImage(peer.avatar, 56) }} style={styles.avatar} />
           ) : (
             <LinearGradient colors={[P.orange500, P.orange700]} style={styles.avatarFallback}>
               <Text style={styles.avatarFallbackText}>
@@ -319,7 +451,7 @@ export default function MessagesListScreen({ navigation, route }) {
 
           {itemImage ? (
             <View style={styles.productPreviewWrap}>
-              <Image source={{ uri: itemImage }} style={styles.productPreviewImage} />
+              <Image source={{ uri: sizedImage(itemImage, 48) }} style={styles.productPreviewImage} />
               <Text style={styles.productPreviewTitle} numberOfLines={1}>
                 {itemTitle}
               </Text>
@@ -333,7 +465,6 @@ export default function MessagesListScreen({ navigation, route }) {
   if (!isAuthenticated) {
     return (
       <LinearGradient colors={theme.shell} style={styles.container}>
-        <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} backgroundColor="transparent" translucent />
         <View style={[styles.center, { paddingTop: insets.top + 24, paddingHorizontal: 32 }]}>
           <View style={{ width: 80, height: 80, borderRadius: 40, backgroundColor: isDark ? 'rgba(255,255,255,0.07)' : 'rgba(236,90,19,0.08)', alignItems: 'center', justifyContent: 'center', marginBottom: 20 }}>
             <Ionicons name="chatbubbles-outline" size={40} color={P.terra} />
@@ -355,7 +486,6 @@ export default function MessagesListScreen({ navigation, route }) {
 
   return (
     <LinearGradient colors={theme.shell} style={styles.container}>
-      <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} backgroundColor="transparent" translucent />
       <View style={[styles.header, { paddingTop: insets.top + 8 }]}> 
         <Text style={styles.headerTitle}>Messages</Text>
       </View>
@@ -377,6 +507,15 @@ export default function MessagesListScreen({ navigation, route }) {
             <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={P.amber} />
           }
           renderItem={renderItem}
+          onEndReached={loadMore}
+          onEndReachedThreshold={0.4}
+          initialNumToRender={12}
+          maxToRenderPerBatch={10}
+          windowSize={9}
+          removeClippedSubviews={Platform.OS === 'android'}
+          ListFooterComponent={
+            loadingMore ? <ActivityIndicator style={{ marginVertical: 16 }} color={P.amber} /> : null
+          }
           ListEmptyComponent={
             <View style={styles.center}>
               <Text style={styles.emptyTitle}>Aucune conversation</Text>

@@ -12,6 +12,9 @@ export const API_BASE_URL = 'http://192.168.1.48:5001/api'; // À MODIFIER avec 
 // export const SOCKET_URL = 'https://api.taktak-ne.com';
 export const SOCKET_URL = 'http://192.168.1.48:5001'; // À MODIFIER avec votre IP
 
+// Site web public (liens de partage) — même adresse que les QR codes vendeur du web
+export const WEB_BASE_URL = 'https://api.taktak-ne.com';
+
 // Couleurs centralisees (source unique)
 export { COLORS };
 

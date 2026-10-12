@@ -1,653 +1,414 @@
-﻿// ─── SellerProfileScreen — TakTak Niger ────────────────────────────────────
-// Profil public d'un vendeur avec ses annonces
+// ─── Profil public d'un vendeur ──────────────────────────────────────────────
+// Couverture + identité, statistiques, onglets Tout / Produits / Services
+// et grille d'annonces paginée. Pas de contact direct (WhatsApp / appel) :
+// les échanges passent par la messagerie de l'app.
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  View, Text, StyleSheet, ScrollView, Image, TouchableOpacity,
-  Dimensions, StatusBar, Animated, ActivityIndicator, FlatList,
+  View,
+  Text,
+  StyleSheet,
+  Animated,
+  Pressable,
+  Share,
+  ActivityIndicator,
+  RefreshControl,
+  useWindowDimensions,
 } from 'react-native';
+import { Image } from 'expo-image';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Feather } from '@expo/vector-icons';
 import { apiClient } from '../api/auth';
 import { useAppTheme } from '../contexts/ThemeContext';
+import { useFavorites } from '../hooks/useFavorites';
 import { MOBILE_COLORS as P } from '../theme/colors';
+import { WEB_BASE_URL } from '../utils/constants';
+import { getCityName, getInitials, getProductId, sizedImage } from '../utils/format';
+import ProductCard from '../components/home/ProductCard';
+import PressableScale from '../components/home/PressableScale';
+import { SkeletonGroup, Bone } from '../components/home/Skeleton';
 
-const { width } = Dimensions.get('window');
+const PAGE_SIZE = 20;
+const GAP = 12;
+const COVER_H = 150;
+const AVATAR = 96;
+const TABS = [
+  { key: 'all', label: 'Tout' },
+  { key: 'product', label: 'Produits' },
+  { key: 'service', label: 'Services' },
+];
 
-// ─── THEME CONFIG ─────────────────────────────────────────────────────────────
-const getThemeConfig = (isService) => {
-  if (isService) {
-    return {
-      typeBadge: P.terra,
-      priceAccent: '#2563EB',
-      priceAccentGrad: ['#2563EB', '#60A5FA'],
-    };
-  }
-  return {
-    typeBadge: P.amber,
-    priceAccent: P.terra,
-    priceAccentGrad: [P.terra, P.terraDark],
-  };
-};
-
-// ─── HELPERS ──────────────────────────────────────────────────────────────────
-const getCityName = (location) => {
-  if (!location) return 'Niger';
-  return location.split(',')[0].trim();
-};
-
-const getPostedLabel = (dateValue) => {
-  if (!dateValue) return 'Récent';
-  const date = new Date(dateValue);
-  if (Number.isNaN(date.getTime())) return 'Récent';
-
-  const diffMs = Date.now() - date.getTime();
-  const mins = Math.max(1, Math.floor(diffMs / 60000));
-  if (mins < 60) return `${mins} min`;
-
-  const hours = Math.floor(mins / 60);
-  if (hours < 24) return `${hours} h`;
-
-  const days = Math.floor(hours / 24);
-  if (days < 7) return `${days} j`;
-
-  const weeks = Math.floor(days / 7);
-  return `${weeks} sem`;
-};
-
-const getDistanceKm = (itemId) => {
-  const distances = [0.5, 1.2, 2.3, 3.5, 4.8, 5.1, 6.7, 8.2, 10.5];
-  if (typeof itemId === 'string') {
-    const hash = itemId.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
-    return distances[hash % distances.length];
-  }
-  const n = Number(itemId) || 0;
-  return distances[Math.abs(n) % distances.length];
-};
-
-// Initiales du vendeur
-const getInitials = (name) => {
-  if (!name) return '??';
-  const parts = name.split(' ');
-  if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
-  return name.substring(0, 2).toUpperCase();
-};
-
-
-// ─────────────────────────────────────────────────────────────────────────────
-// PRODUCT CARD (Harmonized with AnnounceCard from ProductsListScreen)
-// ─────────────────────────────────────────────────────────────────────────────
-function ProductCard({ item, onPress }) {
-  const sc = useRef(new Animated.Value(1)).current;
-  const isService = item.type === 'service';
-  const d = getThemeConfig(isService);
-  const posted = getPostedLabel(item.createdAt || item.updatedAt);
-  const distance = getDistanceKm(item._id || item.id);
-
+// ─── Squelette de chargement ─────────────────────────────────────────────────
+function SellerSkeleton({ width, topInset }) {
+  const cardW = (width - 32 - GAP) / 2;
   return (
-    <TouchableOpacity
-      activeOpacity={1}
-      onPress={onPress}
-      onPressIn={() => Animated.spring(sc, { toValue: 0.96, useNativeDriver: true, speed: 30 }).start()}
-      onPressOut={() => Animated.spring(sc, { toValue: 1, useNativeDriver: true, speed: 30 }).start()}
-    >
-      <Animated.View style={[s.card, { transform: [{ scale: sc }] }]}>
-
-        {/* Image */}
-        <View style={s.cardImgWrap}>
-          <Image
-            source={{ uri: item.images?.[0] || item.mainImage || 'https://via.placeholder.com/200x150/FFE9DE/EC5A13?text=MH' }}
-            style={s.cardImg}
-            resizeMode="cover"
-          />
-
-          {/* Time Badge */}
-          <View style={s.cardTimeBadge}>
-            <Feather name="clock" size={11} color={P.charcoal} />
-            <Text style={s.cardTimeTxt}>Il y a {posted}</Text>
-          </View>
-
-          {/* Fav Ghost */}
-          <View style={s.cardFavGhost}>
-            <Feather name="heart" size={14} color={d.priceAccent} />
-          </View>
-        </View>
-
-        {/* Content */}
-        <View style={s.cardBody}>
-          {/* Title Row with Type Glyph */}
-          <View style={s.cardTitleRow}>
-            <View style={s.cardTypeGlyphWrap}>
-              <Text style={s.cardTypeGlyph}>{isService ? '🛠️' : '📦'}</Text>
-            </View>
-            <Text style={s.cardTitle} numberOfLines={1}>{item.title}</Text>
-          </View>
-
-          {/* Location + Distance Meta */}
-          <View style={s.cardMetaRow}>
-            <Feather name="map-pin" size={11} color={d.priceAccent} />
-            <Text style={s.cardLoc} numberOfLines={1}>{getCityName(item.location)}</Text>
-            <Text style={s.cardMetaDot}>•</Text>
-            <Text style={s.cardMetaTail}>{distance.toFixed(1)} km</Text>
-          </View>
-
-          {/* Price Row */}
-          <View style={s.cardPriceRow}>
-            <View style={s.cardPriceSpacer} />
-            <Text style={[s.cardPriceTxt, { color: d.priceAccent }]}>
-              {item.price ? `${parseInt(item.price).toLocaleString('fr-FR')} FCFA` : 'À discuter'}
-            </Text>
-          </View>
-        </View>
-
-      </Animated.View>
-    </TouchableOpacity>
+    <SkeletonGroup>
+      <Bone width={width} height={COVER_H + topInset} radius={0} />
+      <View style={{ alignItems: 'center', marginTop: -AVATAR / 2 }}>
+        <Bone width={AVATAR} height={AVATAR} radius={AVATAR / 2} />
+        <Bone width={180} height={22} radius={8} style={{ marginTop: 14 }} />
+        <Bone width={130} height={13} radius={6} style={{ marginTop: 8 }} />
+        <Bone width={width - 32} height={74} radius={20} style={{ marginTop: 20 }} />
+      </View>
+      <View style={{ flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 16, marginTop: 20 }}>
+        <Bone width={cardW} height={cardW * 1.3} radius={18} />
+        <Bone width={cardW} height={cardW * 1.3} radius={18} />
+      </View>
+    </SkeletonGroup>
   );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// ÉCRAN PRINCIPAL
-// ─────────────────────────────────────────────────────────────────────────────
-export default function SellerProfileScreen({ route, navigation }) {
-  const insets = useSafeAreaInsets();
-  const { isDark } = useAppTheme();
-  const { sellerId } = route.params;
-  const [seller, setSeller] = useState(null);
-  const [products, setProducts] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [filterType, setFilterType] = useState('all'); // 'all', 'product', 'service'
-  const [allProducts, setAllProducts] = useState([]); // Tous les produits non filtrés
-
-  const fadeAnim = useRef(new Animated.Value(0)).current;
-
-  useEffect(() => {
-    Animated.timing(fadeAnim, { toValue: 1, duration: 400, useNativeDriver: true }).start();
-  }, []);
-
-  const fetchSellerData = async () => {
-    try {
-      // Récupérer le profil du vendeur
-      const sellerResponse = await apiClient.get(`/auth/seller/${sellerId}`);
-      setSeller(sellerResponse.data.data || sellerResponse.data);
-
-      // Récupérer TOUS les produits du vendeur (sans filtre)
-      const productsResponse = await apiClient.get('/products', {
-        params: {
-          seller: sellerId,
-          status: 'active',
-        }
-      });
-      const fetchedProducts = productsResponse.data.data || productsResponse.data;
-      
-      // Stocker tous les produits
-      setAllProducts(fetchedProducts);
-      
-      // Filtrer selon le type sélectionné
-      if (filterType === 'all') {
-        setProducts(fetchedProducts);
-      } else {
-        setProducts(fetchedProducts.filter(p => p.type === filterType));
-      }
-    } catch (error) {
-      console.error('Erreur chargement vendeur:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    fetchSellerData();
-  }, [sellerId]);
-
-  // Filtrer les produits côté client quand le filtre change
-  useEffect(() => {
-    if (allProducts.length > 0) {
-      if (filterType === 'all') {
-        setProducts(allProducts);
-      } else {
-        setProducts(allProducts.filter(p => p.type === filterType));
-      }
-    }
-  }, [filterType, allProducts.length]);
-
-  if (loading) {
-    return (
-      <View style={{ flex: 1 }}>
-        <LinearGradient colors={[P.charcoal, P.brown]} style={s.loadScreen}>
-          <Image
-            source={require('../../Branding/flogo-removebg-preview.png')}
-            style={{ width: 160, height: 160, resizeMode: 'contain' }}
-          />
-          <ActivityIndicator size="large" color={P.cream} style={{ marginTop: 40 }} />
-        </LinearGradient>
-      </View>
-    );
-  }
-
-  if (!seller) {
-    return (
-      <View style={s.errorScreen}>
-        <Text style={{ fontSize: 64 }}>😕</Text>
-        <Text style={s.errorTitle}>Vendeur introuvable</Text>
-        <Text style={s.errorText}>Ce vendeur n'existe pas ou n'est plus disponible</Text>
-        <TouchableOpacity
-          style={s.errorBtn}
-          onPress={() => navigation.goBack()}
-          activeOpacity={0.85}
-        >
-          <Text style={s.errorBtnTxt}>← Retour</Text>
-        </TouchableOpacity>
-      </View>
-    );
-  }
-
-  const filteredProducts = products;
-  
-  // Compter les produits par type
-  const totalCount = allProducts.length;
-  const productCount = allProducts.filter(p => p.type === 'product').length;
-  const serviceCount = allProducts.filter(p => p.type === 'service').length;
-  const sellerRating = Number(seller?.rating ?? seller?.sellerStats?.rating ?? 0);
-  const sellerTotalReviews = Number(seller?.totalReviews ?? seller?.sellerStats?.totalReviews ?? 0);
-  const sellerResponseRate = Number(seller?.sellerStats?.responseRate ?? 0);
-
+// ─── Statistique ──────────────────────────────────────────────────────────────
+function Stat({ value, label, icon, iconColor }) {
+  const { theme } = useAppTheme();
   return (
-    <View style={s.screen}>
-      <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} backgroundColor="transparent" translucent />
-
-      {/* ══════════════ BACK BUTTON FLOTTANT ══════════════════════════════ */}
-      <View style={[s.headerFloat, { paddingTop: insets.top + 10 }]}>
-        <TouchableOpacity
-          style={s.backBtn}
-          onPress={() => navigation.goBack()}
-          activeOpacity={0.7}
-        >
-          <Text style={s.backBtnTxt}>←</Text>
-        </TouchableOpacity>
+    <View style={s.stat}>
+      <View style={s.statValueRow}>
+        {icon ? <Feather name={icon} size={14} color={iconColor} /> : null}
+        <Text style={[s.statValue, { color: theme.text }]} numberOfLines={1}>{value}</Text>
       </View>
-
-      {/* ══════════════ LISTE AVEC HEADER ═════════════════════════════════ */}
-      <FlatList
-        key={`flatlist-${filterType}`}
-        data={filteredProducts}
-        extraData={filteredProducts.length}
-        renderItem={({ item }) => (
-          <ProductCard
-            item={item}
-            onPress={() => navigation.navigate('ProductDetail', { productId: item.id })}
-          />
-        )}
-        keyExtractor={(item, index) => item.id?.toString() || `product-${index}`}
-        numColumns={2}
-        columnWrapperStyle={s.productsRow}
-        contentContainerStyle={{ paddingBottom: Math.max(insets.bottom, 16) + 20 }}
-        ListHeaderComponent={() => (
-          <>
-            {/* ══════════════ HEADER HERO PREMIUM ═════════════════════════════ */}
-            <LinearGradient 
-              colors={['#2d3748', '#374151', '#3d4a5c']} 
-              start={{ x: 0, y: 0 }} 
-              end={{ x: 1, y: 1 }} 
-              style={[s.hero, { paddingTop: insets.top + 16 }]}
-            >
-              {/* Décos cercles ambiance */}
-              <View style={s.deco1} />
-              <View style={s.deco2} />
-              <View style={s.deco3} />
-              {/* Ligne accent top */}
-              <View style={s.heroTopLine} />
-
-              <Animated.View style={[s.heroContent, { opacity: fadeAnim }]}>
-                {/* Seller Info Container */}
-                <View style={s.sellerInfoContainer}>
-                  {/* Avatar avec badge */}
-                  <View style={s.avatarContainer}>
-                    <View style={s.avatarWrap}>
-                      {seller.avatar ? (
-                        <Image source={{ uri: seller.avatar }} style={s.avatarImg} />
-                      ) : (
-                        <LinearGradient colors={['#ec5a13', '#d94f0f']} style={s.avatarPlaceholder}>
-                          <Text style={s.avatarInitials}>{getInitials(seller.name)}</Text>
-                        </LinearGradient>
-                      )}
-                      {seller.verified && (
-                        <View style={s.verifiedBadge}>
-                          <Text style={s.verifiedIcon}>✓</Text>
-                        </View>
-                      )}
-                    </View>
-                  </View>
-
-                  {/* Seller Details */}
-                  <View style={s.sellerDetailsSection}>
-                    <View style={s.nameRow}>
-                      <Text style={s.heroName}>{seller.businessName || seller.name}</Text>
-                      {seller.sellerStats?.responseRate > 80 && (
-                        <View style={s.topSellerBadge}>
-                          <Text style={s.topSellerBadgeTxt}>⭐ TOP</Text>
-                        </View>
-                      )}
-                    </View>
-                    {seller.businessName && seller.name && seller.businessName !== seller.name && (
-                      <Text style={s.heroSubName}>{seller.name}</Text>
-                    )}
-
-                    {/* Meta: Location + Rating */}
-                    <View style={s.heroMeta}>
-                      <View style={s.heroMetaItem}>
-                        <Text style={s.heroLocIcon}>📍</Text>
-                        <Text style={s.heroMetaText}>{getCityName(seller.location)}</Text>
-                      </View>
-                      <Text style={s.heroMetaSep}>•</Text>
-                      <View style={s.heroMetaItem}>
-                        <Text style={s.heroRatingStar}>⭐</Text>
-                        <Text style={s.heroMetaText}>
-                          {sellerRating.toFixed(1)}/5.0
-                        </Text>
-                      </View>
-                    </View>
-
-                    {/* Response Time Badge */}
-                    <View style={s.responseBadge}>
-                      <Text style={s.responseBadgeIcon}>⚡</Text>
-                      <Text style={s.responseBadgeText}>Répond généralement en quelques heures</Text>
-                    </View>
-                  </View>
-                </View>
-              </Animated.View>
-            </LinearGradient>
-
-            {/* ══════════════ STATS ROW ULTRA-COMPACT ════════════════════════════════════ */}
-            <View style={s.statsRow}>
-              <View style={s.statChip}>
-                <Text style={s.statChipIcon}>📦</Text>
-                <Text style={s.statChipValue}>{totalCount}</Text>
-              </View>
-              <View style={s.statChipDivider} />
-              <View style={s.statChip}>
-                <Text style={s.statChipIcon}>💬</Text>
-                <Text style={s.statChipValue}>{sellerTotalReviews}</Text>
-              </View>
-              <View style={s.statChipDivider} />
-              <View style={s.statChip}>
-                <Text style={s.statChipIcon}>⚡</Text>
-                <Text style={s.statChipValue}>{sellerResponseRate}%</Text>
-              </View>
-            </View>
-
-            {/* ══════════════ FILTRES PREMIUM ═══════════════════════════════════════════ */}
-            <View style={s.filtersRow}>
-              <TouchableOpacity
-                style={[s.filterBtn, filterType === 'all' && s.filterBtnActive]}
-                onPress={() => setFilterType('all')}
-                activeOpacity={0.7}
-              >
-                <Text style={[s.filterBtnIcon, filterType === 'all' && s.filterBtnIconActive]}>🎯</Text>
-                <Text style={[s.filterBtnText, filterType === 'all' && s.filterBtnTextActive]}>
-                  Tout ({totalCount})
-                </Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[s.filterBtn, filterType === 'product' && s.filterBtnActive]}
-                onPress={() => setFilterType('product')}
-                activeOpacity={0.7}
-              >
-                <Text style={[s.filterBtnIcon, filterType === 'product' && s.filterBtnIconActive]}>📦</Text>
-                <Text style={[s.filterBtnText, filterType === 'product' && s.filterBtnTextActive]}>
-                  Produits ({productCount})
-                </Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[s.filterBtn, filterType === 'service' && s.filterBtnActive]}
-                onPress={() => setFilterType('service')}
-                activeOpacity={0.7}
-              >
-                <Text style={[s.filterBtnIcon, filterType === 'service' && s.filterBtnIconActive]}>🛠</Text>
-                <Text style={[s.filterBtnText, filterType === 'service' && s.filterBtnTextActive]}>
-                  Services ({serviceCount})
-                </Text>
-              </TouchableOpacity>
-            </View>
-
-            {/* Padding pour la grille */}
-            <View style={{ height: 12 }} />
-          </>
-        )}
-        ListEmptyComponent={() => (
-          <View style={s.emptyState}>
-            <Text style={{ fontSize: 64 }}>📭</Text>
-            <Text style={s.emptyTitle}>Aucune annonce</Text>
-            <Text style={s.emptyText}>Ce vendeur n'a pas encore publié d'annonce</Text>
-          </View>
-        )}
-      />
+      <Text style={[s.statLabel, { color: theme.textSoft }]} numberOfLines={1}>{label}</Text>
     </View>
   );
 }
 
-// ─── STYLES ───────────────────────────────────────────────────────────────────
+export default function SellerProfileScreen({ route, navigation }) {
+  const insets = useSafeAreaInsets();
+  const { width } = useWindowDimensions();
+  const { isDark, theme } = useAppTheme();
+  const { favorites, toggleFavorite } = useFavorites();
+  const { sellerId } = route.params || {};
+
+  const [seller, setSeller] = useState(null);
+  const [status, setStatus] = useState('loading'); // loading | ready | notfound | error
+  const [tab, setTab] = useState('all');
+  const [counts, setCounts] = useState({ all: 0, product: 0, service: 0 });
+  const [items, setItems] = useState([]);
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState(0);
+  const [listLoading, setListLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [bioExpanded, setBioExpanded] = useState(false);
+
+  const scrollY = useRef(new Animated.Value(0)).current;
+  const requestId = useRef(0);
+  const cardW = (width - 32 - GAP) / 2;
+  const accent = isDark ? P.amber : P.terra;
+
+  // ─── Profil ───────────────────────────────────────────────────────────────
+  const fetchProfile = useCallback(async () => {
+    try {
+      const profileRes = await apiClient.get(`/auth/seller/${sellerId}`);
+      setSeller(profileRes.data?.data || null);
+      setStatus('ready');
+    } catch (e) {
+      setStatus(e?.response?.status === 404 ? 'notfound' : 'error');
+    }
+  }, [sellerId]);
+
+  // ─── Annonces paginées (la dernière requête l'emporte) ────────────────────
+  // La première page renvoie aussi les compteurs Tout / Produits / Services (facets=type)
+  const loadItems = useCallback(async (pageToLoad) => {
+    const id = ++requestId.current;
+    if (pageToLoad > 1) setLoadingMore(true);
+    try {
+      const res = await apiClient.get('/products', {
+        params: {
+          seller: sellerId,
+          page: pageToLoad,
+          limit: PAGE_SIZE,
+          view: 'card',
+          ...(pageToLoad === 1 ? { facets: 'type' } : {}),
+          ...(tab !== 'all' ? { type: tab } : {}),
+        },
+      });
+      if (id !== requestId.current) return;
+      const facets = res.data?.facets;
+      if (facets) setCounts({ all: facets.all || 0, product: facets.product || 0, service: facets.service || 0 });
+      const list = Array.isArray(res.data?.data) ? res.data.data : [];
+      setItems((prev) => {
+        if (pageToLoad === 1) return list;
+        const seen = new Set(prev.map(getProductId));
+        return [...prev, ...list.filter((it) => !seen.has(getProductId(it)))];
+      });
+      setTotal(Number(res.data?.pagination?.total ?? list.length));
+      setPage(pageToLoad);
+    } catch (e) {
+      // La liste garde son contenu ; le pull-to-refresh permet de réessayer
+    } finally {
+      if (id === requestId.current) { setListLoading(false); setLoadingMore(false); setRefreshing(false); }
+    }
+  }, [sellerId, tab]);
+
+  useEffect(() => { fetchProfile(); }, [fetchProfile]);
+  useEffect(() => { setListLoading(true); loadItems(1); }, [loadItems]);
+
+  const onRefresh = () => { setRefreshing(true); fetchProfile(); loadItems(1); };
+  const loadMore = () => { if (!listLoading && !loadingMore && items.length < total) loadItems(page + 1); };
+
+  // ─── Actions ───────────────────────────────────────────────────────────────
+  const name = seller?.businessName || seller?.name || 'Vendeur';
+  const shareProfile = () => {
+    Share.share({
+      message: `Découvrez ${name} sur TakTak (${counts.all} annonce${counts.all > 1 ? 's' : ''}) : ${WEB_BASE_URL}/seller/${sellerId}`,
+    }).catch(() => {});
+  };
+
+  const openProduct = useCallback((item) => navigation.navigate('ProductDetail', { productId: getProductId(item), preview: item }), [navigation]);
+
+  // ─── En-tête compact qui apparaît au défilement ───────────────────────────
+  const barOpacity = scrollY.interpolate({ inputRange: [COVER_H - 40, COVER_H + 20], outputRange: [0, 1], extrapolate: 'clamp' });
+  const coverTranslate = scrollY.interpolate({ inputRange: [-100, 0, COVER_H], outputRange: [-50, 0, COVER_H * 0.4], extrapolate: 'clamp' });
+  const coverScale = scrollY.interpolate({ inputRange: [-100, 0], outputRange: [1.4, 1], extrapolate: 'clamp' });
+
+  const rating = Number(seller?.rating || 0);
+  const reviews = Number(seller?.totalReviews || 0);
+  const bio = String(seller?.bio || '').trim();
+
+  const profileHeader = useMemo(() => {
+    if (!seller) return null;
+    return (
+      <View>
+        {/* Couverture (parallaxe) */}
+        <Animated.View style={{ height: COVER_H + insets.top, overflow: 'hidden', transform: [{ translateY: coverTranslate }, { scale: coverScale }] }}>
+          <LinearGradient colors={[P.orange700, P.terra, P.amber]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={StyleSheet.absoluteFill} />
+          <View style={s.coverGlowA} />
+          <View style={s.coverGlowB} />
+        </Animated.View>
+
+        {/* Identité */}
+        <View style={[s.identity, { backgroundColor: theme.screen }]}>
+          <View style={[s.avatarRing, { backgroundColor: theme.screen }]}>
+            {seller.avatar ? (
+              <Image source={{ uri: sizedImage(seller.avatar, 96) }} style={s.avatar} />
+            ) : (
+              <LinearGradient colors={[P.orange400, P.terra]} style={[s.avatar, s.center]}>
+                <Text style={s.initials}>{getInitials(name)}</Text>
+              </LinearGradient>
+            )}
+            {seller.verified ? (
+              <View style={[s.verified, { borderColor: theme.screen }]}>
+                <Feather name="check" size={13} color={P.white} />
+              </View>
+            ) : null}
+          </View>
+
+          <View style={s.nameRow}>
+            <Text style={[s.name, { color: theme.text }]} numberOfLines={2}>{name}</Text>
+          </View>
+          {seller.businessName && seller.name && seller.businessName !== seller.name ? (
+            <Text style={[s.subName, { color: theme.textMuted }]}>{seller.name}</Text>
+          ) : null}
+
+          <View style={s.metaRow}>
+            <View style={s.metaItem}>
+              <Feather name="map-pin" size={13} color={theme.textSoft} />
+              <Text style={[s.metaTxt, { color: theme.textSoft }]}>{getCityName(seller.location)}</Text>
+            </View>
+            {seller.memberSince ? (
+              <View style={s.metaItem}>
+                <Feather name="calendar" size={13} color={theme.textSoft} />
+                <Text style={[s.metaTxt, { color: theme.textSoft }]}>Membre depuis {seller.memberSince}</Text>
+              </View>
+            ) : null}
+          </View>
+
+          {seller.verified ? (
+            <View style={[s.trustPill, { backgroundColor: isDark ? 'rgba(34,197,94,0.14)' : P.successSoft }]}>
+              <Feather name="shield" size={12} color={P.greenDark} />
+              <Text style={[s.trustTxt, { color: isDark ? P.green : P.greenDark }]}>Vendeur vérifié</Text>
+            </View>
+          ) : null}
+
+          {/* Statistiques */}
+          <View style={[s.stats, { backgroundColor: theme.surface, borderColor: theme.border }, !isDark && s.cardShadow]}>
+            <Stat value={String(counts.all)} label="Annonces" />
+            <View style={[s.statSep, { backgroundColor: theme.border }]} />
+            <Stat value={reviews > 0 ? rating.toFixed(1) : '—'} label={reviews > 0 ? `${reviews} avis` : 'Pas d\'avis'} icon="star" iconColor={P.gold} />
+            <View style={[s.statSep, { backgroundColor: theme.border }]} />
+            <Stat value={String(seller.dealsConcluded || 0)} label="Ventes conclues" />
+          </View>
+
+          {/* Bio */}
+          {bio ? (
+            <Pressable onPress={() => setBioExpanded((v) => !v)} style={s.bioWrap}>
+              <Text style={[s.bio, { color: theme.textMuted }]} numberOfLines={bioExpanded ? undefined : 3}>{bio}</Text>
+              {bio.length > 140 ? (
+                <Text style={[s.bioMore, { color: accent }]}>{bioExpanded ? 'Voir moins' : 'Lire la suite'}</Text>
+              ) : null}
+            </Pressable>
+          ) : null}
+
+        </View>
+
+        {/* Onglets */}
+        <View style={[s.tabs, { borderBottomColor: theme.border }]}>
+          {TABS.map((t) => {
+            const active = tab === t.key;
+            const tabAccent = t.key === 'service' ? P.blue600 : accent;
+            return (
+              <Pressable key={t.key} onPress={() => setTab(t.key)} style={s.tab} accessibilityRole="tab" accessibilityState={{ selected: active }}>
+                <Text style={[s.tabTxt, { color: active ? theme.text : theme.textSoft }, active && { fontWeight: '800' }]}>
+                  {t.label} <Text style={{ color: active ? tabAccent : theme.textSoft }}>{counts[t.key]}</Text>
+                </Text>
+                {active ? <View style={[s.tabLine, { backgroundColor: tabAccent }]} /> : null}
+              </Pressable>
+            );
+          })}
+        </View>
+        <View style={{ height: 14 }} />
+      </View>
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [seller, theme, isDark, counts, tab, bioExpanded, insets.top, accent]);
+
+  const renderItem = useCallback(({ item }) => (
+    <View style={{ paddingHorizontal: 0 }}>
+      <ProductCard
+        item={item}
+        width={cardW}
+        isFavorite={favorites.has(getProductId(item))}
+        onPress={() => openProduct(item)}
+        onToggleFavorite={() => toggleFavorite(item)}
+      />
+    </View>
+  ), [cardW, favorites, openProduct, toggleFavorite]);
+
+  // ─── États globaux ─────────────────────────────────────────────────────────
+  if (status === 'loading') {
+    return (
+      <View style={[s.screen, { backgroundColor: theme.screen }]}>
+        <SellerSkeleton width={width} topInset={insets.top} />
+      </View>
+    );
+  }
+
+  if (status !== 'ready' || !seller) {
+    const notFound = status === 'notfound';
+    return (
+      <View style={[s.screen, s.center, { backgroundColor: theme.screen, padding: 32 }]}>
+        <View style={[s.emptyIcon, { backgroundColor: theme.glass }]}>
+          <Feather name={notFound ? 'user-x' : 'wifi-off'} size={28} color={theme.textMuted} />
+        </View>
+        <Text style={[s.emptyTitle, { color: theme.text }]}>{notFound ? 'Vendeur introuvable' : 'Connexion impossible'}</Text>
+        <Text style={[s.emptySub, { color: theme.textMuted }]}>
+          {notFound ? 'Ce profil n\'existe plus ou a été désactivé.' : 'Vérifiez votre connexion internet puis réessayez.'}
+        </Text>
+        <PressableScale
+          onPress={notFound ? () => navigation.goBack() : () => { setStatus('loading'); fetchProfile(); }}
+          style={[s.emptyBtn, { backgroundColor: P.terra }]}
+        >
+          <Text style={s.emptyBtnTxt}>{notFound ? 'Retour' : 'Réessayer'}</Text>
+        </PressableScale>
+      </View>
+    );
+  }
+
+  return (
+    <View style={[s.screen, { backgroundColor: theme.screen }]}>
+
+      <Animated.FlatList
+        data={listLoading ? [] : items}
+        keyExtractor={getProductId}
+        renderItem={renderItem}
+        numColumns={2}
+        columnWrapperStyle={s.gridRow}
+        ListHeaderComponent={profileHeader}
+        ListEmptyComponent={
+          listLoading ? (
+            <ActivityIndicator color={accent} style={{ marginTop: 32 }} />
+          ) : (
+            <View style={[s.center, { paddingVertical: 40, paddingHorizontal: 32 }]}>
+              <View style={[s.emptyIcon, { backgroundColor: theme.glass }]}>
+                <Feather name="package" size={26} color={theme.textMuted} />
+              </View>
+              <Text style={[s.emptyTitle, { color: theme.text }]}>
+                {tab === 'service' ? 'Aucun service' : tab === 'product' ? 'Aucun produit' : 'Aucune annonce'}
+              </Text>
+              <Text style={[s.emptySub, { color: theme.textMuted }]}>Ce vendeur n'a rien publié ici pour le moment.</Text>
+            </View>
+          )
+        }
+        ListFooterComponent={loadingMore ? <ActivityIndicator color={accent} style={{ marginVertical: 18 }} /> : null}
+        contentContainerStyle={{ paddingBottom: insets.bottom + 32 }}
+        onEndReached={loadMore}
+        onEndReachedThreshold={0.6}
+        onScroll={Animated.event([{ nativeEvent: { contentOffset: { y: scrollY } } }], { useNativeDriver: true })}
+        scrollEventThrottle={16}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[P.terra]} tintColor={P.white} progressViewOffset={insets.top} />}
+        showsVerticalScrollIndicator={false}
+        initialNumToRender={6}
+        windowSize={9}
+      />
+
+      {/* Barre supérieure : boutons sur la couverture, puis barre pleine au défilement */}
+      <View style={[s.topBar, { paddingTop: insets.top + 6 }]} pointerEvents="box-none">
+        <Animated.View
+          pointerEvents="none"
+          style={[StyleSheet.absoluteFill, { backgroundColor: isDark ? theme.screen : theme.surface, borderBottomColor: theme.border, opacity: barOpacity }, s.topBarBg]}
+        />
+        <PressableScale onPress={() => navigation.goBack()} scaleTo={0.9} style={s.roundBtn} accessibilityLabel="Retour">
+          <Feather name="arrow-left" size={20} color={P.white} />
+        </PressableScale>
+        <Animated.Text style={[s.topTitle, { color: theme.text, opacity: barOpacity }]} numberOfLines={1}>{name}</Animated.Text>
+        <PressableScale onPress={shareProfile} scaleTo={0.9} style={s.roundBtn} accessibilityLabel="Partager le profil">
+          <Feather name="share-2" size={18} color={P.white} />
+        </PressableScale>
+      </View>
+    </View>
+  );
+}
+
 const s = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: P.cream },
+  screen: { flex: 1 },
+  center: { alignItems: 'center', justifyContent: 'center' },
 
-  // Loading
-  loadScreen:   { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  loadLogoBox:  { width: 74, height: 74, borderRadius: 22, backgroundColor: P.gold, justifyContent: 'center', alignItems: 'center', marginBottom: 16 },
-  loadLogoTxt:  { fontSize: 40, fontWeight: '900', color: P.brown },
-  loadBrand:    { fontSize: 28, fontWeight: '900', color: P.cream, letterSpacing: -1 },
+  coverGlowA: { position: 'absolute', right: -60, top: -40, width: 220, height: 220, borderRadius: 110, backgroundColor: 'rgba(255,255,255,0.14)' },
+  coverGlowB: { position: 'absolute', left: -50, bottom: -80, width: 180, height: 180, borderRadius: 90, backgroundColor: 'rgba(17,24,39,0.12)' },
 
-  // Error
-  errorScreen:  { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 40, backgroundColor: P.cream },
-  errorTitle:   { fontSize: 22, fontWeight: '900', color: P.charcoal, marginTop: 16, marginBottom: 8 },
-  errorText:    { fontSize: 14, color: P.muted, textAlign: 'center', lineHeight: 21, marginBottom: 24 },
-  errorBtn:     { backgroundColor: P.terra, borderRadius: 14, paddingVertical: 14, paddingHorizontal: 24 },
-  errorBtnTxt:  { fontSize: 15, fontWeight: '800', color: P.white },
+  identity: { alignItems: 'center', paddingHorizontal: 16, borderTopLeftRadius: 28, borderTopRightRadius: 28, marginTop: -28 },
+  avatarRing: { width: AVATAR + 8, height: AVATAR + 8, borderRadius: (AVATAR + 8) / 2, padding: 4, marginTop: -(AVATAR / 2) },
+  avatar: { width: AVATAR, height: AVATAR, borderRadius: AVATAR / 2 },
+  initials: { color: P.white, fontSize: 32, fontWeight: '900' },
+  verified: { position: 'absolute', right: 4, bottom: 6, width: 26, height: 26, borderRadius: 13, backgroundColor: P.green, borderWidth: 3, alignItems: 'center', justifyContent: 'center' },
+  nameRow: { flexDirection: 'row', alignItems: 'center', marginTop: 10 },
+  name: { fontSize: 23, fontWeight: '900', letterSpacing: -0.5, textAlign: 'center' },
+  subName: { fontSize: 14, marginTop: 2 },
+  metaRow: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: 14, marginTop: 8 },
+  metaItem: { flexDirection: 'row', alignItems: 'center', gap: 5 },
+  metaTxt: { fontSize: 13 },
+  trustPill: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 999, marginTop: 10 },
+  trustTxt: { fontSize: 12, fontWeight: '800' },
 
-  // Header flottant
-  headerFloat: { position: 'absolute', top: 0, left: 0, right: 0, zIndex: 20, paddingHorizontal: 14 },
-  backBtn: { width: 44, height: 44, borderRadius: 22, backgroundColor: P.glassWhite25, justifyContent: 'center', alignItems: 'center', shadowColor: P.shadow, shadowOpacity: 0.2, shadowOffset: { width: 0, height: 2 }, shadowRadius: 8, elevation: 5 },
-  backBtnTxt: { fontSize: 22, color: P.white, fontWeight: '700' },
+  stats: { flexDirection: 'row', alignItems: 'center', alignSelf: 'stretch', borderRadius: 20, borderWidth: StyleSheet.hairlineWidth, paddingVertical: 14, marginTop: 18 },
+  cardShadow: { shadowColor: '#0f172a', shadowOpacity: 0.07, shadowRadius: 14, shadowOffset: { width: 0, height: 6 }, elevation: 2 },
+  stat: { flex: 1, alignItems: 'center', paddingHorizontal: 4 },
+  statValueRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  statValue: { fontSize: 19, fontWeight: '900', letterSpacing: -0.4 },
+  statLabel: { fontSize: 11.5, marginTop: 2 },
+  statSep: { width: StyleSheet.hairlineWidth, height: 32 },
 
-  // Hero
-  hero: { paddingBottom: 12, paddingHorizontal: 18, overflow: 'hidden', position: 'relative' },
-  heroContent: { alignItems: 'center', marginTop: 6 },
-  
-  // Decorative Elements
-  deco1: { position: 'absolute', width: 150, height: 150, borderRadius: 75, backgroundColor: 'rgba(236, 90, 19, 0.08)', top: -40, right: -40 },
-  deco2: { position: 'absolute', width: 100, height: 100, borderRadius: 50, backgroundColor: 'rgba(255, 168, 123, 0.06)', bottom: 60, left: -20 },
-  deco3: { position: 'absolute', width: 80, height: 80, borderRadius: 40, backgroundColor: 'rgba(236, 90, 19, 0.04)', top: 120, left: 40 },
-  heroTopLine: { position: 'absolute', top: 0, left: 0, right: 0, height: 2, backgroundColor: 'rgba(255, 255, 255, 0.1)' },
+  bioWrap: { alignSelf: 'stretch', marginTop: 16 },
+  bio: { fontSize: 14, lineHeight: 20, textAlign: 'center' },
+  bioMore: { fontSize: 13, fontWeight: '700', textAlign: 'center', marginTop: 4 },
 
-  // Seller Info Container
-  sellerInfoContainer: { flexDirection: 'row', gap: 8, alignItems: 'flex-start' },
-  
-  // Avatar
-  avatarContainer: { marginBottom: 0, shadowColor: P.shadow, shadowOpacity: 0.2, shadowOffset: { width: 0, height: 3 }, shadowRadius: 6, elevation: 4 },
-  avatarWrap: { position: 'relative', alignItems: 'center' },
-  avatarImg: { width: 64, height: 64, borderRadius: 32, borderWidth: 2, borderColor: P.white },
-  avatarPlaceholder: { width: 64, height: 64, borderRadius: 32, justifyContent: 'center', alignItems: 'center', borderWidth: 2, borderColor: P.white },
-  avatarInitials: { fontSize: 24, fontWeight: '900', color: P.white, letterSpacing: -1 },
-  verifiedBadge: { position: 'absolute', bottom: -2, right: -2, width: 22, height: 22, borderRadius: 11, backgroundColor: P.green, justifyContent: 'center', alignItems: 'center', borderWidth: 1.5, borderColor: P.white, shadowColor: P.shadow, shadowOpacity: 0.2, shadowOffset: { width: 0, height: 1 }, shadowRadius: 2, elevation: 1 },
-  verifiedIcon: { fontSize: 11, color: P.white, fontWeight: '900' },
+  tabs: { flexDirection: 'row', marginTop: 22, borderBottomWidth: StyleSheet.hairlineWidth, paddingHorizontal: 8 },
+  tab: { flex: 1, alignItems: 'center', paddingVertical: 13 },
+  tabTxt: { fontSize: 14, fontWeight: '600' },
+  tabLine: { position: 'absolute', bottom: -StyleSheet.hairlineWidth, left: '18%', right: '18%', height: 3, borderRadius: 2 },
 
-  // Seller Details Section
-  sellerDetailsSection: { flex: 1, justifyContent: 'center', gap: 4 },
-  nameRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 2 },
-  heroName: { fontSize: 18, fontWeight: '900', color: P.white, letterSpacing: -0.5, flex: 1 },
-  heroSubName: { fontSize: 10, fontWeight: '600', color: 'rgba(255,255,255,0.72)', marginTop: -2 },
-  topSellerBadge: { backgroundColor: 'rgba(34, 197, 94, 0.9)', paddingHorizontal: 5, paddingVertical: 1, borderRadius: 3 },
-  topSellerBadgeTxt: { fontSize: 8, fontWeight: '700', color: P.white, letterSpacing: 0.2 },
+  gridRow: { justifyContent: 'space-between', paddingHorizontal: 16, marginBottom: GAP },
 
-  // Hero text
-  heroMeta: { flexDirection: 'row', alignItems: 'center', gap: 5, marginBottom: 4 },
-  heroMetaItem: { flexDirection: 'row', alignItems: 'center', gap: 2 },
-  heroMetaText: { fontSize: 11, fontWeight: '600', color: 'rgba(255,255,255,0.9)' },
-  heroMetaSep: { fontSize: 11, color: 'rgba(255,255,255,0.3)', fontWeight: '700' },
-  heroLocIcon: { fontSize: 12 },
-  heroRatingStar: { fontSize: 12 },
+  topBar: { position: 'absolute', top: 0, left: 0, right: 0, flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 14, paddingBottom: 8 },
+  topBarBg: { borderBottomWidth: StyleSheet.hairlineWidth },
+  roundBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(17,24,39,0.35)', alignItems: 'center', justifyContent: 'center' },
+  topTitle: { flex: 1, fontSize: 16, fontWeight: '800', textAlign: 'center' },
 
-  // Response Badge
-  responseBadge: { flexDirection: 'row', alignItems: 'center', gap: 3, backgroundColor: 'rgba(34, 197, 94, 0.12)', borderRadius: 5, paddingHorizontal: 6, paddingVertical: 3, borderWidth: 0.8, borderColor: 'rgba(34, 197, 94, 0.25)' },
-  responseBadgeIcon: { fontSize: 10 },
-  responseBadgeText: { fontSize: 9, fontWeight: '600', color: 'rgba(255,255,255,0.85)' },
-
-  // Stats - Ultra Compact Chips
-  statsRow: { flexDirection: 'row', gap: 0, alignItems: 'center', paddingHorizontal: 12, paddingVertical: 4, backgroundColor: P.white, borderTopWidth: 1, borderTopColor: 'rgba(0,0,0,0.03)', shadowColor: P.brown, shadowOpacity: 0.02, shadowOffset: { width: 0, height: 0.5 }, shadowRadius: 1, elevation: 0 },
-  statChip: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 3, paddingVertical: 4 },
-  statChipIcon: { fontSize: 13 },
-  statChipValue: { fontSize: 12, fontWeight: '900', color: P.terra, letterSpacing: -0.2 },
-  statChipDivider: { width: 1, height: 14, backgroundColor: 'rgba(107, 114, 128, 0.2)' },
-
-  // Filtres
-  filtersRow: { flexDirection: 'row', gap: 5, paddingHorizontal: 10, paddingVertical: 7, backgroundColor: P.white },
-  filterBtn: { flex: 1, paddingVertical: 6, paddingHorizontal: 6, borderRadius: 8, backgroundColor: '#F3F4F6', borderWidth: 1, borderColor: '#E8EAEF', alignItems: 'center', justifyContent: 'center', minHeight: 32 },
-  filterBtnActive: { backgroundColor: P.terra, borderColor: P.terra },
-  filterBtnIcon: { fontSize: 12, marginBottom: 0 },
-  filterBtnIconActive: { fontSize: 12 },
-  filterBtnText: { fontSize: 9, fontWeight: '700', color: P.muted, textAlign: 'center' },
-  filterBtnTextActive: { color: P.white },
-
-  // Products grid
-  productsRow: { 
-    gap: 12, 
-    paddingHorizontal: 12,
-    justifyContent: 'flex-start'
-  },
-
-  // Card structure (matching AnnounceCard from ProductsListScreen)
-  card: { 
-    backgroundColor: P.white, 
-    borderRadius: 16, 
-    overflow: 'hidden', 
-    marginBottom: 12, 
-    borderWidth: 1.5, 
-    borderColor: P.dim, 
-    shadowColor: P.brown, 
-    shadowOpacity: 0.12, 
-    shadowOffset: { width: 0, height: 4 }, 
-    shadowRadius: 12, 
-    elevation: 4,
-    flex: 1,
-    maxWidth: (Dimensions.get('window').width - 36) / 2,
-  },
-
-  // Card Image Wrapper
-  cardImgWrap: { 
-    position: 'relative', 
-    width: '100%', 
-    aspectRatio: 1, 
-    backgroundColor: P.sand,
-    overflow: 'hidden',
-  },
-  cardImg: { 
-    width: '100%', 
-    height: '100%', 
-  },
-
-  // Time Badge
-  cardTimeBadge: { 
-    position: 'absolute', 
-    top: 10, 
-    left: 10, 
-    flexDirection: 'row', 
-    gap: 4, 
-    alignItems: 'center',
-    backgroundColor: 'rgba(253,246,236,0.92)',
-    paddingVertical: 5,
-    paddingHorizontal: 8,
-    borderRadius: 8,
-  },
-  cardTimeTxt: { 
-    fontSize: 11, 
-    fontWeight: '600', 
-    color: P.charcoal,
-  },
-
-  // Fav Ghost
-  cardFavGhost: { 
-    position: 'absolute', 
-    top: 10, 
-    right: 10, 
-    width: 36, 
-    height: 36, 
-    borderRadius: 18, 
-    backgroundColor: 'rgba(253,246,236,0.92)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-
-  // Card Body
-  cardBody: { 
-    padding: 12,
-  },
-
-  // Title Row
-  cardTitleRow: { 
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginBottom: 8,
-  },
-  cardTypeGlyphWrap: { 
-    width: 24, 
-    height: 24, 
-    justifyContent: 'center', 
-    alignItems: 'center' 
-  },
-  cardTypeGlyph: { 
-    fontSize: 16, 
-  },
-  cardTitle: { 
-    fontSize: 14, 
-    fontWeight: '800', 
-    color: P.charcoal,
-    flex: 1,
-  },
-
-  // Meta Row (Location + Distance)
-  cardMetaRow: { 
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    marginBottom: 8,
-  },
-  cardLoc: { 
-    fontSize: 11, 
-    fontWeight: '600', 
-    color: P.muted,
-    flex: 1,
-  },
-  cardMetaDot: { 
-    fontSize: 11, 
-    color: P.muted,
-    fontWeight: '600',
-  },
-  cardMetaTail: { 
-    fontSize: 11, 
-    fontWeight: '600', 
-    color: P.muted,
-  },
-
-  // Price Row
-  cardPriceRow: { 
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'flex-end',
-    gap: 4,
-  },
-  cardPriceSpacer: { 
-    flex: 1,
-  },
-  cardPriceTxt: { 
-    fontSize: 14, 
-    fontWeight: '900', 
-    letterSpacing: -0.3,
-  },
-
-  // Empty state
-  emptyState: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingVertical: 80 },
-  emptyTitle: { fontSize: 18, fontWeight: '900', color: P.charcoal, marginTop: 16, marginBottom: 8 },
-  emptyText: { fontSize: 13, color: P.muted, textAlign: 'center' },
+  emptyIcon: { width: 64, height: 64, borderRadius: 22, alignItems: 'center', justifyContent: 'center', marginBottom: 12 },
+  emptyTitle: { fontSize: 17, fontWeight: '900', textAlign: 'center' },
+  emptySub: { fontSize: 13.5, textAlign: 'center', lineHeight: 19, marginTop: 6 },
+  emptyBtn: { marginTop: 18, paddingHorizontal: 22, paddingVertical: 12, borderRadius: 14 },
+  emptyBtnTxt: { color: P.white, fontSize: 14, fontWeight: '800' },
 });
-
-

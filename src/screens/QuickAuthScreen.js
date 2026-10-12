@@ -7,10 +7,10 @@
 import React, { useState, useRef, useEffect } from 'react';
 import {
   View, Text, StyleSheet, TextInput, TouchableOpacity, Image,
-  ScrollView, StatusBar, Animated, KeyboardAvoidingView,
-  Platform, ActivityIndicator, Modal, Keyboard,
+  ScrollView, Animated, Platform, ActivityIndicator, Modal, Keyboard,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { KeyboardAwareView, KeyboardAwareScrollView, FormKeyboardToolbar } from '../components/Keyboard';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useAuth } from '../contexts/AuthContext';
 import { useAppTheme } from '../contexts/ThemeContext';
@@ -347,11 +347,9 @@ export default function QuickAuthScreen({ navigation, route }) {
   };
 
   return (
-    <KeyboardAvoidingView
+    <KeyboardAwareView
       style={[s.container, { backgroundColor: theme.screen }]}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'padding'}
     >
-      <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} backgroundColor="transparent" translucent />
 
       {/* ── HEADER ── */}
       <LinearGradient
@@ -384,7 +382,7 @@ export default function QuickAuthScreen({ navigation, route }) {
       </LinearGradient>
 
       {/* ── CONTENU ── */}
-      <ScrollView
+      <KeyboardAwareScrollView
         style={{ flex: 1 }}
         contentContainerStyle={s.scrollContent}
         keyboardShouldPersistTaps="handled"
@@ -457,6 +455,8 @@ export default function QuickAuthScreen({ navigation, route }) {
             <View style={s.fieldZone}>
               <Text style={[s.fieldLabel, { color: theme.textMuted }]}>Adresse email</Text>
               <TextInput
+                returnKeyType="next"
+                onSubmitEditing={() => handleCheckPhone()}
                 style={[s.mainInput, { color: theme.inputText, borderBottomColor: accent, backgroundColor: theme.inputBg }]}
                 placeholder="exemple@email.com"
                 placeholderTextColor={theme.inputPlaceholder}
@@ -522,12 +522,14 @@ export default function QuickAuthScreen({ navigation, route }) {
                 <Text style={s.fieldLabel}>Mot de passe</Text>
                 <View style={s.pwdWrap}>
                   <TextInput
+                    returnKeyType="go"
+                    onSubmitEditing={() => handleLogin()}
                     style={[s.pwdInput, { color: theme.text, borderBottomColor: accent }]}
                     placeholder="••••••••"
                     placeholderTextColor={theme.inputPlaceholder}
                     value={password}
                     onChangeText={v => { setPassword(v); setError(''); }}
-                    secureTextEntry={!showPwd}
+                    textContentType="password" autoComplete="password" secureTextEntry={!showPwd}
                     autoCapitalize="none"
                     autoFocus
                   />
@@ -567,6 +569,8 @@ export default function QuickAuthScreen({ navigation, route }) {
               <View style={s.fieldZone}>
                 <Text style={s.fieldLabel}>Nom complet</Text>
                 <TextInput
+                  returnKeyType="go"
+                  onSubmitEditing={() => handleQuickRegister()}
                   style={[s.mainInput, { color: theme.inputText, borderBottomColor: accent, backgroundColor: theme.inputBg }]}
                   placeholder="Ex: Amadou Diallo"
                   placeholderTextColor={theme.inputPlaceholder}
@@ -588,7 +592,7 @@ export default function QuickAuthScreen({ navigation, route }) {
           )}
 
         </Animated.View>
-      </ScrollView>
+      </KeyboardAwareScrollView>
 
       {/* ── Bannière erreur — toujours visible au-dessus du footer ── */}
       {error ? (
@@ -688,7 +692,9 @@ export default function QuickAuthScreen({ navigation, route }) {
           </View>
         </View>
       </Modal>
-    </KeyboardAvoidingView>
+      {/* Barre ‹ › OK collée au clavier (le bouton du bas reste en place) */}
+      <FormKeyboardToolbar />
+    </KeyboardAwareView>
   );
 }
 

@@ -1,89 +1,128 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+// ─── Socket.IO partagé ────────────────────────────────────────────────────────
+// UNE seule connexion pour toute l'app. Avant, chaque écran appelant useSocket()
+// (onglets, liste des messages, conversation) ouvrait sa propre WebSocket :
+// jusqu'à 3 connexions par téléphone, 3 authentifications et 3× les événements.
+// L'API du hook est inchangée pour les écrans.
+
+import { useCallback, useEffect, useReducer, useState } from 'react';
 import { io } from 'socket.io-client';
 import { SOCKET_URL } from '../utils/constants';
 
-export function useSocket({ enabled = true, token } = {}) {
-  const [isConnected, setIsConnected] = useState(false);
-  const [onlineUsers, setOnlineUsers] = useState(new Set());
-  const socketRef = useRef(null);
+const RELEASE_DELAY_MS = 3000; // évite de couper/reconnecter lors d'une simple navigation
 
-  useEffect(() => {
-    if (!enabled || !token) {
-      if (socketRef.current) {
-        socketRef.current.disconnect();
-        socketRef.current = null;
-      }
-      setIsConnected(false);
-      setOnlineUsers(new Set());
-      return;
-    }
+let shared = null; // { token, socket, refs, connected, online: Set, subscribers: Set, releaseTimer }
 
+function notify(entry) {
+  entry.subscribers.forEach((fn) => fn());
+}
+
+function acquire(token) {
+  if (shared && shared.token !== token) {
+    // Changement de compte : on repart d'une connexion neuve
+    shared.socket.disconnect();
+    shared = null;
+  }
+
+  if (!shared) {
     const socket = io(SOCKET_URL, {
       auth: { token },
       transports: ['websocket', 'polling'],
       reconnection: true,
       reconnectionDelay: 1000,
-      reconnectionDelayMax: 5000,
-      reconnectionAttempts: 5,
+      reconnectionDelayMax: 10000,
+      reconnectionAttempts: Infinity, // réseaux mobiles instables : ne jamais abandonner
+      randomizationFactor: 0.5,       // étale les reconnexions après une coupure générale
     });
 
-    socketRef.current = socket;
+    const entry = {
+      token,
+      socket,
+      refs: 0,
+      connected: false,
+      online: new Set(),
+      subscribers: new Set(),
+      releaseTimer: null,
+    };
 
-    socket.on('connect', () => {
-      setIsConnected(true);
-    });
-
+    socket.on('connect', () => { entry.connected = true; notify(entry); });
     socket.on('disconnect', () => {
-      setIsConnected(false);
-      setOnlineUsers(new Set());
+      entry.connected = false;
+      entry.online = new Set();
+      notify(entry);
     });
-
     socket.on('users:online', (data) => {
-      setOnlineUsers(new Set(data?.userIds || []));
+      entry.online = new Set((data?.userIds || []).map(String));
+      notify(entry);
     });
-
     socket.on('user:online', (data) => {
-      const userId = data?.userId;
-      if (!userId) return;
-      setOnlineUsers((prev) => new Set(prev).add(userId));
+      if (!data?.userId) return;
+      entry.online = new Set(entry.online).add(String(data.userId));
+      notify(entry);
     });
-
     socket.on('user:offline', (data) => {
-      const userId = data?.userId;
-      if (!userId) return;
-      setOnlineUsers((prev) => {
-        const next = new Set(prev);
-        next.delete(userId);
-        return next;
-      });
+      if (!data?.userId) return;
+      const next = new Set(entry.online);
+      next.delete(String(data.userId));
+      entry.online = next;
+      notify(entry);
     });
 
+    shared = entry;
+  }
+
+  if (shared.releaseTimer) {
+    clearTimeout(shared.releaseTimer);
+    shared.releaseTimer = null;
+  }
+  shared.refs += 1;
+  return shared;
+}
+
+function release(entry) {
+  entry.refs -= 1;
+  if (entry.refs > 0) return;
+  entry.releaseTimer = setTimeout(() => {
+    if (entry.refs > 0) return;
+    entry.socket.disconnect();
+    if (shared === entry) shared = null;
+  }, RELEASE_DELAY_MS);
+}
+
+export function useSocket({ enabled = true, token } = {}) {
+  const [entry, setEntry] = useState(null);
+  const [, rerender] = useReducer((x) => x + 1, 0);
+
+  useEffect(() => {
+    if (!enabled || !token) {
+      setEntry(null);
+      return undefined;
+    }
+    const current = acquire(token);
+    current.subscribers.add(rerender);
+    setEntry(current);
     return () => {
-      socket.disconnect();
-      socketRef.current = null;
-      setIsConnected(false);
-      setOnlineUsers(new Set());
+      current.subscribers.delete(rerender);
+      release(current);
     };
   }, [enabled, token]);
 
-  const emit = useCallback((event, payload) => {
-    if (!socketRef.current?.connected) return;
-    socketRef.current.emit(event, payload);
-  }, []);
+  const isConnected = Boolean(entry?.connected);
+  const onlineUsers = entry?.online || EMPTY_SET;
 
+  const emit = useCallback((event, payload) => {
+    if (!entry?.socket.connected) return;
+    entry.socket.emit(event, payload);
+  }, [entry]);
+
+  // Toujours passer le handler à off() : la connexion est partagée avec les autres écrans
   const on = useCallback((event, handler) => {
-    if (!socketRef.current) return;
-    socketRef.current.on(event, handler);
-  }, []);
+    entry?.socket.on(event, handler);
+  }, [entry]);
 
   const off = useCallback((event, handler) => {
-    if (!socketRef.current) return;
-    if (handler) {
-      socketRef.current.off(event, handler);
-      return;
-    }
-    socketRef.current.off(event);
-  }, []);
+    if (!entry || !handler) return;
+    entry.socket.off(event, handler);
+  }, [entry]);
 
   const joinConversation = useCallback((conversationId) => {
     emit('conversation:join', { conversationId });
@@ -109,10 +148,10 @@ export function useSocket({ enabled = true, token } = {}) {
     emit('typing:stop', { conversationId });
   }, [emit]);
 
-  const isUserOnline = useCallback((userId) => onlineUsers.has(userId), [onlineUsers]);
+  const isUserOnline = useCallback((userId) => onlineUsers.has(String(userId)), [onlineUsers]);
 
   return {
-    socket: socketRef.current,
+    socket: entry?.socket || null,
     isConnected,
     onlineUsers,
     emit,
@@ -127,3 +166,5 @@ export function useSocket({ enabled = true, token } = {}) {
     isUserOnline,
   };
 }
+
+const EMPTY_SET = new Set();

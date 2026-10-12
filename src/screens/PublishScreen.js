@@ -4,10 +4,10 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  TextInput, Image, ActivityIndicator, KeyboardAvoidingView,
-  Platform, Dimensions, Switch, StatusBar, Modal, Keyboard
+  TextInput, Image, ActivityIndicator, Platform, Dimensions, Switch, Modal, Keyboard
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { KeyboardAwareView, KeyboardAwareScrollView, FormKeyboardToolbar } from '../components/Keyboard';
 import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
 import { useFocusEffect } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -597,12 +597,9 @@ export default function PublishScreen({ navigation, route }) {
 
   // ── Rendu principal ─────────────────────────────────────────────────────────
   return (
-    <KeyboardAvoidingView
+    <KeyboardAwareView
       style={[s.container, { backgroundColor: theme.screen }]}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      keyboardVerticalOffset={Platform.OS === 'ios' ? insets.top : 0}
     >
-      <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} backgroundColor="transparent" translucent />
 
       {/* ── HEADER ─────────────────────────────────────────────────────── */}
       <LinearGradient
@@ -662,7 +659,7 @@ export default function PublishScreen({ navigation, route }) {
       </LinearGradient>
 
       {/* ── SCROLL ─────────────────────────────────────────────────────── */}
-      <ScrollView
+      <KeyboardAwareScrollView
         ref={scrollRef}
         style={{flex:1}}
         contentContainerStyle={[s.scroll, { paddingBottom: keyboardVisible ? 20 : 24 }]}
@@ -1068,7 +1065,7 @@ export default function PublishScreen({ navigation, route }) {
             </View>
           </View>
         )}
-      </ScrollView>
+      </KeyboardAwareScrollView>
 
       {/* ── FOOTER ─────────────────────────────────────────────────────── */}
       <View
@@ -1076,7 +1073,8 @@ export default function PublishScreen({ navigation, route }) {
           s.footer,
           { backgroundColor: theme.surface, borderTopColor: theme.border },
           {
-            marginBottom: keyboardVisible ? 0 : footerOffset,
+            // Fixe : le pied de page reste derrière le clavier (pas de saut de mise en page)
+            marginBottom: footerOffset,
             paddingBottom: Math.max(insets.bottom, 12) + 4,
           },
         ]}
@@ -1114,7 +1112,8 @@ export default function PublishScreen({ navigation, route }) {
       />
 
       {/* ── LOADER FULL SCREEN BLAZING FAST RENDERING ── */}
-      <Modal visible={submitting} transparent={true} animationType="fade" statusBarTranslucent>
+      {/* Volontairement non fermable pendant l'envoi de l'annonce (retour Android ignoré) */}
+      <Modal visible={submitting} transparent={true} animationType="fade" statusBarTranslucent onRequestClose={() => {}}>
         <View style={[s.loaderOverlay, { backgroundColor: theme.overlay }]}> 
           <View style={[s.loaderBox, { backgroundColor: theme.surface }]}> 
             <View style={[s.loaderIconWrap, isService && d.loaderIconWrap]}>
@@ -1129,7 +1128,9 @@ export default function PublishScreen({ navigation, route }) {
           </View>
         </View>
       </Modal>
-    </KeyboardAvoidingView>
+      {/* Barre ‹ › OK collée au clavier (le bouton du bas reste en place) */}
+      <FormKeyboardToolbar />
+    </KeyboardAwareView>
   );
 }
 

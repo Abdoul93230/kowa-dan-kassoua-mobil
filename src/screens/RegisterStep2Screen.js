@@ -4,11 +4,11 @@
 import React, { useState, useRef, useEffect } from 'react';
 import {
   View, Text, TextInput, StyleSheet, TouchableOpacity,
-  ScrollView, KeyboardAvoidingView, Platform,
-  ActivityIndicator, Modal, FlatList, Image, Animated, StatusBar,
-  PanResponder, Dimensions,
+  ScrollView, Platform,
+  ActivityIndicator, Modal, FlatList, Image, Animated, PanResponder, Dimensions,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { KeyboardAwareView, KeyboardAwareScrollView, FormKeyboardToolbar } from '../components/Keyboard';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
@@ -368,6 +368,8 @@ export default function RegisterStep2Screen({ navigation, route }) {
       case 'businessName':
         return (
           <TextInput
+            returnKeyType="next"
+            onSubmitEditing={() => goNext()}
             style={[s.mainInput, { color: theme.text }]}
             placeholder="Ex: Boutique Amadou"
             placeholderTextColor={theme.inputPlaceholder}
@@ -419,6 +421,8 @@ export default function RegisterStep2Screen({ navigation, route }) {
             ) : (
               <View>
                 <TextInput
+                  returnKeyType="next"
+                  onSubmitEditing={() => goNext()}
                   style={[s.mainInput, { color: theme.text }]}
                   placeholder="Entrez votre localisation"
                   placeholderTextColor={theme.inputPlaceholder}
@@ -482,11 +486,9 @@ export default function RegisterStep2Screen({ navigation, route }) {
   };
 
   return (
-    <KeyboardAvoidingView
+    <KeyboardAwareView
       style={[s.container, { backgroundColor: theme.screen }]}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'padding'}
     >
-      <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} backgroundColor="transparent" translucent />
 
       {/* ── HEADER ardoise ─────────────────────────────────────────────── */}
       <LinearGradient
@@ -533,7 +535,7 @@ export default function RegisterStep2Screen({ navigation, route }) {
       </LinearGradient>
 
       {/* ── CONTENU ────────────────────────────────────────────────────── */}
-      <ScrollView
+      <KeyboardAwareScrollView
         style={{ flex: 1 }}
         contentContainerStyle={s.scroll}
         keyboardShouldPersistTaps="handled"
@@ -587,7 +589,7 @@ export default function RegisterStep2Screen({ navigation, route }) {
           )}
 
         </Animated.View>
-      </ScrollView>
+      </KeyboardAwareScrollView>
 
       {/* ── FOOTER ─────────────────────────────────────────────────────── */}
       <View style={[s.footer, { backgroundColor: theme.screen, borderTopColor: theme.divider, paddingBottom: Math.max(insets.bottom, 12) + 4 }]}>
@@ -623,8 +625,11 @@ export default function RegisterStep2Screen({ navigation, route }) {
         transparent
         animationType="slide"
         onRequestClose={() => setShowCityModal(false)}
+        statusBarTranslucent
       >
         <View style={[s.modalOverlay, { backgroundColor: theme.overlay }]}>
+          {/* Toucher à l'extérieur = fermer */}
+          <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={() => setShowCityModal(false)} accessibilityLabel="Fermer" />
           <View style={[s.modal, { backgroundColor: theme.surface }]}>
             <View style={[s.modalHandle, { backgroundColor: theme.divider }]} />
             <View style={[s.modalHead, { borderBottomColor: theme.border }]}>
@@ -667,7 +672,13 @@ export default function RegisterStep2Screen({ navigation, route }) {
         </View>
       </Modal>
       {/* ── MODAL ÉDITEUR PHOTO ────────────────────────────────────────── */}
-      <Modal visible={showEditor} transparent animationType="fade">
+      {/* Plein écran : le bouton retour Android annule le recadrage */}
+      <Modal
+        visible={showEditor}
+        transparent
+        animationType="fade"
+        onRequestClose={() => { if (!cropProcessing) { setShowEditor(false); setRawUri(null); } }}
+      >
         <View style={s.editorOverlay}>
           <LinearGradient colors={['#111827', '#1f2937']} style={s.editorContainer}>
 
@@ -769,7 +780,9 @@ export default function RegisterStep2Screen({ navigation, route }) {
         buttons={alert.buttons}
         onDismiss={() => setAlert({ ...alert, visible: false })}
       />
-    </KeyboardAvoidingView>
+      {/* Barre ‹ › OK collée au clavier (le bouton du bas reste en place) */}
+      <FormKeyboardToolbar />
+    </KeyboardAwareView>
   );
 }
 

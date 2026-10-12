@@ -1,7 +1,10 @@
 import api from './auth';
 
-export const getConversations = async () => {
-  const response = await api.get('/conversations');
+// Paginé : { limit, before } (before = updatedAt ISO de la dernière conversation chargée)
+export const getConversations = async ({ limit, before } = {}) => {
+  const response = await api.get('/conversations', {
+    params: { ...(limit ? { limit } : {}), ...(before ? { before } : {}) },
+  });
   return response.data;
 };
 
@@ -47,9 +50,11 @@ export const getUnreadCount = async () => {
   return response.data;
 };
 
-export const getMessages = async (conversationId, page = 1, limit = 50) => {
+// Pagination par curseur : sans `before`, les messages les plus récents ;
+// avec `before` (id du plus ancien message affiché), la tranche précédente.
+export const getMessages = async (conversationId, { before, limit = 40 } = {}) => {
   const response = await api.get(`/messages/${conversationId}`, {
-    params: { page, limit },
+    params: { limit, ...(before ? { before } : {}) },
   });
   return response.data;
 };
@@ -65,9 +70,10 @@ export const sendMessage = async ({ conversationId, content, type = 'text', atta
   return response.data;
 };
 
-export const sendVoiceMessage = async (conversationId, audioFileUri) => {
+export const sendVoiceMessage = async (conversationId, audioFileUri, durationMs) => {
   const formData = new FormData();
   formData.append('conversationId', conversationId);
+  if (durationMs > 0) formData.append('durationMs', String(Math.round(durationMs)));
   formData.append('audio', {
     uri: audioFileUri,
     type: 'audio/m4a',

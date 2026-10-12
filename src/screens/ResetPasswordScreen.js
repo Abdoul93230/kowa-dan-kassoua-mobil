@@ -5,10 +5,10 @@
 import React, { useState, useRef, useEffect } from 'react';
 import {
   View, Text, StyleSheet, TextInput, TouchableOpacity,
-  ScrollView, StatusBar, Animated, KeyboardAvoidingView,
-  Platform, ActivityIndicator, Image,
+  ScrollView, Animated, Platform, ActivityIndicator, Image,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { KeyboardAwareView, KeyboardAwareScrollView, FormKeyboardToolbar } from '../components/Keyboard';
 import { LinearGradient } from 'expo-linear-gradient';
 import { resetPassword } from '../api/auth';
 import { useAppTheme } from '../contexts/ThemeContext';
@@ -122,11 +122,9 @@ export default function ResetPasswordScreen({ navigation, route }) {
   if (!identifier || !code) return null;
 
   return (
-    <KeyboardAvoidingView
+    <KeyboardAwareView
       style={[s.container, { backgroundColor: theme.screen }]}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'padding'}
     >
-      <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} backgroundColor="transparent" translucent />
 
       {/* ── HEADER ardoise ── identique Login/Register ───────────────── */}
       <LinearGradient
@@ -159,7 +157,7 @@ export default function ResetPasswordScreen({ navigation, route }) {
       </LinearGradient>
 
       {/* ── CONTENU ── */}
-      <ScrollView
+      <KeyboardAwareScrollView
         style={{ flex: 1 }}
         contentContainerStyle={s.scrollContent}
         keyboardShouldPersistTaps="handled"
@@ -190,7 +188,7 @@ export default function ResetPasswordScreen({ navigation, route }) {
                 placeholderTextColor={theme.inputPlaceholder}
                 value={newPassword}
                 onChangeText={v => { setNewPassword(v); setError(''); }}
-                secureTextEntry={!showNewPwd}
+                textContentType="newPassword" autoComplete="new-password" secureTextEntry={!showNewPwd}
                 autoCapitalize="none"
                 autoFocus
                 editable={!loading}
@@ -245,12 +243,14 @@ export default function ResetPasswordScreen({ navigation, route }) {
             <Text style={[s.fieldLabel, { color: theme.textMuted }]}>Confirmer le mot de passe</Text>
             <View style={s.pwdWrap}>
               <TextInput
+                returnKeyType="go"
+                onSubmitEditing={() => handleReset()}
                 style={[s.pwdInput, { color: theme.text }]}
                 placeholder="Retapez votre mot de passe"
                 placeholderTextColor={theme.inputPlaceholder}
                 value={confirmPassword}
                 onChangeText={v => { setConfirmPassword(v); setError(''); }}
-                secureTextEntry={!showConfirmPwd}
+                textContentType="newPassword" autoComplete="new-password" secureTextEntry={!showConfirmPwd}
                 autoCapitalize="none"
                 editable={!loading}
               />
@@ -291,7 +291,7 @@ export default function ResetPasswordScreen({ navigation, route }) {
           </View>
 
         </Animated.View>
-      </ScrollView>
+      </KeyboardAwareScrollView>
 
       {/* ── FOOTER bouton ── identique tous les écrans ───────────────── */}
       <View style={[s.footer, { backgroundColor: theme.screen, borderTopColor: theme.divider, paddingBottom: Math.max(insets.bottom, 12) + 4 }]}>
@@ -322,7 +322,9 @@ export default function ResetPasswordScreen({ navigation, route }) {
         buttons={alert.buttons}
         onDismiss={() => setAlert({ ...alert, visible: false })}
       />
-    </KeyboardAvoidingView>
+      {/* Barre ‹ › OK collée au clavier (le bouton du bas reste en place) */}
+      <FormKeyboardToolbar />
+    </KeyboardAwareView>
   );
 }
 

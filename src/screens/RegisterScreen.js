@@ -4,10 +4,11 @@
 import React, { useState, useRef, useEffect } from 'react';
 import {
   View, Text, StyleSheet, TextInput, TouchableOpacity,
-  KeyboardAvoidingView, Platform, ActivityIndicator,
-  Animated, Modal, ScrollView, StatusBar, Image,
+  Platform, ActivityIndicator,
+  Animated, Modal, ScrollView, Image,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { KeyboardAwareView, KeyboardAwareScrollView, FormKeyboardToolbar } from '../components/Keyboard';
 import { LinearGradient } from 'expo-linear-gradient';
 import { sendOTP } from '../api/auth';
 import { useAppTheme } from '../contexts/ThemeContext';
@@ -300,11 +301,9 @@ export default function RegisterScreen({ navigation }) {
   const isLast = stepIndex === steps.length - 1;
 
   return (
-    <KeyboardAvoidingView
+    <KeyboardAwareView
       style={[s.container, { backgroundColor: theme.screen }]}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'padding'}
     >
-      <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} backgroundColor="transparent" translucent />
 
       {/* ── HEADER ardoise ────────────────────────────────────────────── */}
       <LinearGradient
@@ -358,7 +357,7 @@ export default function RegisterScreen({ navigation }) {
       </LinearGradient>
 
       {/* ── CONTENU SCROLLABLE (question + input) ──────────────────────── */}
-      <ScrollView
+      <KeyboardAwareScrollView
         style={{ flex: 1 }}
         contentContainerStyle={s.scrollContent}
         keyboardShouldPersistTaps="handled"
@@ -415,6 +414,8 @@ export default function RegisterScreen({ navigation }) {
           {/* Email identifiant */}
           {step.id === 'identifier' && isEmailMode && (
             <TextInput
+              returnKeyType="next"
+              onSubmitEditing={() => goNext()}
               style={[s.mainInput, { color: theme.text }]}
               placeholder="exemple@email.com"
               placeholderTextColor={theme.inputPlaceholder}
@@ -440,7 +441,7 @@ export default function RegisterScreen({ navigation }) {
                 placeholderTextColor={theme.inputPlaceholder}
                 value={step.id === 'whatsapp' ? form.whatsapp : form.phone}
                 onChangeText={v => setPhoneField(step.id === 'whatsapp' ? 'whatsapp' : 'phone', v)}
-                keyboardType="phone-pad"
+                textContentType="telephoneNumber" autoComplete="tel" keyboardType="phone-pad"
               />
             </View>
           )}
@@ -448,6 +449,8 @@ export default function RegisterScreen({ navigation }) {
           {/* Champs texte normaux */}
           {step.id === 'name' && (
             <TextInput
+              returnKeyType="next"
+              onSubmitEditing={() => goNext()}
               style={[s.mainInput, { color: theme.text }]}
               placeholder="Ex: Amadou Diallo"
               placeholderTextColor={theme.inputPlaceholder}
@@ -459,12 +462,14 @@ export default function RegisterScreen({ navigation }) {
 
           {step.id === 'email' && (
             <TextInput
+              returnKeyType="next"
+              onSubmitEditing={() => goNext()}
               style={[s.mainInput, { color: theme.text }]}
               placeholder="exemple@email.com (optionnel)"
               placeholderTextColor={theme.inputPlaceholder}
               value={form.email}
               onChangeText={v => set('email', v)}
-              keyboardType="email-address"
+              textContentType="emailAddress" autoComplete="email" keyboardType="email-address"
               autoCapitalize="none"
             />
           )}
@@ -474,12 +479,14 @@ export default function RegisterScreen({ navigation }) {
             <View>
               <View style={s.pwdWrap}>
                 <TextInput
+                  returnKeyType="next"
+                  onSubmitEditing={() => goNext()}
                   style={[s.pwdInput, { color: theme.text }]}
                   placeholder="Minimum 6 caractères"
                   placeholderTextColor={theme.inputPlaceholder}
                   value={form.password}
                   onChangeText={v => set('password', v)}
-                  secureTextEntry={!showPwd}
+                  textContentType="newPassword" autoComplete="new-password" secureTextEntry={!showPwd}
                   autoCapitalize="none"
                 />
                 <TouchableOpacity style={s.eyeBtn} onPress={() => setShowPwd(p => !p)}>
@@ -530,12 +537,14 @@ export default function RegisterScreen({ navigation }) {
           {step.id === 'confirmPassword' && (
             <View style={s.pwdWrap}>
               <TextInput
+                returnKeyType="done"
+                onSubmitEditing={() => goNext()}
                 style={[s.pwdInput, { color: theme.text }]}
                 placeholder="Retapez votre mot de passe"
                 placeholderTextColor={theme.inputPlaceholder}
                 value={form.confirmPassword}
                 onChangeText={v => set('confirmPassword', v)}
-                secureTextEntry={!showCPwd}
+                textContentType="newPassword" autoComplete="new-password" secureTextEntry={!showCPwd}
                 autoCapitalize="none"
               />
               <TouchableOpacity style={s.eyeBtn} onPress={() => setShowCPwd(p => !p)}>
@@ -565,7 +574,7 @@ export default function RegisterScreen({ navigation }) {
 
         </Animated.View>
         </View>
-      </ScrollView>
+      </KeyboardAwareScrollView>
 
       {/* ── BOUTON SUIVANT ─────────────────────────────────────────────── */}
       <View style={[s.footer, { backgroundColor: theme.screen, borderTopColor: theme.divider, paddingBottom: Math.max(insets.bottom, 12) + 4 }]}>
@@ -604,8 +613,11 @@ export default function RegisterScreen({ navigation }) {
         transparent
         animationType="slide"
         onRequestClose={() => setShowPicker(false)}
+        statusBarTranslucent
       >
         <View style={[s.modalOverlay, { backgroundColor: theme.overlay }]}>
+          {/* Toucher à l'extérieur = fermer */}
+          <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={() => setShowPicker(false)} accessibilityLabel="Fermer" />
           <View style={[s.modal, { backgroundColor: theme.surface }]}>
             <View style={[s.modalHandle, { backgroundColor: theme.divider }]} />
             <View style={[s.modalHead, { borderBottomColor: theme.border }]}>
@@ -634,7 +646,9 @@ export default function RegisterScreen({ navigation }) {
           </View>
         </View>
       </Modal>
-    </KeyboardAvoidingView>
+      {/* Barre ‹ › OK collée au clavier (le bouton du bas reste en place) */}
+      <FormKeyboardToolbar />
+    </KeyboardAwareView>
   );
 }
 

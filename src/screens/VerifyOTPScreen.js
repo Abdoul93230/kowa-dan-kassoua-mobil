@@ -4,10 +4,10 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
   View, Text, TextInput, StyleSheet, TouchableOpacity,
-  ActivityIndicator, KeyboardAvoidingView,
-  Platform, ScrollView, StatusBar, Animated,
+  ActivityIndicator, Platform, ScrollView, Animated, Keyboard,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { KeyboardAwareView, KeyboardAwareScrollView, FormKeyboardToolbar } from '../components/Keyboard';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Clipboard from 'expo-clipboard';
 import { useAuth } from '../contexts/AuthContext';
@@ -75,8 +75,22 @@ export default function VerifyOTPScreen({ navigation, route }) {
     ]).start();
   };
 
-  const handleChangeText = (text, index) => {
-    if (text && !/^\d+$/.test(text)) return;
+  const handleChangeText = (raw, index) => {
+    const digits = String(raw || '').replace(/\D/g, '');
+    if (raw && !digits) return;
+
+    // Code complet (suggestion iOS depuis le SMS, ou collage) : on remplit les 6 cases
+    if (digits.length >= 6) {
+      const full = digits.slice(0, 6);
+      setCode(full.split(''));
+      setError('');
+      Keyboard.dismiss();
+      handleVerify(full);
+      return;
+    }
+
+    // Saisie dans une case déjà remplie : on garde le dernier chiffre tapé
+    const text = digits.slice(-1);
     const newCode = [...code];
     newCode[index] = text;
     setCode(newCode);
@@ -223,11 +237,9 @@ export default function VerifyOTPScreen({ navigation, route }) {
   const isComplete = code.join('').length === 6;
 
   return (
-    <KeyboardAvoidingView
+    <KeyboardAwareView
       style={[s.container, { backgroundColor: theme.screen }]}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'padding'}
     >
-      <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} backgroundColor="transparent" translucent />
 
       {/* ── HEADER ardoise ─────────────────────────────────────────────── */}
       <LinearGradient
@@ -261,7 +273,7 @@ export default function VerifyOTPScreen({ navigation, route }) {
       </LinearGradient>
 
       {/* ── CONTENU ────────────────────────────────────────────────────── */}
-      <ScrollView
+      <KeyboardAwareScrollView
         style={{ flex: 1 }}
         contentContainerStyle={s.scroll}
         keyboardShouldPersistTaps="handled"
@@ -312,7 +324,10 @@ export default function VerifyOTPScreen({ navigation, route }) {
                 onChangeText={t => handleChangeText(t, i)}
                 onKeyPress={e => handleKeyPress(e, i)}
                 keyboardType="number-pad"
-                maxLength={1}
+                // iOS propose le code reçu par SMS ; maxLength 6 pour ne pas le tronquer
+                textContentType="oneTimeCode"
+                autoComplete="sms-otp"
+                maxLength={6}
                 selectTextOnFocus
                 editable={!loading}
               />
@@ -374,7 +389,7 @@ export default function VerifyOTPScreen({ navigation, route }) {
           </View>
 
         </Animated.View>
-      </ScrollView>
+      </KeyboardAwareScrollView>
 
       <AlertModal
         visible={alert.visible}
@@ -384,7 +399,9 @@ export default function VerifyOTPScreen({ navigation, route }) {
         buttons={alert.buttons}
         onDismiss={() => setAlert({ ...alert, visible: false })}
       />
-    </KeyboardAvoidingView>
+      {/* Barre ‹ › OK collée au clavier (le bouton du bas reste en place) */}
+      <FormKeyboardToolbar />
+    </KeyboardAwareView>
   );
 }
 
