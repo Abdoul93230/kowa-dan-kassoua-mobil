@@ -1,31 +1,36 @@
-// ─── ProfileScreen v3 ─ MarketHub Niger ──────────────────────────────────────
-// Panneaux (apparence, édition) : CustomBottomSheet natif.
+// ─── ProfileScreen v4 ─ TakTak ───────────────────────────────────────────────
+// En-tête immersif (anneau lumineux animé autour de l'avatar), statistiques,
+// jauge de complétion du profil, éditeur photo dédié (caméra / galerie),
+// formulaire d'édition repensé. Panneaux : CustomBottomSheet.
 // Mot de passe : page dédiée SecurityScreen (navigation 'Security').
 
-import React, { useState, useRef, useEffect, useMemo } from 'react';
+import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   TouchableOpacity,
+  Pressable,
   ScrollView,
-  Platform,
   Animated,
+  Easing,
   ActivityIndicator,
-  TextInput,
-  FlatList,
+  StatusBar,
 } from 'react-native';
 import { Image } from 'expo-image';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
+import { Ionicons } from '@expo/vector-icons';
+import * as Haptics from 'expo-haptics';
 import * as ImagePicker from 'expo-image-picker';
+import { useFocusEffect, useIsFocused } from '@react-navigation/native';
 import { useAuth } from '../contexts/AuthContext';
 import { useAppTheme } from '../contexts/ThemeContext';
 import { MOBILE_COLORS as P } from '../theme/colors';
 import AlertModal from '../components/AlertModal';
 import CustomBottomSheet, { SheetTextInput } from '../components/CustomBottomSheet';
-import { updateProfile } from '../api/auth';
-import { compressToBase64 } from '../api/products';
+import { updateProfile, apiClient } from '../api/auth';
+import { compressToBase64, getMyStats } from '../api/products';
 import { doneAccessory } from '../components/Keyboard';
 import { sizedImage } from '../utils/format';
 
@@ -45,29 +50,74 @@ const COUNTRIES = [
   { code: 'BJ', name: 'Bénin',         dialCode: '+229', flag: '🇧🇯' },
 ];
 
+const THEME_OPTIONS = [
+  { value: 'system', label: 'Auto',   icon: 'phone-portrait-outline' },
+  { value: 'light',  label: 'Clair',  icon: 'sunny-outline' },
+  { value: 'dark',   label: 'Sombre', icon: 'moon-outline' },
+];
+
+const BIO_MAX = 1000;
+const HERO_COLORS = ['#060a14', '#10172b', '#2a1307'];
+const RING_COLORS = [P.terra, P.amber, '#8b5cf6', '#22d3ee', P.terra];
+
+const tap = () => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+const success = () => Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+
+const compact = (n) => {
+  const v = Number(n) || 0;
+  if (v >= 1e6) return `${(v / 1e6).toFixed(1).replace('.0', '')}M`;
+  if (v >= 1e3) return `${(v / 1e3).toFixed(1).replace('.0', '')}k`;
+  return String(v);
+};
+
+const initialsOf = (name) => {
+  if (!name) return '?';
+  const n = name.trim().split(/\s+/);
+  return n.length >= 2 ? (n[0][0] + n[n.length - 1][0]).toUpperCase() : name.substring(0, 2).toUpperCase();
+};
+
+const splitWhatsapp = (raw) => {
+  if (!raw) return { country: COUNTRIES[0], number: '' };
+  const m = COUNTRIES.find((c) => raw.startsWith(c.dialCode));
+  return m ? { country: m, number: raw.replace(m.dialCode, '').trim() } : { country: COUNTRIES[0], number: raw };
+};
+
 // ─────────────────────────────────────────────────────────────────────────────
 export default function ProfileScreen({ navigation }) {
   const s = useProfileStyles();
-  const { user, isAuthenticated, logout, updateUserProfile } = useAuth();
+  const { user, isAuthenticated, logout, updateUserProfile, refreshUserProfile } = useAuth();
   const { isDark, theme, themePreference, setThemePreference } = useAppTheme();
   const insets = useSafeAreaInsets();
+  const focused = useIsFocused();
+  // Barre d'état claire sur l'en-tête sombre, foncée une fois l'en-tête dépassé (mode clair)
+  const [pastHero, setPastHero] = useState(false);
 
   const [alert, setAlert] = useState({
     visible: false, type: 'info', title: '', message: '',
     buttons: [{ text: 'OK', onPress: () => {} }],
   });
 
-  // Sheets visibility
-  const [editSheet,     setEditSheet]     = useState(false);
-  const [citySheet,     setCitySheet]     = useState(false);
-  const [countrySheet,  setCountrySheet]  = useState(false);
-  const [themeSheet,    setThemeSheet]    = useState(false);
+  // Panneaux
+  const [editSheet,    setEditSheet]    = useState(false);
+  const [photoSheet,   setPhotoSheet]   = useState(false);
+  const [citySheet,    setCitySheet]    = useState(false);
+  const [countrySheet, setCountrySheet] = useState(false);
 
-  // Loaders
-  const [loggingOut,       setLoggingOut]       = useState(false);
-  const [savingProfile,    setSavingProfile]    = useState(false);
+  // Chargements
+  const [loggingOut,    setLoggingOut]    = useState(false);
+  const [savingProfile, setSavingProfile] = useState(false);
+  const [savingAvatar,  setSavingAvatar]  = useState(false);
+  const [picking,       setPicking]       = useState(false);
 
-  // Edit profile fields
+  // Statistiques de mes annonces
+  const [stats, setStats] = useState(null);
+  // Note et nombre d'avis, calculés comme sur le profil public
+  const [rep, setRep] = useState(null);
+
+  // Photo choisie dans l'éditeur photo (pas encore enregistrée)
+  const [pendingAvatar, setPendingAvatar] = useState(null);
+
+  // Champs du formulaire
   const [editName,         setEditName]         = useState('');
   const [editCity,         setEditCity]         = useState('');
   const [editAvatarUri,    setEditAvatarUri]    = useState(null);
@@ -78,13 +128,20 @@ export default function ProfileScreen({ navigation }) {
   const [editBusinessName, setEditBusinessName] = useState('');
   const [whatsappCountry,  setWhatsappCountry]  = useState(COUNTRIES[0]);
 
-  const headerAnim = useRef(new Animated.Value(0)).current;
+  const enter = useRef(new Animated.Value(0)).current;
+  const glow = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
-    Animated.timing(headerAnim, { toValue: 1, duration: 600, useNativeDriver: true }).start();
+    Animated.timing(enter, { toValue: 1, duration: 650, easing: Easing.out(Easing.cubic), useNativeDriver: true }).start();
+    const loop = Animated.loop(Animated.sequence([
+      Animated.timing(glow, { toValue: 1, duration: 3200, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
+      Animated.timing(glow, { toValue: 0, duration: 3200, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
+    ]));
+    loop.start();
+    return () => loop.stop();
   }, []);
 
-  useEffect(() => {
+  const fillFromUser = useCallback(() => {
     if (!user) return;
     setEditName(user.name || '');
     setEditCity(user.city || user.location || '');
@@ -93,23 +150,76 @@ export default function ProfileScreen({ navigation }) {
     setEditDescription(user.description || '');
     setEditBusinessType(user.businessType || 'individual');
     setEditBusinessName(user.businessName || '');
-    const raw = user?.contactInfo?.whatsapp || '';
-    if (raw) {
-      const m = COUNTRIES.find(c => raw.startsWith(c.dialCode));
-      if (m) { setWhatsappCountry(m); setEditWhatsapp(raw.replace(m.dialCode, '').trim()); }
-      else    { setEditWhatsapp(raw); }
-    }
+    const { country, number } = splitWhatsapp(user?.contactInfo?.whatsapp || '');
+    setWhatsappCountry(country);
+    setEditWhatsapp(number);
   }, [user]);
+
+  useEffect(() => { fillFromUser(); }, [fillFromUser]);
+
+  useFocusEffect(useCallback(() => {
+    if (!isAuthenticated) return undefined;
+    let alive = true;
+    refreshUserProfile?.();
+    getMyStats().then((res) => { if (alive && res?.data) setStats(res.data); }).catch(() => {});
+    const uid = user?.id || user?._id;
+    if (uid) {
+      apiClient.get(`/auth/seller/${uid}`)
+        .then((res) => { const d = res.data?.data; if (alive && d) setRep({ rating: Number(d.rating) || 0, reviews: Number(d.totalReviews) || 0 }); })
+        .catch(() => {});
+    }
+    return () => { alive = false; };
+  }, [isAuthenticated, user?.id, user?._id]));
 
   const showAlert = (type, title, message, buttons) =>
     setAlert({ visible: true, type, title, message, buttons: buttons || [{ text: 'OK', onPress: () => {} }] });
 
+  // ── Complétion du profil ─────────────────────────────────────────────────
+  const completion = useMemo(() => {
+    if (!user) return { percent: 0, missing: [] };
+    const checks = [
+      { key: 'photo', label: 'Photo', ok: !!user.avatar },
+      { key: 'name', label: 'Nom', ok: !!user.name?.trim() },
+      { key: 'city', label: 'Ville', ok: !!(user.city || user.location) },
+      { key: 'email', label: 'E-mail', ok: !!user.email },
+      { key: 'bio', label: 'Bio', ok: !!user.description?.trim() },
+      ...(user.businessType === 'professional' ? [{ key: 'biz', label: 'Entreprise', ok: !!user.businessName?.trim() }] : []),
+    ];
+    const done = checks.filter((c) => c.ok).length;
+    return { percent: Math.round((done / checks.length) * 100), missing: checks.filter((c) => !c.ok) };
+  }, [user]);
+
+  const progress = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    Animated.timing(progress, { toValue: completion.percent, duration: 900, delay: 250, easing: Easing.out(Easing.cubic), useNativeDriver: false }).start();
+  }, [completion.percent]);
+
+  // ── Formulaire : y a-t-il des modifications ? ────────────────────────────
+  const isDirty = useMemo(() => {
+    if (!user) return false;
+    const { country, number } = splitWhatsapp(user?.contactInfo?.whatsapp || '');
+    return (
+      editName.trim() !== (user.name || '') ||
+      editCity.trim() !== (user.city || user.location || '') ||
+      editAvatarUri !== (user.avatar || null) ||
+      editEmail.trim() !== (user.email || '') ||
+      editDescription.trim() !== (user.description || '') ||
+      editBusinessType !== (user.businessType || 'individual') ||
+      editBusinessName.trim() !== (user.businessName || '') ||
+      editWhatsapp.trim() !== number ||
+      (editWhatsapp.trim() && whatsappCountry.code !== country.code)
+    );
+  }, [user, editName, editCity, editAvatarUri, editEmail, editDescription, editBusinessType, editBusinessName, editWhatsapp, whatsappCountry]);
+
   // ── Handlers ─────────────────────────────────────────────────────────────
+  const openEdit = () => { tap(); fillFromUser(); setEditSheet(true); };
+  const openPhoto = () => { tap(); setPendingAvatar(null); setPhotoSheet(true); };
+
   const handleLogout = () => {
     showAlert('warning', 'Se déconnecter', 'Êtes-vous sûr de vouloir vous déconnecter ?', [
       { text: 'Annuler', onPress: () => {} },
       { text: 'Déconnecter', onPress: async () => {
-        setAlert(a => ({ ...a, visible: false }));
+        setAlert((a) => ({ ...a, visible: false }));
         setLoggingOut(true);
         try { await logout(); navigation.navigate('Home'); }
         catch (e) { setLoggingOut(false); showAlert('error', 'Erreur', e.message); }
@@ -117,457 +227,660 @@ export default function ProfileScreen({ navigation }) {
     ]);
   };
 
+  // Ouvre la caméra ou la galerie, recadre en carré et compresse (512 px suffisent pour un avatar)
+  const pickImage = async (source) => {
+    tap();
+    try {
+      const perm = source === 'camera'
+        ? await ImagePicker.requestCameraPermissionsAsync()
+        : await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (perm.status !== 'granted') {
+        showAlert('error', 'Permission refusée', source === 'camera'
+          ? 'Autorisez l\'accès à l\'appareil photo dans les réglages.'
+          : 'Autorisez l\'accès à vos photos dans les réglages.');
+        return null;
+      }
+      const options = { mediaTypes: ['images'], allowsEditing: true, aspect: [1, 1], quality: 1 };
+      const res = source === 'camera'
+        ? await ImagePicker.launchCameraAsync(options)
+        : await ImagePicker.launchImageLibraryAsync(options);
+      if (res.canceled || !res.assets?.[0]) return null;
+      setPicking(true);
+      try { return await compressToBase64(res.assets[0].uri, 512); }
+      catch { return res.assets[0].uri; }
+      finally { setPicking(false); }
+    } catch {
+      showAlert('error', 'Erreur', 'Impossible de récupérer la photo');
+      return null;
+    }
+  };
+
+  const handleSaveAvatar = async () => {
+    if (!pendingAvatar) return;
+    setSavingAvatar(true);
+    try {
+      const res = await updateProfile({ avatar: pendingAvatar });
+      if (res.success) {
+        await updateUserProfile(res?.data?.user || {});
+        success();
+        setPhotoSheet(false);
+        setPendingAvatar(null);
+      }
+    } catch (e) {
+      showAlert('error', 'Erreur', e.message || 'Impossible de mettre à jour la photo');
+    } finally { setSavingAvatar(false); }
+  };
+
   const handleSaveProfile = async () => {
-    if (!editName.trim()) { showAlert('error', 'Erreur', 'Le nom est requis'); return; }
+    if (!editName.trim()) { showAlert('error', 'Nom requis', 'Indiquez votre nom complet.'); return; }
+    if (editBusinessType === 'professional' && !editBusinessName.trim()) {
+      showAlert('error', 'Nom de l\'entreprise', 'Indiquez le nom de votre boutique ou entreprise.');
+      return;
+    }
     setSavingProfile(true);
     try {
       const fullWA = editWhatsapp.trim() ? `${whatsappCountry.dialCode} ${editWhatsapp.trim()}` : undefined;
       const data = {
         name: editName.trim(), city: editCity.trim(),
-        avatar: editAvatarUri || null, email: editEmail.trim() || undefined,
-        description: editDescription.trim() || undefined,
+        email: editEmail.trim() || undefined,
+        description: editDescription.trim(),
         businessType: editBusinessType, whatsapp: fullWA,
-        ...(editBusinessType === 'professional' ? { businessName: editBusinessName.trim() || undefined } : {}),
+        // La photo n'est renvoyée que si elle a changé (évite de ré-uploader l'actuelle)
+        ...(editAvatarUri && editAvatarUri !== user?.avatar ? { avatar: editAvatarUri } : {}),
+        ...(editBusinessType === 'professional' ? { businessName: editBusinessName.trim() } : {}),
       };
       const res = await updateProfile(data);
       if (res.success) {
         await updateUserProfile(res?.data?.user || {});
+        success();
         setEditSheet(false);
-        showAlert('success', 'Profil mis à jour', 'Informations sauvegardées avec succès !');
+        showAlert('success', 'Profil mis à jour', 'Vos informations ont été enregistrées.');
       }
     } catch (e) {
       showAlert('error', 'Erreur', e.message || 'Impossible de mettre à jour le profil');
     } finally { setSavingProfile(false); }
   };
 
-  const handleSelectImage = async () => {
-    try {
-      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (perm.status !== 'granted') { showAlert('error', 'Permission refusée', 'Autorisez l\'accès à vos photos'); return; }
-      const res = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        allowsEditing: true, aspect: [1, 1], quality: 1,
-      });
-      if (!res.canceled && res.assets?.[0]) {
-        const p = res.assets[0];
-        // Un avatar s'affiche en ≤ 120 px : 512 px suffisent (quelques dizaines de Ko au lieu de plusieurs Mo)
-        try {
-          setEditAvatarUri(await compressToBase64(p.uri, 512));
-        } catch {
-          setEditAvatarUri(p.uri);
-        }
-      }
-    } catch { showAlert('error', 'Erreur', 'Impossible de sélectionner l\'image'); }
-  };
-
-  const getInitials = () => {
-    if (!user?.name) return '?';
-    const n = user.name.split(' ');
-    return n.length >= 2 ? (n[0][0] + n[n.length - 1][0]).toUpperCase() : user.name.substring(0, 2).toUpperCase();
-  };
-
   // ─────────────────────────────────────────────────────────────────────────
-  // NON-AUTH
+  // NON CONNECTÉ
   // ─────────────────────────────────────────────────────────────────────────
   if (!isAuthenticated) {
     return (
       <View style={[s.container, { backgroundColor: theme.screen }]}>
-        <LinearGradient colors={isDark ? [P.brown, P.charcoal] : theme.header} style={[s.header, { paddingTop: (insets.top || 0) + 6 }]}>
-          <View style={s.headerAccent} />
-          <Text style={[s.headerTitle, { color: isDark ? P.white : theme.text }]}>Profil</Text>
-        </LinearGradient>
-        <ScrollView style={s.content}>
-          <View style={s.notAuthBox}>
-            <Text style={s.notAuthEmoji}>👤</Text>
-            <Text style={[s.notAuthTitle, { color: theme.text }]}>Connectez-vous à votre compte</Text>
-            <Text style={[s.notAuthText, { color: theme.textMuted }]}>Accédez à vos annonces, favoris, messages et bien plus</Text>
-            <View style={{ width: '100%', gap: 12 }}>
-              <TouchableOpacity
-                style={s.loginBtn}
-                onPress={() => navigation.navigate('QuickAuth', { pendingAction: { type: 'profile' }, returnScreen: 'Profile' })}
-                activeOpacity={0.88}
-              >
-                <LinearGradient colors={[P.terra, P.orange700]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={s.loginBtnGrad}>
-                  <Text style={s.loginBtnTxt}>Se connecter</Text>
-                </LinearGradient>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[s.registerBtn, { backgroundColor: theme.surface }]}
-                onPress={() => navigation.navigate('QuickAuth', { pendingAction: { type: 'profile' }, returnScreen: 'Profile' })}
-                activeOpacity={0.88}
-              >
-                <Text style={s.registerBtnTxt}>Créer un compte</Text>
-              </TouchableOpacity>
+      {/* En-tête sombre : icônes de la barre d'état en clair tant que l'écran est affiché */}
+      {focused ? <StatusBar barStyle="light-content" backgroundColor="transparent" translucent /> : null}
+        <LinearGradient colors={HERO_COLORS} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={[s.guestHero, { paddingTop: (insets.top || 0) + 40 }]}>
+          <HeroBackdrop glow={glow} />
+          <View style={s.guestIconRing}>
+            <LinearGradient colors={RING_COLORS} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={StyleSheet.absoluteFill} />
+            <View style={s.guestIconInner}>
+              <Ionicons name="person-outline" size={40} color={P.white} />
             </View>
           </View>
-        </ScrollView>
+          <Text style={s.guestTitle}>Votre espace TakTak</Text>
+          <Text style={s.guestText}>Connectez-vous pour gérer vos annonces, vos favoris et vos messages.</Text>
+        </LinearGradient>
+        <View style={s.guestActions}>
+          <TouchableOpacity
+            style={s.primaryBtn}
+            onPress={() => navigation.navigate('QuickAuth', { pendingAction: { type: 'profile' }, returnScreen: 'Profile' })}
+            activeOpacity={0.88}
+          >
+            <LinearGradient colors={[P.orange500, P.orange700]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={s.primaryBtnGrad}>
+              <Ionicons name="log-in-outline" size={20} color={P.white} />
+              <Text style={s.primaryBtnTxt}>Se connecter</Text>
+            </LinearGradient>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={s.ghostBtn}
+            onPress={() => navigation.navigate('QuickAuth', { pendingAction: { type: 'profile' }, returnScreen: 'Profile' })}
+            activeOpacity={0.85}
+          >
+            <Text style={s.ghostBtnTxt}>Créer un compte</Text>
+          </TouchableOpacity>
+        </View>
       </View>
     );
   }
 
   // ─────────────────────────────────────────────────────────────────────────
-  // RENDER PRINCIPAL
+  // RENDU PRINCIPAL
   // ─────────────────────────────────────────────────────────────────────────
+  const isPro = user?.businessType === 'professional';
+  const city = user?.city || user?.location;
+  const rating = rep ? rep.rating : Number(user?.sellerStats?.rating) || 0;
+  const reviews = rep ? rep.reviews : Number(user?.sellerStats?.totalReviews) || 0;
+  const userId = user?.id || user?._id;
+  const fade = (dy) => ({
+    opacity: enter,
+    transform: [{ translateY: enter.interpolate({ inputRange: [0, 1], outputRange: [dy, 0] }) }],
+  });
+
   return (
     <View style={[s.container, { backgroundColor: theme.screen }]}>
+      {/* En-tête sombre : icônes de la barre d'état en clair tant que l'écran est affiché */}
+      {focused ? <StatusBar barStyle={pastHero && !isDark ? 'dark-content' : 'light-content'} backgroundColor="transparent" translucent /> : null}
+      <ScrollView
+        contentContainerStyle={{ paddingBottom: Math.max(insets.bottom, 12) + 110 }}
+        showsVerticalScrollIndicator={false}
+        scrollEventThrottle={32}
+        onScroll={(e) => {
+          const past = e.nativeEvent.contentOffset.y > 300;
+          if (past !== pastHero) setPastHero(past);
+        }}
+      >
+        {/* ── HERO ─────────────────────────────────────────────────────── */}
+        <LinearGradient colors={HERO_COLORS} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={[s.hero, { paddingTop: (insets.top || 0) + 10 }]}>
+          <HeroBackdrop glow={glow} />
 
-      {/* Bannière MDP */}
-      {user?.needsPasswordChange && (
-        <View style={[s.pwdBanner, { paddingTop: (insets.top || 0) + 12 }]}>
-          <Text style={s.pwdBannerTxt}>🔒 Personnalisez votre mot de passe pour sécuriser votre compte.</Text>
-          <TouchableOpacity onPress={() => navigation.navigate('Security')} style={s.pwdBannerBtn}>
-            <Text style={s.pwdBannerBtnTxt}>Mettre à jour</Text>
-          </TouchableOpacity>
-        </View>
-      )}
+          <View style={s.heroTop}>
+            <Text style={s.heroKicker}>MON PROFIL</Text>
+            <TouchableOpacity style={s.heroIconBtn} onPress={openEdit} activeOpacity={0.8} hitSlop={8}>
+              <Ionicons name="create-outline" size={19} color={P.white} />
+            </TouchableOpacity>
+          </View>
 
-      {/* Header gradient */}
-      <LinearGradient colors={isDark ? [P.brown, P.charcoal] : theme.header} style={[s.header, { paddingTop: (insets.top || 0) + 6 }]}>
-        <View style={s.headerAccent} />
-        <Animated.View style={{ opacity: headerAnim, transform: [{ translateY: headerAnim.interpolate({ inputRange: [0,1], outputRange: [-10, 0] }) }] }}>
-          <Text style={[s.headerTitle, { color: isDark ? P.white : theme.text }]}>Mon Profil</Text>
+          <Animated.View style={[s.heroCenter, { opacity: enter, transform: [{ scale: enter.interpolate({ inputRange: [0, 1], outputRange: [0.85, 1] }) }] }]}>
+            <AvatarRing uri={user?.avatar ? sizedImage(user.avatar, 240) : null} name={user?.name} size={108} gap="#0b1120" onPress={openPhoto}>
+              <View style={s.cameraBadge}>
+                <LinearGradient colors={[P.orange500, P.orange700]} style={StyleSheet.absoluteFill} />
+                <Ionicons name="camera" size={15} color={P.white} />
+              </View>
+            </AvatarRing>
+          </Animated.View>
+
+          <Animated.View style={[s.heroInfo, fade(12)]}>
+            <View style={s.nameRow}>
+              <Text style={s.heroName} numberOfLines={1}>{user?.name || 'Utilisateur'}</Text>
+              {user?.verified ? <Ionicons name="checkmark-circle" size={20} color="#38bdf8" /> : null}
+            </View>
+            {isPro && user?.businessName ? <Text style={s.heroBiz} numberOfLines={1}>{user.businessName}</Text> : null}
+            <Text style={s.heroSub} numberOfLines={1}>{user?.email || user?.phone || ''}</Text>
+
+            <View style={s.chipsRow}>
+              <HeroChip icon={isPro ? 'briefcase-outline' : 'person-outline'} label={isPro ? 'Professionnel' : 'Particulier'} accent />
+              {city ? <HeroChip icon="location-outline" label={city} /> : null}
+              {user?.memberSince ? <HeroChip icon="time-outline" label={`Depuis ${user.memberSince}`} /> : null}
+            </View>
+          </Animated.View>
+        </LinearGradient>
+
+        {/* ── STATISTIQUES ─────────────────────────────────────────────── */}
+        <Animated.View style={[s.statsCard, fade(20)]}>
+          <Stat value={stats ? compact(stats.totalActive) : '—'} label="En ligne" icon="radio-button-on" tint={P.green} onPress={() => navigation.navigate('MyListingsTab')} />
+          <View style={s.statDivider} />
+          <Stat value={stats ? compact(stats.totalViews) : '—'} label="Vues" icon="eye-outline" tint="#38bdf8" onPress={() => navigation.navigate('MyListingsTab')} />
+          <View style={s.statDivider} />
+          <Stat value={stats ? compact(stats.totalFavorites) : '—'} label="Favoris" icon="heart-outline" tint={P.error} onPress={() => navigation.navigate('MyListingsTab')} />
+          <View style={s.statDivider} />
+          <Stat value={reviews ? rating.toFixed(1) : '—'} label={reviews ? `${reviews} avis` : 'Avis'} icon="star" tint={P.gold} />
         </Animated.View>
-      </LinearGradient>
 
-      {/* Main scroll */}
-      <ScrollView style={s.content} contentContainerStyle={[s.scrollContent, { paddingBottom: Math.max(insets.bottom, 12) + 100 }]} showsVerticalScrollIndicator={false}>
+        <View style={s.body}>
+          {/* Mot de passe à personnaliser */}
+          {user?.needsPasswordChange ? (
+            <TouchableOpacity style={s.alertCard} onPress={() => navigation.navigate('Security')} activeOpacity={0.85}>
+              <View style={[s.alertIcon, { backgroundColor: P.gold + '22' }]}>
+                <Ionicons name="shield-half-outline" size={20} color={P.gold} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={s.alertTitle}>Sécurisez votre compte</Text>
+                <Text style={s.alertSub}>Choisissez votre propre mot de passe.</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={18} color={P.gold} />
+            </TouchableOpacity>
+          ) : null}
 
-        {/* Profile card */}
-        {/* Carte de profil : fond plein suivant le thème (le flou iOS sans teinte
-            rendait les textes illisibles selon le mode) */}
-        <Animated.View style={[s.profileCard, { opacity: headerAnim, transform: [{ scale: headerAnim.interpolate({ inputRange: [0,1], outputRange: [0.9, 1] }) }] }]}>
-          <View style={[s.blurWrapper, { backgroundColor: theme.surface, borderColor: theme.border }, !isDark && s.cardShadow]}>
-            <View style={s.avatarSection}>
-              <View style={s.avatarWrap}>
-                {user?.avatar
-                  ? <Image source={{ uri: sizedImage(user.avatar, 120) }} style={[s.avatarImg, { backgroundColor: theme.surfaceAlt }]} />
-                  : <View style={[s.avatarImg, s.avatarFallback]}><Text style={s.avatarInitials}>{getInitials()}</Text></View>
-                }
-                {user?.verified ? (
-                  <View style={[s.verifiedMiniBadge, { borderColor: theme.surface }]}>
-                    <Text style={s.verifiedMiniTxt}>✓</Text>
+          {/* Complétion du profil */}
+          {completion.percent < 100 ? (
+            <Animated.View style={fade(24)}>
+              <TouchableOpacity
+                style={s.completeCard}
+                activeOpacity={0.88}
+                onPress={completion.missing[0]?.key === 'photo' ? openPhoto : openEdit}
+              >
+                <View style={s.completeHead}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={s.completeTitle}>Profil complété à {completion.percent} %</Text>
+                    <Text style={s.completeSub} numberOfLines={1}>
+                      Ajoutez : {completion.missing.map((m) => m.label).join(' · ')}
+                    </Text>
                   </View>
-                ) : null}
-                <TouchableOpacity style={[s.avatarEdit, { borderColor: theme.surface }]} onPress={() => setEditSheet(true)} activeOpacity={0.75}>
-                  <Text style={{ fontSize: 15 }}>✏️</Text>
-                </TouchableOpacity>
-              </View>
-              <View style={{ alignItems: 'center' }}>
-                <Text style={[s.userName, { color: theme.text }]}>{user?.name || 'Utilisateur'}</Text>
-                <Text style={[s.userEmail, { color: theme.textMuted }]}>{user?.email || user?.phone || ''}</Text>
-              </View>
-            </View>
-
-            {/* Infos + bouton éditer */}
-            <View style={[s.infoSection, { borderTopColor: theme.border }]}>
-              <View style={s.infoSectionHead}>
-                <Text style={[s.sectionLabel, { color: theme.textMuted }]}>Détails du compte</Text>
-                <TouchableOpacity
-                  onPress={() => setEditSheet(true)}
-                  style={[s.editChip, isDark && { backgroundColor: 'rgba(236,90,19,0.16)', borderColor: P.amber }]}
-                  activeOpacity={0.7}
-                >
-                  <Text style={s.editChipIcon}>✏️</Text>
-                  <Text style={[s.editChipTxt, isDark && { color: P.amber }]}>Éditer</Text>
-                </TouchableOpacity>
-              </View>
-              {user?.phone ? <InfoRow icon="📞" label="Téléphone" value={user.phone} /> : null}
-              {(user?.city || user?.location) ? <InfoRow icon="📍" label="Ville" value={user?.city || user?.location} /> : null}
-              <InfoRow
-                icon="🏢"
-                label="Type de compte"
-                value={user?.businessType === 'professional'
-                  ? `Professionnel${user?.businessName ? ` · ${user.businessName}` : ''}`
-                  : 'Particulier'}
-              />
-            </View>
-          </View>
-        </Animated.View>
-
-        {/* Menu items */}
-        <View style={s.menuSection}>
-          <MenuItem icon="🔐" label="Sécurité et Connexion" onPress={() => navigation.navigate('Security')} />
-          <MenuItem icon="🌗" label={`Apparence : ${themePreference === 'system' ? 'Système' : themePreference === 'dark' ? 'Sombre' : 'Clair'}`} onPress={() => setThemeSheet(true)} />
-          <MenuItem icon="📦" label="Mes annonces"          onPress={() => navigation.navigate('MyListingsTab')} />
-        </View>
-
-        {/* Logout */}
-        <TouchableOpacity style={[s.logoutBtn, { backgroundColor: theme.surface }, isDark && { elevation: 0 }]} onPress={handleLogout} disabled={loggingOut} activeOpacity={0.85}>
-          <View style={s.logoutAccent} />
-          <View style={s.logoutRow}>
-            {loggingOut ? (
-              <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', flex: 1, gap: 10 }}>
-                <ActivityIndicator color={P.error} size="small" />
-                <Text style={s.logoutTxt}>Déconnexion...</Text>
-              </View>
-            ) : (
-              <>
-                <View style={s.logoutIconWrap}><Text style={{ fontSize: 17, color: P.error }}>⎋</Text></View>
-                <View style={{ flex: 1 }}>
-                  <Text style={s.logoutTxt}>Se déconnecter</Text>
-                  <Text style={[s.logoutHint, { color: theme.textSoft }]}>Fermer votre session sur cet appareil</Text>
+                  <View style={s.completeCta}>
+                    <Text style={s.completeCtaTxt}>Compléter</Text>
+                    <Ionicons name="arrow-forward" size={14} color={P.terra} />
+                  </View>
                 </View>
-                <Text style={{ fontSize: 22, color: P.error }}>›</Text>
-              </>
-            )}
-          </View>
-        </TouchableOpacity>
+                <View style={s.track}>
+                  <Animated.View style={[s.trackFill, { width: progress.interpolate({ inputRange: [0, 100], outputRange: ['0%', '100%'] }) }]}>
+                    <LinearGradient colors={[P.terra, P.amber, '#8b5cf6']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={StyleSheet.absoluteFill} />
+                  </Animated.View>
+                </View>
+                <Text style={s.completeHint}>Un profil complet inspire confiance aux acheteurs.</Text>
+              </TouchableOpacity>
+            </Animated.View>
+          ) : null}
 
+          {/* Bio */}
+          {user?.description ? (
+            <View style={s.bioCard}>
+              <Ionicons name="chatbox-ellipses-outline" size={16} color={theme.iconMuted} />
+              <Text style={s.bioTxt} numberOfLines={4}>{user.description}</Text>
+            </View>
+          ) : null}
+
+          {/* Activité */}
+          <Text style={s.groupLabel}>Activité</Text>
+          <View style={s.group}>
+            <Row icon="cube-outline" tint={P.terra} label="Mes annonces"
+              sub={stats ? `${stats.totalAll || 0} au total · ${stats.totalSold || 0} vendue${(stats.totalSold || 0) > 1 ? 's' : ''}` : 'Gérer, modifier, marquer vendu'}
+              onPress={() => navigation.navigate('MyListingsTab')} />
+            {userId ? (
+              <Row icon="eye-outline" tint="#38bdf8" label="Voir mon profil public" sub="Tel que les acheteurs le voient"
+                onPress={() => navigation.navigate('SellerProfile', { sellerId: userId })} />
+            ) : null}
+            <Row icon="heart-outline" tint={P.error} label="Mes favoris" sub="Les annonces que vous suivez"
+              onPress={() => navigation.navigate('Favorites')} last />
+          </View>
+
+          {/* Compte */}
+          <Text style={s.groupLabel}>Compte</Text>
+          <View style={s.group}>
+            <Row icon="person-circle-outline" tint="#8b5cf6" label="Informations personnelles" sub="Nom, ville, e-mail, bio" onPress={openEdit} />
+            <Row icon="image-outline" tint={P.amber} label="Photo de profil" sub={user?.avatar ? 'Changer votre photo' : 'Ajouter une photo'} onPress={openPhoto} />
+            <Row icon="lock-closed-outline" tint={P.green} label="Sécurité et connexion" sub="Mot de passe, appareils connectés"
+              onPress={() => navigation.navigate('Security')}
+              badge={user?.needsPasswordChange ? 'Action requise' : null} last />
+          </View>
+
+          {/* Apparence */}
+          <Text style={s.groupLabel}>Apparence</Text>
+          <View style={s.segment}>
+            {THEME_OPTIONS.map((o) => {
+              const active = themePreference === o.value;
+              return (
+                <Pressable key={o.value} style={s.segmentItem} onPress={() => { tap(); setThemePreference(o.value); }}>
+                  {active ? (
+                    <LinearGradient colors={[P.orange500, P.orange700]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={[StyleSheet.absoluteFill, s.segmentActive]} />
+                  ) : null}
+                  <Ionicons name={o.icon} size={17} color={active ? P.white : theme.textMuted} />
+                  <Text style={[s.segmentTxt, active && { color: P.white }]}>{o.label}</Text>
+                </Pressable>
+              );
+            })}
+          </View>
+
+          {/* Déconnexion */}
+          <TouchableOpacity style={s.logoutBtn} onPress={handleLogout} disabled={loggingOut} activeOpacity={0.85}>
+            {loggingOut
+              ? <ActivityIndicator color={P.error} size="small" />
+              : <Ionicons name="log-out-outline" size={20} color={P.error} />}
+            <Text style={s.logoutTxt}>{loggingOut ? 'Déconnexion…' : 'Se déconnecter'}</Text>
+          </TouchableOpacity>
+
+          <Text style={s.footerTxt}>TakTak · Achetez et vendez près de chez vous</Text>
+        </View>
       </ScrollView>
 
-      {/* Alert */}
+      {/* Bandeau sous la barre d'état une fois l'en-tête dépassé (le contenu ne passe plus sous l'heure) */}
+      {pastHero ? <View pointerEvents="none" style={[s.statusScrim, { height: insets.top || 0 }]} /> : null}
+
       <AlertModal
         visible={alert.visible} type={alert.type}
         title={alert.title} message={alert.message}
         buttons={alert.buttons}
-        onDismiss={() => setAlert(a => ({ ...a, visible: false }))}
+        onDismiss={() => setAlert((a) => ({ ...a, visible: false }))}
       />
 
       {/* ═══════════════════════════════════════════════════════════════════ */}
-      {/* SHEET : ÉDITER LE PROFIL                                           */}
+      {/* PANNEAU : PHOTO DE PROFIL                                          */}
       {/* ═══════════════════════════════════════════════════════════════════ */}
       <CustomBottomSheet
-        visible={themeSheet}
-        onClose={() => setThemeSheet(false)}
-        title="Apparence"
+        visible={photoSheet}
+        onClose={() => { if (!savingAvatar) { setPhotoSheet(false); setPendingAvatar(null); } }}
+        title="Photo de profil"
         avoidKeyboard={false}
-      >
-        <Text style={{ fontSize: 14, color: theme.textMuted, marginBottom: 16, lineHeight: 20 }}>
-          Choisissez le mode d'affichage de l'app. Le mode système suit automatiquement le réglage du téléphone.
-        </Text>
-
-        {[
-          { value: 'system', label: 'Système', icon: '📱' },
-          { value: 'light', label: 'Clair', icon: '☀️' },
-          { value: 'dark', label: 'Sombre', icon: '🌙' },
-        ].map((option) => {
-          const active = themePreference === option.value;
-
-          return (
-            <TouchableOpacity
-              key={option.value}
-              style={[
-                s.themeOption,
-                active && s.themeOptionActive,
-                active && { borderColor: isDark ? P.amber : P.terra, backgroundColor: isDark ? 'rgba(236,90,19,0.16)' : P.peachSoft },
-              ]}
-              onPress={() => setThemePreference(option.value)}
-              activeOpacity={0.8}
-            >
-              <Text style={s.themeOptionIcon}>{option.icon}</Text>
-              <View style={{ flex: 1 }}>
-                <Text style={[s.themeOptionLabel, active && { color: P.terra }]}>{option.label}</Text>
-                <Text style={s.themeOptionSub}>
-                  {option.value === 'system' && 'Suit automatiquement le thème du téléphone'}
-                  {option.value === 'light' && 'Interface claire et lumineuse'}
-                  {option.value === 'dark' && 'Interface sombre et contrastée'}
-                </Text>
-              </View>
-              {active && <Text style={{ fontSize: 18, color: P.terra }}>✓</Text>}
+        footer={pendingAvatar ? (
+          <View style={s.photoFooter}>
+            <TouchableOpacity style={s.photoCancel} onPress={() => setPendingAvatar(null)} disabled={savingAvatar} activeOpacity={0.8}>
+              <Text style={s.photoCancelTxt}>Annuler</Text>
             </TouchableOpacity>
-          );
-        })}
+            <TouchableOpacity style={[s.primaryBtn, { flex: 1 }]} onPress={handleSaveAvatar} disabled={savingAvatar} activeOpacity={0.88}>
+              <LinearGradient colors={[P.orange500, P.orange700]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={s.primaryBtnGrad}>
+                {savingAvatar
+                  ? <ActivityIndicator color={P.white} />
+                  : <><Ionicons name="checkmark" size={20} color={P.white} /><Text style={s.primaryBtnTxt}>Enregistrer</Text></>}
+              </LinearGradient>
+            </TouchableOpacity>
+          </View>
+        ) : null}
+      >
+        <View style={s.photoStage}>
+          <AvatarRing
+            uri={pendingAvatar || (user?.avatar ? sizedImage(user.avatar, 400) : null)}
+            name={user?.name}
+            size={176}
+            gap={theme.surface}
+            spinning
+          >
+            {picking ? (
+              <View style={s.photoBusy}><ActivityIndicator color={P.white} size="large" /></View>
+            ) : null}
+          </AvatarRing>
+          <View style={[s.photoTag, pendingAvatar && s.photoTagNew]}>
+            <Ionicons name={pendingAvatar ? 'sparkles' : 'person-outline'} size={12} color={pendingAvatar ? P.white : theme.textMuted} />
+            <Text style={[s.photoTagTxt, pendingAvatar && { color: P.white }]}>{pendingAvatar ? 'Aperçu' : 'Photo actuelle'}</Text>
+          </View>
+        </View>
+
+        <View style={s.photoActions}>
+          <PhotoAction icon="camera-outline" label="Appareil photo" sub="Prendre une photo" disabled={picking || savingAvatar}
+            onPress={async () => { const img = await pickImage('camera'); if (img) setPendingAvatar(img); }} />
+          <PhotoAction icon="images-outline" label="Galerie" sub="Choisir une image" disabled={picking || savingAvatar}
+            onPress={async () => { const img = await pickImage('library'); if (img) setPendingAvatar(img); }} />
+        </View>
+
+        <View style={s.photoTips}>
+          <Ionicons name="bulb-outline" size={16} color={P.gold} />
+          <Text style={s.photoTipsTxt}>
+            Une photo nette de votre visage ou de votre logo, bien éclairée, inspire confiance aux acheteurs.
+          </Text>
+        </View>
       </CustomBottomSheet>
 
+      {/* ═══════════════════════════════════════════════════════════════════ */}
+      {/* PANNEAU : ÉDITER LE PROFIL                                         */}
+      {/* ═══════════════════════════════════════════════════════════════════ */}
       <CustomBottomSheet
         visible={editSheet}
-        onClose={() => setEditSheet(false)}
-        title="Éditer le profil"
+        onClose={() => { if (!savingProfile) setEditSheet(false); }}
+        title="Modifier le profil"
         avoidKeyboard
         footer={
           <TouchableOpacity
-            style={[s.actionBtn, savingProfile && s.actionBtnDisabled]}
+            style={[s.primaryBtn, s.saveBtn, (!isDirty || savingProfile) && s.btnDisabled]}
             onPress={handleSaveProfile}
-            disabled={savingProfile}
+            disabled={!isDirty || savingProfile}
             activeOpacity={0.88}
           >
-            <LinearGradient colors={[P.orange500, P.orange700]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={s.actionBtnGrad}>
+            <LinearGradient colors={[P.orange500, P.orange700]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={s.primaryBtnGrad}>
               {savingProfile
                 ? <ActivityIndicator color={P.white} />
-                : (
-                  <View style={s.actionBtnContent}>
-                    <Text style={s.actionBtnIcon}>💾</Text>
-                    <Text style={s.actionBtnTxt}>Enregistrer les modifications</Text>
-                  </View>
-                )}
+                : <>
+                    <Ionicons name={isDirty ? 'checkmark-done' : 'checkmark'} size={20} color={P.white} />
+                    <Text style={s.primaryBtnTxt}>{isDirty ? 'Enregistrer les modifications' : 'Aucune modification'}</Text>
+                  </>}
             </LinearGradient>
           </TouchableOpacity>
         }
       >
-        {/* Photo de profil */}
-        <FieldGroup label="Photo de profil">
-          <TouchableOpacity style={s.avatarPickerWrap} onPress={handleSelectImage} disabled={savingProfile} activeOpacity={0.8}>
-            {editAvatarUri
-              ? <Image source={{ uri: editAvatarUri }} style={s.avatarPickerImg} />
-              : <View style={[s.avatarPickerImg, s.avatarPickerFallback]}><Text style={{ fontSize: 52 }}>📷</Text></View>}
-            <View style={s.avatarPickerOverlay}>
-              <Text style={s.avatarPickerOverlayTxt}>✏️  Changer la photo</Text>
+        {/* Photo */}
+        <View style={s.editPhotoRow}>
+          <AvatarRing uri={editAvatarUri ? (editAvatarUri === user?.avatar ? sizedImage(editAvatarUri, 200) : editAvatarUri) : null} name={editName} size={74} gap={theme.surface} />
+          <View style={{ flex: 1, gap: 8 }}>
+            <Text style={s.editPhotoTitle}>Photo de profil</Text>
+            <View style={{ flexDirection: 'row', gap: 8 }}>
+              <MiniBtn icon="images-outline" label="Galerie" disabled={picking || savingProfile}
+                onPress={async () => { const img = await pickImage('library'); if (img) setEditAvatarUri(img); }} />
+              <MiniBtn icon="camera-outline" label="Caméra" disabled={picking || savingProfile}
+                onPress={async () => { const img = await pickImage('camera'); if (img) setEditAvatarUri(img); }} />
             </View>
-          </TouchableOpacity>
-        </FieldGroup>
-
-        {/* Nom */}
-        <FieldGroup label="Nom complet">
-          <SheetTextInput style={s.input} placeholder="Votre nom" placeholderTextColor={theme.textSoft}
-            value={editName} onChangeText={setEditName} editable={!savingProfile} />
-        </FieldGroup>
-
-        {/* Ville */}
-        <FieldGroup label="Ville">
-          <TouchableOpacity style={s.selectRow} onPress={() => setCitySheet(true)} activeOpacity={0.75}>
-            <Text style={s.selectRowIcon}>📍</Text>
-            <Text style={[s.selectRowVal, !editCity && { color: theme.textSoft }]}>{editCity || 'Sélectionner une ville'}</Text>
-            <Text style={s.selectRowArrow}>›</Text>
-          </TouchableOpacity>
-        </FieldGroup>
-
-        {/* Email */}
-        <FieldGroup label="Adresse email">
-          <SheetTextInput style={s.input} placeholder="votre@email.com" placeholderTextColor={theme.textSoft}
-            value={editEmail} onChangeText={setEditEmail} textContentType="emailAddress" autoComplete="email" keyboardType="email-address" autoCapitalize="none" editable={!savingProfile} />
-        </FieldGroup>
-
-        {/* WhatsApp */}
-        <FieldGroup label="Numéro WhatsApp">
-          <View style={s.phoneRow}>
-            <TouchableOpacity style={s.dialPill} onPress={() => setCountrySheet(true)} activeOpacity={0.8} disabled={savingProfile}>
-              <Text style={{ fontSize: 18 }}>{whatsappCountry.flag}</Text>
-              <Text style={s.dialCode}>{whatsappCountry.dialCode}</Text>
-              <Text style={s.dialArrow}>▾</Text>
-            </TouchableOpacity>
-            <SheetTextInput style={[s.input, { flex: 1 }]} placeholder="12 34 56 78" placeholderTextColor={theme.textSoft}
-              value={editWhatsapp} onChangeText={setEditWhatsapp} {...doneAccessory} textContentType="telephoneNumber" autoComplete="tel" keyboardType="phone-pad" editable={!savingProfile} />
           </View>
-        </FieldGroup>
+        </View>
 
-        {/* Type de compte */}
-        <FieldGroup label="Type de compte">
-          <View style={s.typeRow}>
-            {['individual', 'professional'].map(t => (
-              <TouchableOpacity
-                key={t}
-                style={[s.typeBtn, editBusinessType === t && s.typeBtnActive]}
-                onPress={() => setEditBusinessType(t)}
-              >
-                <Text style={[s.typeBtnTxt, editBusinessType === t && s.typeBtnTxtActive]}>
-                  {t === 'individual' ? '👤  Particulier' : '🏢  Professionnel'}
-                </Text>
+        <SectionTitle icon="finger-print-outline" title="Identité" />
+        <Field icon="person-outline" label="Nom complet" placeholder="Votre nom"
+          value={editName} onChangeText={setEditName} editable={!savingProfile} autoCapitalize="words" />
+        <Field icon="mail-outline" label="Adresse e-mail" placeholder="votre@email.com"
+          value={editEmail} onChangeText={setEditEmail} textContentType="emailAddress" autoComplete="email"
+          keyboardType="email-address" autoCapitalize="none" editable={!savingProfile} />
+        <Text style={s.fieldLabel}>Ville</Text>
+        <TouchableOpacity style={s.fieldBox} onPress={() => setCitySheet(true)} activeOpacity={0.75} disabled={savingProfile}>
+          <Ionicons name="location-outline" size={18} color={theme.iconMuted} />
+          <Text style={[s.selectVal, !editCity && { color: theme.textSoft, fontWeight: '500' }]}>{editCity || 'Sélectionner une ville'}</Text>
+          <Ionicons name="chevron-down" size={18} color={theme.iconMuted} />
+        </TouchableOpacity>
+
+        <SectionTitle icon="call-outline" title="Contact" />
+        <Text style={s.fieldLabel}>Numéro WhatsApp</Text>
+        <View style={s.phoneRow}>
+          <TouchableOpacity style={[s.fieldBox, s.dialPill]} onPress={() => setCountrySheet(true)} activeOpacity={0.8} disabled={savingProfile}>
+            <Text style={{ fontSize: 18 }}>{whatsappCountry.flag}</Text>
+            <Text style={s.dialCode}>{whatsappCountry.dialCode}</Text>
+            <Ionicons name="chevron-down" size={14} color={theme.iconMuted} />
+          </TouchableOpacity>
+          <View style={{ flex: 1 }}>
+            <Field compact icon="logo-whatsapp" placeholder="12 34 56 78"
+              value={editWhatsapp} onChangeText={setEditWhatsapp} {...doneAccessory}
+              textContentType="telephoneNumber" autoComplete="tel" keyboardType="phone-pad" editable={!savingProfile} />
+          </View>
+        </View>
+
+        <SectionTitle icon="storefront-outline" title="Activité" />
+        <View style={s.typeRow}>
+          {[
+            { value: 'individual', icon: 'person-outline', label: 'Particulier', sub: 'Je vends ponctuellement' },
+            { value: 'professional', icon: 'briefcase-outline', label: 'Professionnel', sub: 'Boutique ou entreprise' },
+          ].map((t) => {
+            const active = editBusinessType === t.value;
+            return (
+              <TouchableOpacity key={t.value} style={[s.typeCard, active && s.typeCardActive]} onPress={() => { tap(); setEditBusinessType(t.value); }} activeOpacity={0.85} disabled={savingProfile}>
+                <View style={[s.typeIcon, active && { backgroundColor: P.terra }]}>
+                  <Ionicons name={t.icon} size={18} color={active ? P.white : theme.textMuted} />
+                </View>
+                <Text style={[s.typeLabel, active && { color: P.terra }]}>{t.label}</Text>
+                <Text style={s.typeSub}>{t.sub}</Text>
+                {active ? <Ionicons name="checkmark-circle" size={18} color={P.terra} style={s.typeCheck} /> : null}
               </TouchableOpacity>
-            ))}
-          </View>
-        </FieldGroup>
+            );
+          })}
+        </View>
 
-        {/* Nom entreprise */}
-        {editBusinessType === 'professional' && (
-          <FieldGroup label="Nom de l'entreprise">
-            <SheetTextInput style={s.input} placeholder="Nom de votre boutique / entreprise" placeholderTextColor={theme.textSoft}
-              value={editBusinessName} onChangeText={setEditBusinessName} editable={!savingProfile} />
-          </FieldGroup>
-        )}
+        {editBusinessType === 'professional' ? (
+          <Field icon="business-outline" label="Nom de l'entreprise" placeholder="Nom de votre boutique / entreprise"
+            value={editBusinessName} onChangeText={setEditBusinessName} editable={!savingProfile} />
+        ) : null}
 
-        {/* Description */}
-        <FieldGroup label="Description / Bio">
-          <SheetTextInput
-            style={[s.input, s.inputMulti]}
-            placeholder="Parlez-nous de vous..."
-            placeholderTextColor={theme.textSoft}
-            value={editDescription}
-            onChangeText={setEditDescription}
-            {...doneAccessory} multiline numberOfLines={3}
-            textAlignVertical="top"
-            editable={!savingProfile}
-          />
-        </FieldGroup>
+        <Field icon="document-text-outline" label="Bio" placeholder="Présentez-vous en quelques mots : ce que vous vendez, vos horaires…"
+          value={editDescription} onChangeText={setEditDescription} {...doneAccessory}
+          multiline maxLength={BIO_MAX} editable={!savingProfile}
+          counter={`${editDescription.length}/${BIO_MAX}`} />
 
         {/* Sélecteurs ouverts depuis ce panneau : déclarés À L'INTÉRIEUR pour
             pouvoir s'afficher par-dessus (iOS n'affiche pas deux Modal sœurs) */}
-
-        {/* ── SHEET : VILLE ── */}
-        <CustomBottomSheet
-          visible={citySheet}
-          onClose={() => setCitySheet(false)}
-          title="Choisir une ville"
-          avoidKeyboard={false}
-        >
-          {NIGER_CITIES.map(city => (
-            <TouchableOpacity
-              key={city}
-              style={[s.listRow, editCity === city && s.listRowActive]}
-              onPress={() => { setEditCity(city); setCitySheet(false); }}
-              activeOpacity={0.75}
-            >
-              <Text style={s.listRowIcon}>📍</Text>
-              <Text style={[s.listRowTxt, editCity === city && { color: P.terra, fontWeight: '800' }]}>{city}, Niger</Text>
-              {editCity === city && <Text style={{ color: P.terra, fontSize: 16, fontWeight: '900' }}>✓</Text>}
-            </TouchableOpacity>
-          ))}
+        <CustomBottomSheet visible={citySheet} onClose={() => setCitySheet(false)} title="Choisir une ville" avoidKeyboard={false}>
+          {NIGER_CITIES.map((c) => {
+            const active = editCity === c;
+            return (
+              <TouchableOpacity key={c} style={[s.listRow, active && s.listRowActive]} onPress={() => { setEditCity(c); setCitySheet(false); }} activeOpacity={0.75}>
+                <Ionicons name="location-outline" size={18} color={active ? P.terra : theme.iconMuted} />
+                <Text style={[s.listRowTxt, active && { color: P.terra, fontWeight: '800' }]}>{c}, Niger</Text>
+                {active ? <Ionicons name="checkmark" size={18} color={P.terra} /> : null}
+              </TouchableOpacity>
+            );
+          })}
         </CustomBottomSheet>
 
-        {/* ── SHEET : PAYS WHATSAPP ── */}
-        <CustomBottomSheet
-          visible={countrySheet}
-          onClose={() => setCountrySheet(false)}
-          title="Indicatif du pays"
-          avoidKeyboard={false}
-        >
-          {COUNTRIES.map(c => (
-            <TouchableOpacity
-              key={c.code}
-              style={[s.listRow, whatsappCountry.code === c.code && s.listRowActive]}
-              onPress={() => { setWhatsappCountry(c); setCountrySheet(false); }}
-              activeOpacity={0.75}
-            >
-              <Text style={{ fontSize: 22, marginRight: 14 }}>{c.flag}</Text>
-              <Text style={[s.listRowTxt, whatsappCountry.code === c.code && { color: P.terra, fontWeight: '800' }]}>{c.name}</Text>
-              <Text style={s.listRowDial}>{c.dialCode}</Text>
-              {whatsappCountry.code === c.code && <Text style={{ color: P.terra, fontSize: 16, fontWeight: '900', marginLeft: 8 }}>✓</Text>}
-            </TouchableOpacity>
-          ))}
+        <CustomBottomSheet visible={countrySheet} onClose={() => setCountrySheet(false)} title="Indicatif du pays" avoidKeyboard={false}>
+          {COUNTRIES.map((c) => {
+            const active = whatsappCountry.code === c.code;
+            return (
+              <TouchableOpacity key={c.code} style={[s.listRow, active && s.listRowActive]} onPress={() => { setWhatsappCountry(c); setCountrySheet(false); }} activeOpacity={0.75}>
+                <Text style={{ fontSize: 22 }}>{c.flag}</Text>
+                <Text style={[s.listRowTxt, active && { color: P.terra, fontWeight: '800' }]}>{c.name}</Text>
+                <Text style={s.listRowDial}>{c.dialCode}</Text>
+                {active ? <Ionicons name="checkmark" size={18} color={P.terra} /> : null}
+              </TouchableOpacity>
+            );
+          })}
         </CustomBottomSheet>
       </CustomBottomSheet>
-
     </View>
   );
 }
 
-// ─── Petits composants locaux ─────────────────────────────────────────────────
-function FieldGroup({ label, children }) {
+// ─── Composants locaux ────────────────────────────────────────────────────────
+
+// Halos lumineux + grille fine en fond de l'en-tête
+function HeroBackdrop({ glow }) {
+  const s = useProfileStyles();
+  const pulse = glow.interpolate({ inputRange: [0, 1], outputRange: [0.45, 0.85] });
+  const drift = glow.interpolate({ inputRange: [0, 1], outputRange: [0, 18] });
+  return (
+    <View style={StyleSheet.absoluteFill} pointerEvents="none">
+      {[0.2, 0.4, 0.6, 0.8].map((p) => <View key={`h${p}`} style={[s.gridH, { top: `${p * 100}%` }]} />)}
+      {[0.2, 0.4, 0.6, 0.8].map((p) => <View key={`v${p}`} style={[s.gridV, { left: `${p * 100}%` }]} />)}
+      <Animated.View style={[s.orbTerra, { opacity: pulse, transform: [{ translateX: drift }] }]}><Orb size={300} color="236,90,19" /></Animated.View>
+      <Animated.View style={[s.orbViolet, { opacity: pulse, transform: [{ translateY: drift }] }]}><Orb size={260} color="124,58,237" /></Animated.View>
+      <LinearGradient colors={['transparent', 'rgba(6,10,20,0.55)']} style={s.heroFade} />
+    </View>
+  );
+}
+
+// Halo flou simulé par des disques concentriques très transparents
+const ORB_STEPS = Array.from({ length: 12 }, (_, i) => 1 - i * 0.065);
+function Orb({ size, color }) {
+  return (
+    <View style={{ width: size, height: size, alignItems: 'center', justifyContent: 'center' }}>
+      {ORB_STEPS.map((k) => (
+        <View key={k} style={{ position: 'absolute', width: size * k, height: size * k, borderRadius: size, backgroundColor: `rgba(${color},0.055)` }} />
+      ))}
+    </View>
+  );
+}
+
+// Avatar entouré d'un anneau dégradé qui tourne lentement
+function AvatarRing({ uri, name, size, gap, onPress, spinning = true, children }) {
+  const spin = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    if (!spinning) return undefined;
+    const loop = Animated.loop(Animated.timing(spin, { toValue: 1, duration: 7000, easing: Easing.linear, useNativeDriver: true }));
+    loop.start();
+    return () => loop.stop();
+  }, [spinning]);
+  const rotate = spin.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '360deg'] });
+  const outer = size + 10;
+  const inner = size + 4;
+  const Wrapper = onPress ? Pressable : View;
+  return (
+    <Wrapper onPress={onPress} style={{ width: outer, height: outer, alignItems: 'center', justifyContent: 'center' }}>
+      <Animated.View style={[StyleSheet.absoluteFill, { borderRadius: outer / 2, overflow: 'hidden', transform: [{ rotate }] }]}>
+        <LinearGradient colors={RING_COLORS} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={{ flex: 1 }} />
+      </Animated.View>
+      <View style={{ width: inner, height: inner, borderRadius: inner / 2, backgroundColor: gap, alignItems: 'center', justifyContent: 'center' }}>
+        {uri ? (
+          <Image source={{ uri }} style={{ width: size, height: size, borderRadius: size / 2 }} contentFit="cover" transition={200} />
+        ) : (
+          <LinearGradient colors={['#1e293b', '#3b1d0c']} style={{ width: size, height: size, borderRadius: size / 2, alignItems: 'center', justifyContent: 'center' }}>
+            <Text style={{ color: P.white, fontSize: size * 0.34, fontWeight: '800', letterSpacing: 1 }}>{initialsOf(name)}</Text>
+          </LinearGradient>
+        )}
+      </View>
+      {children}
+    </Wrapper>
+  );
+}
+
+function HeroChip({ icon, label, accent }) {
   const s = useProfileStyles();
   return (
-    <View style={{ marginBottom: 20 }}>
-      <Text style={s.fieldLabel}>{label}</Text>
-      {children}
+    <View style={[s.heroChip, accent && s.heroChipAccent]}>
+      <Ionicons name={icon} size={12} color={accent ? P.amber : 'rgba(255,255,255,0.8)'} />
+      <Text style={[s.heroChipTxt, accent && { color: P.amber }]} numberOfLines={1}>{label}</Text>
     </View>
   );
 }
 
-function InfoRow({ icon, label, value }) {
+function Stat({ value, label, icon, tint, onPress }) {
+  const s = useProfileStyles();
+  return (
+    <TouchableOpacity style={s.stat} onPress={onPress} disabled={!onPress} activeOpacity={0.7}>
+      <View style={s.statValueRow}>
+        <Ionicons name={icon} size={12} color={tint} />
+        <Text style={s.statValue}>{value}</Text>
+      </View>
+      <Text style={s.statLabel} numberOfLines={1}>{label}</Text>
+    </TouchableOpacity>
+  );
+}
+
+function Row({ icon, tint, label, sub, onPress, badge, last }) {
   const s = useProfileStyles();
   const { theme } = useAppTheme();
   return (
-    <View style={s.infoRow}>
-      <Text style={s.infoRowIcon}>{icon}</Text>
-      <View style={{ flex: 1 }}>
-        <Text style={[s.infoRowLabel, { color: theme.textSoft }]}>{label}</Text>
-        <Text style={[s.infoRowValue, { color: theme.text }]}>{value}</Text>
+    <TouchableOpacity style={[s.row, !last && s.rowBorder]} onPress={() => { tap(); onPress?.(); }} activeOpacity={0.7}>
+      <View style={[s.rowIcon, { backgroundColor: tint + '1f', borderColor: tint + '40' }]}>
+        <Ionicons name={icon} size={19} color={tint} />
       </View>
+      <View style={{ flex: 1 }}>
+        <Text style={s.rowLabel}>{label}</Text>
+        {sub ? <Text style={s.rowSub} numberOfLines={1}>{sub}</Text> : null}
+      </View>
+      {badge ? <View style={s.rowBadge}><Text style={s.rowBadgeTxt}>{badge}</Text></View> : null}
+      <Ionicons name="chevron-forward" size={18} color={theme.iconMuted} />
+    </TouchableOpacity>
+  );
+}
+
+function PhotoAction({ icon, label, sub, onPress, disabled }) {
+  const s = useProfileStyles();
+  return (
+    <TouchableOpacity style={[s.photoAction, disabled && s.btnDisabled]} onPress={onPress} disabled={disabled} activeOpacity={0.85}>
+      <LinearGradient colors={[P.orange500 + '26', '#8b5cf6' + '1a']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={StyleSheet.absoluteFill} />
+      <View style={s.photoActionIcon}>
+        <Ionicons name={icon} size={24} color={P.terra} />
+      </View>
+      <Text style={s.photoActionLabel}>{label}</Text>
+      <Text style={s.photoActionSub}>{sub}</Text>
+    </TouchableOpacity>
+  );
+}
+
+function MiniBtn({ icon, label, onPress, disabled }) {
+  const s = useProfileStyles();
+  return (
+    <TouchableOpacity style={[s.miniBtn, disabled && s.btnDisabled]} onPress={onPress} disabled={disabled} activeOpacity={0.8}>
+      <Ionicons name={icon} size={15} color={P.terra} />
+      <Text style={s.miniBtnTxt}>{label}</Text>
+    </TouchableOpacity>
+  );
+}
+
+function SectionTitle({ icon, title }) {
+  const s = useProfileStyles();
+  return (
+    <View style={s.sectionTitle}>
+      <Ionicons name={icon} size={15} color={P.terra} />
+      <Text style={s.sectionTitleTxt}>{title}</Text>
+      <View style={s.sectionTitleLine} />
     </View>
   );
 }
 
-function MenuItem({ icon, label, onPress }) {
+// Champ avec icône ; la bordure s'illumine quand il a le focus.
+// Ne changer que la couleur au focus : ajouter une ombre/elevation (Android) recrée
+// la vue native autour du champ, qui perd alors le focus au profit d'un autre champ.
+function Field({ icon, label, counter, multiline, compact: isCompact, ...inputProps }) {
   const s = useProfileStyles();
-  const { theme, isDark } = useAppTheme();
+  const { theme } = useAppTheme();
+  const [focused, setFocused] = useState(false);
   return (
-    <TouchableOpacity
-      style={[s.menuItem, { backgroundColor: theme.surface, borderColor: theme.border }, isDark && { elevation: 0 }]}
-      onPress={onPress}
-      activeOpacity={0.75}
-    >
-      <Text style={s.menuItemIcon}>{icon}</Text>
-      <Text style={[s.menuItemLabel, { color: theme.text }]}>{label}</Text>
-      <Text style={[s.menuItemArrow, isDark && { color: P.amber }]}>›</Text>
-    </TouchableOpacity>
+    <View style={{ marginBottom: isCompact ? 0 : 14 }}>
+      {label ? <Text style={s.fieldLabel}>{label}</Text> : null}
+      <View collapsable={false} style={[s.fieldBox, multiline && s.fieldBoxMulti, focused && s.fieldBoxFocus]}>
+        <Ionicons name={icon} size={18} color={focused ? P.terra : theme.iconMuted} style={multiline ? { marginTop: 2 } : null} />
+        <SheetTextInput
+          {...inputProps}
+          multiline={multiline}
+          textAlignVertical={multiline ? 'top' : 'center'}
+          placeholderTextColor={theme.textSoft}
+          onFocus={() => setFocused(true)}
+          onBlur={() => setFocused(false)}
+          style={[s.fieldInput, multiline && s.fieldInputMulti]}
+        />
+      </View>
+      {counter ? <Text style={s.counter}>{counter}</Text> : null}
+    </View>
   );
 }
 
@@ -577,171 +890,205 @@ const useProfileStyles = () => {
 };
 
 // ─── STYLES ──────────────────────────────────────────────────────────────────
-// Styles dépendants du thème : textes, fonds et bordures suivent le mode clair/sombre
 const makeStyles = (theme, isDark) => StyleSheet.create({
   container: { flex: 1, backgroundColor: theme.screen },
 
-  header: { paddingHorizontal: 18, paddingBottom: 8, overflow: 'hidden', position: 'relative' },
-  headerAccent: { position: 'absolute', top: 0, left: 0, right: 0, height: 3, backgroundColor: P.terra },
-  headerTitle: { fontSize: 25, fontWeight: '700', color: P.white, marginBottom: 2 },
-
-  pwdBanner: {
-    backgroundColor: P.orange100, flexDirection: 'row', alignItems: 'center',
-    justifyContent: 'space-between', paddingHorizontal: 16, paddingBottom: 12,
-    borderBottomWidth: 1, borderBottomColor: P.orange300,
+  // ── Hero ──
+  hero: { paddingHorizontal: 18, paddingBottom: 52, overflow: 'hidden', borderBottomLeftRadius: 32, borderBottomRightRadius: 32 },
+  gridH: { position: 'absolute', left: 0, right: 0, height: StyleSheet.hairlineWidth, backgroundColor: 'rgba(255,255,255,0.06)' },
+  gridV: { position: 'absolute', top: 0, bottom: 0, width: StyleSheet.hairlineWidth, backgroundColor: 'rgba(255,255,255,0.06)' },
+  orbTerra: { position: 'absolute', top: -130, right: -120 },
+  orbViolet: { position: 'absolute', bottom: -110, left: -110 },
+  heroFade: { position: 'absolute', left: 0, right: 0, bottom: 0, height: 80 },
+  heroTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 },
+  heroKicker: { color: 'rgba(255,255,255,0.7)', fontSize: 12, fontWeight: '800', letterSpacing: 2.5 },
+  heroIconBtn: {
+    width: 38, height: 38, borderRadius: 13, alignItems: 'center', justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.1)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.16)',
   },
-  pwdBannerTxt: { flex: 1, fontSize: 13, color: P.orange700, fontWeight: '600', marginRight: 10 },
-  pwdBannerBtn: { backgroundColor: P.orange600, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8 },
-  pwdBannerBtnTxt: { color: P.white, fontSize: 12, fontWeight: '700' },
-
-  content: { flex: 1 },
-  scrollContent: { paddingTop: 10, paddingHorizontal: 12 },
-
-  // Non auth
-  notAuthBox: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 40 },
-  notAuthEmoji: { fontSize: 60, marginBottom: 20 },
-  notAuthTitle: { fontSize: 24, fontWeight: '700', color: theme.text, marginBottom: 12, textAlign: 'center' },
-  notAuthText: { fontSize: 15, color: theme.textMuted, marginBottom: 40, textAlign: 'center', lineHeight: 22 },
-  loginBtn: { overflow: 'hidden', borderRadius: 14, elevation: 6 },
-  loginBtnGrad: { paddingVertical: 16, alignItems: 'center' },
-  loginBtnTxt: { fontSize: 15, fontWeight: '700', color: P.white },
-  registerBtn: { paddingVertical: 14, alignItems: 'center', borderWidth: 2, borderColor: P.terra, borderRadius: 14, backgroundColor: theme.surface },
-  registerBtnTxt: { fontSize: 15, fontWeight: '700', color: P.terra },
-
-  // Profile card
-  profileCard: { marginHorizontal: 6, marginBottom: 14, borderRadius: 18, overflow: 'hidden' },
-  blurWrapper: { borderRadius: 18, overflow: 'hidden', borderWidth: StyleSheet.hairlineWidth },
-  cardShadow: { shadowColor: '#0f172a', shadowOpacity: 0.07, shadowRadius: 14, shadowOffset: { width: 0, height: 6 }, elevation: 2 },
-  avatarSection: { alignItems: 'center', paddingVertical: 16, paddingHorizontal: 14, gap: 8 },
-  avatarWrap: { position: 'relative' },
-  avatarImg: { width: 94, height: 94, borderRadius: 47, borderWidth: 2.5, borderColor: P.terra, backgroundColor: theme.surfaceAlt, alignItems: 'center', justifyContent: 'center' },
-  avatarFallback: { backgroundColor: P.orange500 },
-  avatarInitials: { fontSize: 34, fontWeight: '800', color: P.white },
-  verifiedMiniBadge: {
-    position: 'absolute',
-    top: 2,
-    right: -6,
-    minWidth: 24,
-    height: 20,
-    borderRadius: 10,
-    paddingHorizontal: 5,
-    backgroundColor: P.greenDark,
-    borderWidth: 1.5,
-    borderColor: theme.surface,
-    alignItems: 'center',
-    justifyContent: 'center',
+  heroCenter: { alignItems: 'center' },
+  cameraBadge: {
+    position: 'absolute', right: 2, bottom: 4, width: 34, height: 34, borderRadius: 17, overflow: 'hidden',
+    alignItems: 'center', justifyContent: 'center', borderWidth: 2.5, borderColor: '#0b1120',
   },
-  verifiedMiniTxt: { fontSize: 10, fontWeight: '900', color: P.white, letterSpacing: -0.2 },
-  avatarEdit: { position: 'absolute', bottom: -2, right: -2, width: 32, height: 32, borderRadius: 16, backgroundColor: P.terra, alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: theme.surface },
-  userName: { fontSize: 18, fontWeight: '800', color: theme.text, marginBottom: 1 },
-  userEmail: { fontSize: 12, color: theme.textMuted, marginBottom: 2 },
+  heroInfo: { alignItems: 'center', marginTop: 14 },
+  nameRow: { flexDirection: 'row', alignItems: 'center', gap: 6, maxWidth: '90%' },
+  heroName: { color: P.white, fontSize: 24, fontWeight: '800', letterSpacing: -0.4, flexShrink: 1 },
+  heroBiz: { color: P.amber, fontSize: 13, fontWeight: '700', marginTop: 2 },
+  heroSub: { color: 'rgba(255,255,255,0.62)', fontSize: 13, marginTop: 3 },
+  chipsRow: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: 7, marginTop: 14 },
+  heroChip: {
+    flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 999,
+    backgroundColor: 'rgba(255,255,255,0.08)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.14)', maxWidth: 200,
+  },
+  heroChipAccent: { backgroundColor: 'rgba(236,90,19,0.18)', borderColor: 'rgba(255,168,123,0.45)' },
+  heroChipTxt: { color: 'rgba(255,255,255,0.85)', fontSize: 12, fontWeight: '700' },
 
-  infoSection: { paddingVertical: 10, paddingHorizontal: 14, borderTopWidth: StyleSheet.hairlineWidth },
-  infoSectionHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
-  sectionLabel: { fontSize: 13, fontWeight: '700', color: theme.text, textTransform: 'uppercase', letterSpacing: 0.5 },
-  editChip: { flexDirection: 'row', alignItems: 'center', backgroundColor: (isDark ? 'rgba(236,90,19,0.16)' : P.orange50), paddingVertical: 6, paddingHorizontal: 10, borderRadius: 8, gap: 4, borderWidth: 1, borderColor: P.terra },
-  editChipIcon: { fontSize: 13 },
-  editChipTxt: { fontSize: 12, fontWeight: '700', color: P.terra },
+  // ── Stats ──
+  statsCard: {
+    flexDirection: 'row', alignItems: 'center', marginHorizontal: 16, marginTop: -34, paddingVertical: 14,
+    borderRadius: 22, backgroundColor: theme.surface, borderWidth: 1, borderColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(17,24,39,0.06)',
+    shadowColor: '#0f172a', shadowOpacity: isDark ? 0.5 : 0.12, shadowRadius: 18, shadowOffset: { width: 0, height: 10 }, elevation: 8,
+  },
+  stat: { flex: 1, alignItems: 'center', gap: 3 },
+  statValueRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  statValue: { fontSize: 18, fontWeight: '800', color: theme.text, letterSpacing: -0.3 },
+  statLabel: { fontSize: 11, fontWeight: '600', color: theme.textSoft },
+  statDivider: { width: StyleSheet.hairlineWidth, height: 30, backgroundColor: theme.border },
 
-  infoRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 8, gap: 10 },
-  infoRowIcon: { fontSize: 18, width: 28 },
-  infoRowLabel: { fontSize: 11, color: theme.textMuted, fontWeight: '600', marginBottom: 2 },
-  infoRowValue: { fontSize: 14, fontWeight: '600', color: theme.text },
+  body: { paddingHorizontal: 16, paddingTop: 16 },
+  statusScrim: { position: 'absolute', top: 0, left: 0, right: 0, backgroundColor: theme.screen, opacity: 0.96 },
 
-  // Menu
-  menuSection: { marginHorizontal: 6, marginBottom: 16, gap: 8 },
-  menuItem: { flexDirection: 'row', alignItems: 'center', backgroundColor: theme.surface, paddingVertical: 14, paddingHorizontal: 14, borderRadius: 14, borderWidth: 1, borderColor: theme.border, elevation: 2, gap: 10 },
-  menuItemIcon: { fontSize: 22, width: 28 },
-  menuItemLabel: { flex: 1, fontSize: 15, fontWeight: '700', color: theme.text },
-  menuItemArrow: { fontSize: 22, color: P.terra },
+  // ── Cartes ──
+  alertCard: {
+    flexDirection: 'row', alignItems: 'center', gap: 12, padding: 14, borderRadius: 18, marginBottom: 12,
+    backgroundColor: isDark ? 'rgba(245,158,11,0.10)' : '#fffbeb', borderWidth: 1, borderColor: 'rgba(245,158,11,0.35)',
+  },
+  alertIcon: { width: 38, height: 38, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+  alertTitle: { fontSize: 14, fontWeight: '800', color: theme.text },
+  alertSub: { fontSize: 12, color: theme.textMuted, marginTop: 1 },
 
-  themeOption: { flexDirection: 'row', alignItems: 'center', padding: 14, borderRadius: 14, borderWidth: 1, borderColor: theme.border, backgroundColor: theme.surface, marginBottom: 10, gap: 12 },
-  themeOptionActive: { borderWidth: 1.5 },
-  themeOptionIcon: { fontSize: 22 },
-  themeOptionLabel: { fontSize: 15, fontWeight: '700', color: theme.text, marginBottom: 2 },
-  themeOptionSub: { fontSize: 12, color: theme.textMuted, lineHeight: 17 },
+  completeCard: {
+    padding: 16, borderRadius: 20, marginBottom: 12, backgroundColor: theme.surface,
+    borderWidth: 1, borderColor: isDark ? 'rgba(139,92,246,0.35)' : 'rgba(139,92,246,0.22)',
+  },
+  completeHead: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 12 },
+  completeTitle: { fontSize: 15, fontWeight: '800', color: theme.text },
+  completeSub: { fontSize: 12, color: theme.textMuted, marginTop: 2 },
+  completeCta: {
+    flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 999,
+    backgroundColor: isDark ? 'rgba(236,90,19,0.16)' : P.orange50,
+  },
+  completeCtaTxt: { fontSize: 12, fontWeight: '800', color: P.terra },
+  track: { height: 8, borderRadius: 4, backgroundColor: isDark ? 'rgba(255,255,255,0.08)' : '#eef0f4', overflow: 'hidden' },
+  trackFill: { height: '100%', borderRadius: 4, overflow: 'hidden' },
+  completeHint: { fontSize: 11, color: theme.textSoft, marginTop: 10 },
 
-  // Logout
-  logoutBtn: { marginHorizontal: 6, marginBottom: 20, borderRadius: 16, overflow: 'hidden', backgroundColor: theme.surface, borderWidth: 1, borderColor: P.error + '35', elevation: 4 },
-  logoutAccent: { height: 3, backgroundColor: P.error },
-  logoutRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 14, paddingHorizontal: 16, gap: 12 },
-  logoutIconWrap: { width: 36, height: 36, borderRadius: 18, backgroundColor: P.error + '18', borderWidth: 1, borderColor: P.error + '40', alignItems: 'center', justifyContent: 'center' },
+  bioCard: {
+    flexDirection: 'row', gap: 10, padding: 14, borderRadius: 18, marginBottom: 4,
+    backgroundColor: theme.surface, borderWidth: 1, borderColor: theme.border,
+  },
+  bioTxt: { flex: 1, fontSize: 13, lineHeight: 19, color: theme.textMuted },
+
+  // ── Groupes ──
+  groupLabel: { fontSize: 12, fontWeight: '800', color: theme.textSoft, letterSpacing: 1.4, textTransform: 'uppercase', marginTop: 18, marginBottom: 8, marginLeft: 4 },
+  group: { borderRadius: 20, backgroundColor: theme.surface, borderWidth: 1, borderColor: theme.border, overflow: 'hidden' },
+  row: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 13, paddingHorizontal: 14 },
+  rowBorder: { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: theme.border },
+  rowIcon: { width: 40, height: 40, borderRadius: 13, alignItems: 'center', justifyContent: 'center', borderWidth: 1 },
+  rowLabel: { fontSize: 15, fontWeight: '700', color: theme.text },
+  rowSub: { fontSize: 12, color: theme.textSoft, marginTop: 1 },
+  rowBadge: { backgroundColor: P.gold, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 999 },
+  rowBadgeTxt: { fontSize: 10, fontWeight: '800', color: '#111827' },
+
+  segment: {
+    flexDirection: 'row', padding: 5, borderRadius: 18, gap: 5,
+    backgroundColor: theme.surface, borderWidth: 1, borderColor: theme.border,
+  },
+  segmentItem: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 11, borderRadius: 14, overflow: 'hidden' },
+  segmentActive: { borderRadius: 14 },
+  segmentTxt: { fontSize: 13, fontWeight: '700', color: theme.textMuted },
+
+  logoutBtn: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, marginTop: 26, paddingVertical: 15,
+    borderRadius: 18, borderWidth: 1, borderColor: P.error + '55', backgroundColor: isDark ? 'rgba(239,68,68,0.08)' : '#fff5f5',
+  },
   logoutTxt: { fontSize: 15, fontWeight: '800', color: P.error },
-  logoutHint: { fontSize: 11, color: theme.textMuted, marginTop: 2 },
+  footerTxt: { textAlign: 'center', fontSize: 11, color: theme.textSoft, marginTop: 16 },
 
-  // ── ACTION BUTTON (footer des sheets) ────────────────────────────────────
-  actionBtn: {
-    borderRadius: 100,
-    overflow: 'hidden',
-    elevation: 6,
-    shadowColor: P.orange700,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.35,
-    shadowRadius: 10,
-    marginBottom:60,
+  // ── Non connecté ──
+  guestHero: { alignItems: 'center', paddingHorizontal: 28, paddingBottom: 48, overflow: 'hidden', borderBottomLeftRadius: 32, borderBottomRightRadius: 32 },
+  guestIconRing: { width: 104, height: 104, borderRadius: 52, overflow: 'hidden', alignItems: 'center', justifyContent: 'center', marginBottom: 22 },
+  guestIconInner: { width: 96, height: 96, borderRadius: 48, backgroundColor: '#0b1120', alignItems: 'center', justifyContent: 'center' },
+  guestTitle: { color: P.white, fontSize: 24, fontWeight: '800', textAlign: 'center', marginBottom: 8 },
+  guestText: { color: 'rgba(255,255,255,0.68)', fontSize: 14, lineHeight: 21, textAlign: 'center' },
+  guestActions: { padding: 20, gap: 12, marginTop: 8 },
+
+  // ── Boutons ──
+  primaryBtn: {
+    borderRadius: 18, overflow: 'hidden',
+    shadowColor: P.orange700, shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.35, shadowRadius: 12, elevation: 6,
   },
-  actionBtnDisabled: { opacity: 0.52 },
-  actionBtnGrad: {
-    paddingVertical: 18,
-    alignItems: 'center',
-    justifyContent: 'center',
+  primaryBtnGrad: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 16 },
+  primaryBtnTxt: { color: P.white, fontSize: 15, fontWeight: '800', letterSpacing: -0.2 },
+  ghostBtn: { paddingVertical: 15, alignItems: 'center', borderRadius: 18, borderWidth: 1.5, borderColor: P.terra },
+  ghostBtnTxt: { fontSize: 15, fontWeight: '800', color: P.terra },
+  saveBtn: { marginBottom: 60 },
+  btnDisabled: { opacity: 0.5 },
+
+  // ── Éditeur photo ──
+  photoStage: { alignItems: 'center', paddingVertical: 8, marginBottom: 18 },
+  photoBusy: { ...StyleSheet.absoluteFillObject, borderRadius: 999, backgroundColor: 'rgba(0,0,0,0.45)', alignItems: 'center', justifyContent: 'center' },
+  photoTag: {
+    flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 12, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 999,
+    backgroundColor: theme.surfaceAlt, borderWidth: 1, borderColor: theme.border,
   },
-  actionBtnContent: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  actionBtnIcon: { fontSize: 18 },
-  actionBtnTxt: { color: P.white, fontSize: 16, fontWeight: '800', letterSpacing: -0.2 },
-
-  // ── FORM FIELDS ──────────────────────────────────────────────────────────
-  fieldLabel: { fontSize: 13, fontWeight: '700', color: theme.text, marginBottom: 9 },
-  input: {
-    borderWidth: 1.5,
-    borderColor: theme.border,
-    borderRadius: 14,
-    paddingVertical: 15,
-    paddingHorizontal: 16,
-    fontSize: 15,
-    color: theme.text,
-    backgroundColor: theme.surfaceAlt,
+  photoTagNew: { backgroundColor: P.terra, borderColor: P.terra },
+  photoTagTxt: { fontSize: 12, fontWeight: '700', color: theme.textMuted },
+  photoActions: { flexDirection: 'row', gap: 12 },
+  photoAction: {
+    flex: 1, alignItems: 'center', paddingVertical: 18, paddingHorizontal: 10, borderRadius: 20, overflow: 'hidden',
+    borderWidth: 1, borderColor: isDark ? 'rgba(255,168,123,0.25)' : 'rgba(236,90,19,0.18)', backgroundColor: theme.surfaceAlt,
   },
-  inputMulti: { minHeight: 90, textAlignVertical: 'top', paddingTop: 14 },
+  photoActionIcon: {
+    width: 50, height: 50, borderRadius: 16, alignItems: 'center', justifyContent: 'center', marginBottom: 10,
+    backgroundColor: theme.surface, borderWidth: 1, borderColor: isDark ? 'rgba(255,168,123,0.3)' : 'rgba(236,90,19,0.2)',
+  },
+  photoActionLabel: { fontSize: 14, fontWeight: '800', color: theme.text },
+  photoActionSub: { fontSize: 11, color: theme.textSoft, marginTop: 2 },
+  photoTips: {
+    flexDirection: 'row', gap: 10, alignItems: 'flex-start', marginTop: 16, marginBottom: 30, padding: 12, borderRadius: 14,
+    backgroundColor: isDark ? 'rgba(245,158,11,0.08)' : '#fffbeb',
+  },
+  photoTipsTxt: { flex: 1, fontSize: 12, lineHeight: 18, color: theme.textMuted },
+  photoFooter: { flexDirection: 'row', gap: 10, marginBottom: 60 },
+  photoCancel: { paddingHorizontal: 20, justifyContent: 'center', borderRadius: 18, borderWidth: 1, borderColor: theme.border, backgroundColor: theme.surfaceAlt },
+  photoCancelTxt: { fontSize: 15, fontWeight: '700', color: theme.textMuted },
 
-  selectRow: { flexDirection: 'row', alignItems: 'center', borderWidth: 1.5, borderColor: theme.border, borderRadius: 14, paddingVertical: 15, paddingHorizontal: 16, backgroundColor: theme.surfaceAlt, gap: 10 },
-  selectRowIcon: { fontSize: 18 },
-  selectRowVal: { flex: 1, fontSize: 15, color: theme.text, fontWeight: '600' },
-  selectRowArrow: { fontSize: 20, color: P.terra },
+  // ── Formulaire ──
+  editPhotoRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 14, padding: 12, borderRadius: 20, marginBottom: 6,
+    backgroundColor: theme.surfaceAlt, borderWidth: 1, borderColor: theme.border,
+  },
+  editPhotoTitle: { fontSize: 14, fontWeight: '800', color: theme.text },
+  miniBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 12,
+    backgroundColor: isDark ? 'rgba(236,90,19,0.14)' : P.orange50, borderWidth: 1, borderColor: isDark ? 'rgba(255,168,123,0.3)' : P.orange200,
+  },
+  miniBtnTxt: { fontSize: 12, fontWeight: '800', color: P.terra },
 
-  phoneRow: { flexDirection: 'row', gap: 10, alignItems: 'center' },
-  dialPill: { flexDirection: 'row', alignItems: 'center', gap: 6, borderWidth: 1.5, borderColor: theme.border, borderRadius: 14, paddingHorizontal: 12, paddingVertical: 15, backgroundColor: theme.surfaceAlt },
+  sectionTitle: { flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: 18, marginBottom: 12 },
+  sectionTitleTxt: { fontSize: 12, fontWeight: '800', color: theme.text, letterSpacing: 1.2, textTransform: 'uppercase' },
+  sectionTitleLine: { flex: 1, height: StyleSheet.hairlineWidth, backgroundColor: theme.border, marginLeft: 4 },
+
+  fieldLabel: { fontSize: 12, fontWeight: '700', color: theme.textMuted, marginBottom: 7, marginLeft: 2 },
+  fieldBox: {
+    flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 14, minHeight: 52, borderRadius: 16,
+    backgroundColor: theme.surfaceAlt, borderWidth: 1.5, borderColor: theme.border,
+  },
+  fieldBoxMulti: { alignItems: 'flex-start', paddingTop: 14 },
+  fieldBoxFocus: { borderColor: P.terra, backgroundColor: isDark ? 'rgba(236,90,19,0.07)' : '#fffaf7' },
+  fieldInput: { flex: 1, fontSize: 15, color: theme.text, paddingVertical: 14 },
+  fieldInputMulti: { minHeight: 96, paddingTop: 0 },
+  counter: { alignSelf: 'flex-end', fontSize: 11, color: theme.textSoft, marginTop: 5 },
+  selectVal: { flex: 1, fontSize: 15, color: theme.text, fontWeight: '600' },
+
+  phoneRow: { flexDirection: 'row', gap: 10, alignItems: 'flex-start', marginBottom: 4 },
+  dialPill: { gap: 6, paddingHorizontal: 12 },
   dialCode: { fontSize: 14, fontWeight: '700', color: theme.text },
-  dialArrow: { fontSize: 11, color: theme.textMuted },
 
-  typeRow: { flexDirection: 'row', gap: 10 },
-  typeBtn: { flex: 1, paddingVertical: 14, borderWidth: 1.5, borderColor: theme.border, borderRadius: 14, alignItems: 'center', backgroundColor: theme.surfaceAlt },
-  typeBtnActive: { borderColor: P.terra, backgroundColor: (isDark ? 'rgba(236,90,19,0.16)' : P.orange50) },
-  typeBtnTxt: { fontSize: 14, fontWeight: '600', color: theme.textMuted },
-  typeBtnTxtActive: { color: P.terra },
+  typeRow: { flexDirection: 'row', gap: 10, marginBottom: 14 },
+  typeCard: {
+    flex: 1, padding: 14, borderRadius: 18, borderWidth: 1.5, borderColor: theme.border, backgroundColor: theme.surfaceAlt,
+  },
+  typeCardActive: { borderColor: P.terra, backgroundColor: isDark ? 'rgba(236,90,19,0.12)' : P.orange50 },
+  typeIcon: { width: 36, height: 36, borderRadius: 12, alignItems: 'center', justifyContent: 'center', backgroundColor: theme.surface, marginBottom: 10 },
+  typeLabel: { fontSize: 14, fontWeight: '800', color: theme.text },
+  typeSub: { fontSize: 11, color: theme.textSoft, marginTop: 2 },
+  typeCheck: { position: 'absolute', top: 10, right: 10 },
 
-  // Avatar picker
-  avatarPickerWrap: { borderRadius: 16, overflow: 'hidden', position: 'relative' },
-  avatarPickerImg: { width: '100%', height: 190, borderRadius: 16 },
-  avatarPickerFallback: { backgroundColor: theme.surfaceAlt, borderWidth: 2, borderColor: P.terra, borderStyle: 'dashed', alignItems: 'center', justifyContent: 'center' },
-  avatarPickerOverlay: { position: 'absolute', bottom: 0, left: 0, right: 0, backgroundColor: 'rgba(0,0,0,0.48)', paddingVertical: 12, alignItems: 'center' },
-  avatarPickerOverlayTxt: { color: '#fff', fontSize: 13, fontWeight: '700' },
-
-  // Security card
-  secCard: { flexDirection: 'row', alignItems: 'flex-start', backgroundColor: (isDark ? 'rgba(236,90,19,0.16)' : P.orange50), borderRadius: 14, padding: 16, marginBottom: 24, borderWidth: 1, borderColor: P.orange300 + '60' || '#FFD0A0' },
-  secCardTitle: { fontSize: 15, fontWeight: '700', color: theme.text, marginBottom: 4 },
-  secCardSub: { fontSize: 13, color: theme.textMuted, lineHeight: 19 },
-
-  // Password strength
-  strengthWrap: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 10 },
-  strengthBar: { flex: 1, height: 4, borderRadius: 2 },
-  strengthLabel: { fontSize: 12, fontWeight: '700', minWidth: 56, textAlign: 'right' },
-  matchRow: { marginTop: 8 },
-
-  // List rows (ville / pays)
-  listRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 15, paddingHorizontal: 4, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: theme.border, gap: 10 },
-  listRowActive: { backgroundColor: (isDark ? 'rgba(236,90,19,0.16)' : P.orange50) },
-  listRowIcon: { fontSize: 18, width: 24 },
+  listRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 15, paddingHorizontal: 8, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: theme.border, gap: 12, borderRadius: 10 },
+  listRowActive: { backgroundColor: isDark ? 'rgba(236,90,19,0.16)' : P.orange50 },
   listRowTxt: { flex: 1, fontSize: 15, color: theme.text, fontWeight: '500' },
   listRowDial: { fontSize: 13, color: theme.textMuted },
 });

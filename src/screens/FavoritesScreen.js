@@ -1,5 +1,7 @@
-// ─── FavoritesScreen — TakTak Niger ──────────────────────────────────────
-// Version premium redesign — moderne, bling-bling, engageant
+// ─── FavoritesScreen — TakTak ────────────────────────────────────────────────
+// Grille des annonces sauvegardées : filtres (disponibles, produits, services),
+// tri, état « vendu » visible, retrait instantané avec « Annuler », et accès
+// direct à la messagerie du vendeur (jamais de contact hors de l'app).
 
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
@@ -7,284 +9,201 @@ import {
   View,
   Text,
   StyleSheet,
-  TouchableOpacity,
+  Pressable,
   RefreshControl,
   ActivityIndicator,
   FlatList,
-  Dimensions,
   Animated,
+  ScrollView,
+  useWindowDimensions,
 } from 'react-native';
 import { Image } from 'expo-image';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
-import { BlurView } from 'expo-blur';
-import { Feather } from '@expo/vector-icons';
+import { Ionicons } from '@expo/vector-icons';
+import * as Haptics from 'expo-haptics';
 import { useAuth } from '../contexts/AuthContext';
 import { useAppTheme } from '../contexts/ThemeContext';
 import { getMyFavorites } from '../api/favorites';
 import { useFavorites } from '../hooks/useFavorites';
 import { MOBILE_COLORS as P } from '../theme/colors';
 import AlertModal from '../components/AlertModal';
-import { sizedImage } from '../utils/format';
+import { formatPrice, getCityName, getProductId, sizedImage, timeAgo } from '../utils/format';
 
-const { width } = Dimensions.get('window');
-const CARD_WIDTH = (width - 40) / 2;
+const GUTTER = 16;
+const GAP = 12;
+const SORTS = [
+  { value: 'recent', label: 'Récents', icon: 'time-outline' },
+  { value: 'price-asc', label: 'Prix croissant', icon: 'trending-up' },
+  { value: 'price-desc', label: 'Prix décroissant', icon: 'trending-down' },
+];
 
-// ─── HELPERS ──────────────────────────────────────────────────────────────────
+const tap = () => Haptics.selectionAsync().catch(() => {});
+const priceValue = (p) => Number(String(p ?? '').replace(/[^\d]/g, '')) || 0;
+const isUnavailable = (item) => item?.status === 'sold' || item?.status === 'expired';
 
-const formatPrice = (price) => {
-  if (!price && price !== 0) return 'Prix non spécifié';
-  return price === 0 ? 'Gratuit' : `${price.toLocaleString('fr-FR')} FCFA`;
-};
-
-const getCityName = (location) => {
-  if (!location) return '';
-  return location.split(',')[0].trim();
-};
-
-const getProductId = (product) => product?._id || product?.id;
-
-const getPostedLabel = (dateValue) => {
-  if (!dateValue) return 'Récent';
-  const date = new Date(dateValue);
-  if (Number.isNaN(date.getTime())) return 'Récent';
-  const diffMs = Date.now() - date.getTime();
-  const mins = Math.max(1, Math.floor(diffMs / 60000));
-  if (mins < 60) return `${mins} min`;
-  const hours = Math.floor(mins / 60);
-  if (hours < 24) return `${hours} h`;
-  const days = Math.floor(hours / 24);
-  if (days < 7) return `${days} j`;
-  return `${Math.floor(days / 7)} sem`;
-};
-
-const getDistanceKm = (itemId) => {
-  const distances = [0.5, 1.2, 2.3, 3.5, 4.8, 5.1, 6.7, 8.2, 10.5];
-  if (typeof itemId === 'string') {
-    const hash = itemId.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
-    return distances[hash % distances.length];
-  }
-  const n = Number(itemId) || 0;
-  return distances[Math.abs(n) % distances.length];
-};
-
-// ─── ANIMATED CARD ────────────────────────────────────────────────────────────
-
-const FavoriteCard = ({ item, onPress, onRemove, index }) => {
-  const scaleAnim = useRef(new Animated.Value(0)).current;
-  const fadeAnim = useRef(new Animated.Value(0)).current;
-  const heartScale = useRef(new Animated.Value(1)).current;
-
-  useEffect(() => {
-    Animated.parallel([
-      Animated.spring(scaleAnim, {
-        toValue: 1,
-        delay: index * 60,
-        tension: 80,
-        friction: 8,
-        useNativeDriver: true,
-      }),
-      Animated.timing(fadeAnim, {
-        toValue: 1,
-        duration: 400,
-        delay: index * 60,
-        useNativeDriver: true,
-      }),
-    ]).start();
-  }, []);
-
-  const handlePressIn = () => {
-    Animated.spring(scaleAnim, {
-      toValue: 0.96,
-      useNativeDriver: true,
-      tension: 200,
-      friction: 10,
-    }).start();
-  };
-
-  const handlePressOut = () => {
-    Animated.spring(scaleAnim, {
-      toValue: 1,
-      useNativeDriver: true,
-      tension: 200,
-      friction: 10,
-    }).start();
-  };
-
-  const handleHeartPress = () => {
-    Animated.sequence([
-      Animated.spring(heartScale, { toValue: 1.4, useNativeDriver: true, tension: 200 }),
-      Animated.spring(heartScale, { toValue: 1, useNativeDriver: true, tension: 200 }),
-    ]).start(() => onRemove(getProductId(item)));
-  };
-
-  const isSold = item.status === 'sold';
-  const isPending = item.status === 'pending';
+// ─── Carte ───────────────────────────────────────────────────────────────────
+const FavoriteCard = React.memo(function FavoriteCard({ item, width, styles, theme, isMine, onOpen, onRemove, onMessage }) {
+  const sold = item.status === 'sold';
+  const expired = item.status === 'expired';
+  const pending = item.status === 'pending';
   const isService = item.type === 'service';
-  const posted = getPostedLabel(item.createdAt || item.updatedAt);
-  const distance = getDistanceKm(getProductId(item));
+  const seller = item.seller || {};
+  const imageUri = sizedImage(item.mainImage || item.images?.[0], width);
+
+  // Retrait immédiat (le bandeau « Annuler » apparaît sans délai)
+  const remove = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+    onRemove(item);
+  };
 
   return (
-    <Animated.View
-      style={[
-        s.cardWrapper,
-        {
-          opacity: fadeAnim,
-          transform: [{ scale: scaleAnim }],
-        },
-      ]}
+    <Pressable
+      onPress={() => onOpen(item)}
+      style={({ pressed }) => [styles.card, { width }, pressed && { transform: [{ scale: 0.97 }] }]}
+      accessibilityRole="button"
+      accessibilityLabel={`${item.title}, ${formatPrice(item.price)}${sold ? ', vendu' : ''}`}
     >
-      <TouchableOpacity
-        activeOpacity={1}
-        onPress={() => onPress(item)}
-        onPressIn={handlePressIn}
-        onPressOut={handlePressOut}
-        style={s.card}
-      >
-        {/* Image container */}
-        <View style={s.imageContainer}>
-          <Image
-            source={{ uri: sizedImage(item.mainImage || item.images?.[0], 200) || 'https://via.placeholder.com/300' }}
-            style={s.cardImg}
-            contentFit="cover"
-          />
-
-          <View style={s.timeBadge}>
-            <Feather name="clock" size={10} color={P.charcoal} />
-            <Text style={s.timeBadgeTxt}>Il y a {posted}</Text>
+      <View style={[styles.imageBox, { height: width * 1.05 }]}>
+        {imageUri ? (
+          <Image source={{ uri: imageUri }} style={StyleSheet.absoluteFill} contentFit="cover" transition={200} />
+        ) : (
+          <View style={[StyleSheet.absoluteFill, styles.imageEmpty]}>
+            <Ionicons name="image-outline" size={30} color={theme.iconMuted} />
           </View>
+        )}
 
-          {(isSold || isPending) && (
-            <View style={[s.statusBadge, { backgroundColor: isSold ? 'rgba(17,24,39,0.85)' : 'rgba(245,158,11,0.9)' }]}>
-              <Text style={s.statusBadgeTxt}>{isSold ? '● Vendu' : '⏳ En attente'}</Text>
+        {/* Annonce plus disponible : image voilée + mention claire */}
+        {sold || expired ? (
+          <View style={styles.soldVeil}>
+            <View style={styles.soldPill}>
+              <Ionicons name={sold ? 'checkmark-done' : 'pause-circle-outline'} size={13} color="#fff" />
+              <Text style={styles.soldTxt}>{sold ? 'Vendu' : 'Indisponible'}</Text>
+            </View>
+          </View>
+        ) : null}
+
+        <LinearGradient colors={['transparent', 'rgba(0,0,0,0.45)']} style={styles.imageFade} pointerEvents="none" />
+
+        <View style={styles.badgesRow}>
+          {isService ? (
+            <View style={[styles.badge, { backgroundColor: P.blue600 }]}>
+              <Ionicons name="construct" size={10} color="#fff" />
+              <Text style={styles.badgeTxt}>Service</Text>
+            </View>
+          ) : null}
+          {pending ? (
+            <View style={[styles.badge, { backgroundColor: 'rgba(245,158,11,0.95)' }]}>
+              <Text style={styles.badgeTxt}>En attente</Text>
+            </View>
+          ) : null}
+        </View>
+
+        <Pressable onPress={remove} hitSlop={10} style={styles.heartBtn} accessibilityLabel="Retirer des favoris">
+          <Ionicons name="heart" size={19} color={P.terra} />
+        </Pressable>
+      </View>
+
+      <View style={styles.cardBody}>
+        <Text style={[styles.price, { color: isService ? P.blue600 : P.terra }, (sold || expired) && styles.priceOff]} numberOfLines={1}>
+          {formatPrice(item.price)}
+        </Text>
+        <Text style={styles.title} numberOfLines={2}>{item.title}</Text>
+        <View style={styles.metaRow}>
+          <Ionicons name="location-outline" size={12} color={theme.textSoft} />
+          <Text style={styles.meta} numberOfLines={1}>{getCityName(item.location)} · {timeAgo(item.createdAt)}</Text>
+        </View>
+
+        <View style={styles.sellerRow}>
+          {seller.avatar ? (
+            <Image source={{ uri: sizedImage(seller.avatar, 22) }} style={styles.sellerAvatar} contentFit="cover" />
+          ) : (
+            <View style={[styles.sellerAvatar, styles.sellerAvatarEmpty]}>
+              <Text style={styles.sellerInitial}>{(seller.businessName || seller.name || '?').slice(0, 1).toUpperCase()}</Text>
             </View>
           )}
-
-          {/* Heart remove button */}
-          <TouchableOpacity
-            style={s.heartBtn}
-            onPress={handleHeartPress}
-            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-          >
-            <BlurView intensity={40} tint="dark" style={s.heartBlur}>
-              <Animated.Text style={[s.heartIcon, { transform: [{ scale: heartScale }] }]}>
-                ♥
-              </Animated.Text>
-            </BlurView>
-          </TouchableOpacity>
+          <Text style={styles.sellerName} numberOfLines={1}>{seller.businessName || seller.name || 'Vendeur'}</Text>
+          {seller.verified ? <Ionicons name="checkmark-circle" size={12} color="#38bdf8" /> : null}
+          {!isMine && !sold && !expired && (seller._id || seller.id) ? (
+            <Pressable
+              onPress={() => onMessage(item)}
+              hitSlop={8}
+              style={({ pressed }) => [styles.msgBtn, pressed && { opacity: 0.8 }]}
+              accessibilityLabel={`Écrire à ${seller.name || 'ce vendeur'}`}
+            >
+              <Ionicons name="chatbubble-ellipses" size={15} color="#fff" />
+            </Pressable>
+          ) : null}
         </View>
-
-        {/* Content */}
-        <View style={s.cardContent}>
-          <View style={s.cardTitleRow}>
-            <View style={s.typeIconWrap}>
-              <Text style={s.typeIcon}>{isService ? '🛠️' : '📦'}</Text>
-            </View>
-            <Text style={s.cardTitle} numberOfLines={1}>{item.title}</Text>
-          </View>
-
-          <View style={s.locationRow}>
-            <Feather name="map-pin" size={10} color={P.terra} />
-            <Text style={s.locationTxt} numberOfLines={1}>{getCityName(item.location) || 'Niger'}</Text>
-            <Text style={s.locationSep}>•</Text>
-            <Text style={s.locationKm}>{distance.toFixed(1)} km</Text>
-          </View>
-
-          <View style={s.priceRow}>
-            <View style={s.priceSpacer} />
-            <Text style={[s.priceTxt, { color: isService ? '#2563EB' : P.terra }]}>{formatPrice(item.price)}</Text>
-          </View>
-        </View>
-      </TouchableOpacity>
-    </Animated.View>
+      </View>
+    </Pressable>
   );
-};
+});
 
-// ─── HEADER STATS BAR ─────────────────────────────────────────────────────────
-
-const StatsBar = ({ count, isDark, theme }) => (
-  <View style={s.statsBar}>
-
-    {/* Pill 1 — Nombre de favoris */}
-    <LinearGradient
-      colors={[P.orange500, P.orange600]}
-      start={{ x: 0, y: 0 }}
-      end={{ x: 1, y: 1 }}
-      style={[s.statPill, !isDark && { borderColor: theme.border }]}
-    >
-      <Text style={[s.statPillNum, !isDark && { color: theme.surface }]}>{count}</Text>
-      <Text style={[s.statPillLabel, !isDark && { color: theme.surface }]}>annonce{count > 1 ? 's' : ''} sauvegardée{count > 1 ? 's' : ''}</Text>
-    </LinearGradient>
-
-    {/* Pill 2 — Coups de cœur */}
-    <View style={[s.statPillGhost, !isDark && { backgroundColor: theme.surfaceAlt, borderColor: theme.border }]}> 
-      <Text style={s.statPillGhostIcon}>♥</Text>
-      <Text style={[s.statPillGhostLabel, !isDark && { color: theme.textMuted }]}>Mes coups{'\n'}de cœur</Text>
-    </View>
-
-  </View>
-);
-
-// ─── EMPTY STATE ──────────────────────────────────────────────────────────────
-
-const EmptyState = ({ type, onAction }) => {
-  const pulseAnim = useRef(new Animated.Value(1)).current;
-
+// ─── Squelette ───────────────────────────────────────────────────────────────
+function SkeletonGrid({ width, styles }) {
+  const pulse = useRef(new Animated.Value(0.5)).current;
   useEffect(() => {
-    const loop = Animated.loop(
-      Animated.sequence([
-        Animated.timing(pulseAnim, { toValue: 1.12, duration: 900, useNativeDriver: true }),
-        Animated.timing(pulseAnim, { toValue: 1, duration: 900, useNativeDriver: true }),
-      ])
-    );
+    const loop = Animated.loop(Animated.sequence([
+      Animated.timing(pulse, { toValue: 1, duration: 700, useNativeDriver: true }),
+      Animated.timing(pulse, { toValue: 0.5, duration: 700, useNativeDriver: true }),
+    ]));
     loop.start();
     return () => loop.stop();
-  }, []);
-
+  }, [pulse]);
   return (
-    <View style={s.emptyContainer}>
-      <Animated.View style={[s.emptyIconWrap, { transform: [{ scale: pulseAnim }] }]}>
-        <LinearGradient
-          colors={[P.orange100, P.peachSoft]}
-          style={s.emptyIconBg}
-        >
-          <Text style={s.emptyIcon}>♥</Text>
+    <Animated.View style={[styles.skeletonWrap, { opacity: pulse }]}>
+      {Array.from({ length: 4 }).map((_, i) => (
+        <View key={i} style={{ width, gap: 8 }}>
+          <View style={[styles.skel, { height: width * 1.05, borderRadius: 18 }]} />
+          <View style={[styles.skel, { width: '50%', height: 14, borderRadius: 7 }]} />
+          <View style={[styles.skel, { width: '85%', height: 12, borderRadius: 6 }]} />
+        </View>
+      ))}
+    </Animated.View>
+  );
+}
+
+// ─── État vide ───────────────────────────────────────────────────────────────
+function EmptyState({ styles, icon, title, text, action, onAction }) {
+  const pulse = useRef(new Animated.Value(1)).current;
+  useEffect(() => {
+    const loop = Animated.loop(Animated.sequence([
+      Animated.timing(pulse, { toValue: 1.08, duration: 900, useNativeDriver: true }),
+      Animated.timing(pulse, { toValue: 1, duration: 900, useNativeDriver: true }),
+    ]));
+    loop.start();
+    return () => loop.stop();
+  }, [pulse]);
+  return (
+    <View style={styles.empty}>
+      <Animated.View style={[styles.emptyHalo, { transform: [{ scale: pulse }] }]}>
+        <LinearGradient colors={[P.orange500, P.orange700]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.emptyIcon}>
+          <Ionicons name={icon} size={34} color="#fff" />
         </LinearGradient>
       </Animated.View>
-
-      <Text style={s.emptyTitle}>
-        {type === 'auth' ? 'Vos coups de cœur' : 'Aucun favori'}
-      </Text>
-      <Text style={s.emptyDesc}>
-        {type === 'auth'
-          ? 'Connectez-vous pour sauvegarder vos annonces préférées et les retrouver à tout moment.'
-          : 'Parcourez les annonces et cliquez sur ♡ pour les ajouter.'}
-      </Text>
-
-      <TouchableOpacity onPress={onAction} activeOpacity={0.85}>
-        <LinearGradient
-          colors={[P.orange600, P.terra]}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 0 }}
-          style={s.emptyBtn}
-        >
-          <Text style={s.emptyBtnTxt}>
-            {type === 'auth' ? 'Se connecter' : 'Explorer les annonces →'}
-          </Text>
-        </LinearGradient>
-      </TouchableOpacity>
+      <Text style={styles.emptyTitle}>{title}</Text>
+      <Text style={styles.emptyText}>{text}</Text>
+      {action ? (
+        <Pressable onPress={onAction} style={({ pressed }) => [styles.emptyBtn, pressed && { opacity: 0.85 }]}>
+          <Text style={styles.emptyBtnTxt}>{action}</Text>
+          <Ionicons name="arrow-forward" size={16} color="#fff" />
+        </Pressable>
+      ) : null}
     </View>
   );
-};
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
-// COMPOSANT PRINCIPAL
-// ─────────────────────────────────────────────────────────────────────────────
-
 export default function FavoritesScreen({ navigation }) {
   const insets = useSafeAreaInsets();
+  const { width: screenW } = useWindowDimensions();
+  const cardW = Math.floor((screenW - GUTTER * 2 - GAP) / 2);
   const { isDark, theme } = useAppTheme();
-  const { isAuthenticated } = useAuth();
+  const styles = useMemo(() => createStyles(theme, isDark), [theme, isDark]);
+  const { isAuthenticated, user } = useAuth();
+  const myId = String(user?.id || user?._id || '');
+
   // Favoris partagés par toute l'app : retirer ici met à jour les cœurs partout,
   // et un favori ajouté ailleurs fait recharger cette liste au retour sur l'écran
   const { favorites: favoriteIds, toggleFavorite: toggleSharedFavorite } = useFavorites();
@@ -299,23 +218,11 @@ export default function FavoritesScreen({ navigation }) {
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [loadingMore, setLoadingMore] = useState(false);
-  const [alert, setAlert] = useState({
-    visible: false,
-    type: 'info',
-    title: '',
-    message: '',
-    buttons: [{ text: 'OK', onPress: () => {} }],
-  });
-
-  const headerAnim = useRef(new Animated.Value(0)).current;
-
-  useEffect(() => {
-    Animated.timing(headerAnim, {
-      toValue: 1,
-      duration: 600,
-      useNativeDriver: true,
-    }).start();
-  }, []);
+  const [filter, setFilter] = useState('all');
+  const [sort, setSort] = useState('recent');
+  const [undo, setUndo] = useState(null); // { item, index }
+  const undoTimer = useRef(null);
+  const [alert, setAlert] = useState({ visible: false, type: 'info', title: '', message: '', buttons: [{ text: 'OK', onPress: () => {} }] });
 
   // mode : 'initial' (squelette), 'refresh' (tirer pour rafraîchir), 'silent' (sans indicateur)
   const loadFavorites = async (pageNum = 1, mode = 'initial') => {
@@ -327,19 +234,13 @@ export default function FavoritesScreen({ navigation }) {
 
       const response = await getMyFavorites(pageNum, 20);
       if (response.success) {
-        setFavorites(prev => pageNum === 1 ? response.data : [...prev, ...response.data]);
+        setFavorites((prev) => (pageNum === 1 ? response.data : [...prev, ...response.data]));
         setPage(pageNum);
         setTotalPages(response.pagination.pages);
         if (pageNum === 1) loadedIdsKeyRef.current = idsKeyRef.current;
       }
     } catch (error) {
-      setAlert({
-        visible: true,
-        type: 'error',
-        title: 'Erreur',
-        message: error.message || 'Impossible de charger les favoris',
-        buttons: [{ text: 'OK', onPress: () => {} }],
-      });
+      setAlert({ visible: true, type: 'error', title: 'Erreur', message: error.message || 'Impossible de charger les favoris', buttons: [{ text: 'OK', onPress: () => {} }] });
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -357,165 +258,195 @@ export default function FavoritesScreen({ navigation }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [idsKey]));
 
+  useEffect(() => () => { if (undoTimer.current) clearTimeout(undoTimer.current); }, []);
+
   const onRefresh = useCallback(() => loadFavorites(1, 'refresh'), []);
   const loadMore = () => { if (!loadingMore && page < totalPages) loadFavorites(page + 1); };
 
-  const handleRemoveFavorite = (productId) => {
-    setAlert({
-      visible: true,
-      type: 'warning',
-      title: 'Retirer des favoris',
-      message: 'Voulez-vous retirer cette annonce de vos favoris ?',
-      buttons: [
-        { text: 'Annuler', onPress: () => {} },
-        {
-          text: 'Retirer',
-          onPress: () => {
-            setAlert({ ...alert, visible: false });
-            // Optimiste : retrait immédiat ici et sur tous les écrans (annulé par le hook si l'API échoue)
-            toggleSharedFavorite({ id: productId });
-            setFavorites(prev => prev.filter(item => getProductId(item) !== productId));
-            loadedIdsKeyRef.current = [...favoriteIds].filter((id) => id !== productId).sort().join(',');
-          },
-        },
-      ],
+  // Retrait instantané, annulable pendant 5 s
+  const removeFavorite = useCallback((item) => {
+    const id = getProductId(item);
+    setUndo({ item, index: favorites.findIndex((f) => getProductId(f) === id) });
+    setFavorites((prev) => prev.filter((f) => getProductId(f) !== id));
+    toggleSharedFavorite({ id });
+    loadedIdsKeyRef.current = [...favoriteIds].filter((x) => x !== id).sort().join(',');
+    if (undoTimer.current) clearTimeout(undoTimer.current);
+    undoTimer.current = setTimeout(() => setUndo(null), 5000);
+  }, [favorites, favoriteIds, toggleSharedFavorite]);
+
+  const cancelRemove = () => {
+    if (!undo) return;
+    tap();
+    const { item, index } = undo;
+    const id = getProductId(item);
+    toggleSharedFavorite({ id });
+    setFavorites((prev) => {
+      const next = [...prev];
+      next.splice(Math.max(0, Math.min(index, next.length)), 0, item);
+      return next;
     });
+    loadedIdsKeyRef.current = [...favoriteIds, id].sort().join(',');
+    setUndo(null);
+    if (undoTimer.current) clearTimeout(undoTimer.current);
   };
 
-  const openDetail = (product) => {
+  const openDetail = useCallback((product) => {
     const productId = getProductId(product);
-    if (!productId) {
-      setAlert({
-        visible: true,
-        type: 'error',
-        title: 'Erreur',
-        message: 'Identifiant de l\'annonce introuvable',
-        buttons: [{ text: 'OK', onPress: () => {} }],
-      });
-      return;
-    }
-    // Carte transmise pour un affichage instantané de la fiche
-    const preview = favorites.find((item) => getProductId(item) === productId);
-    navigation.navigate('ProductDetail', { productId, ...(preview ? { preview } : {}) });
+    if (!productId) return;
+    navigation.navigate('ProductDetail', { productId, preview: product });
+  }, [navigation]);
+
+  // Messagerie de l'app uniquement (la liste des conversations crée ou rouvre la discussion)
+  const messageSeller = useCallback((product) => {
+    const sellerId = product?.seller?._id || product?.seller?.id;
+    if (!sellerId) return;
+    tap();
+    navigation.navigate('Messages', { sellerId: String(sellerId), productId: getProductId(product) });
+  }, [navigation]);
+
+  const counts = useMemo(() => {
+    const c = { all: favorites.length, available: 0, product: 0, service: 0, sold: 0 };
+    favorites.forEach((f) => {
+      if (isUnavailable(f)) c.sold += 1; else c.available += 1;
+      if (f.type === 'service') c.service += 1; else c.product += 1;
+    });
+    return c;
+  }, [favorites]);
+
+  const visible = useMemo(() => {
+    let list = favorites.filter((f) => (
+      filter === 'all' ? true
+        : filter === 'available' ? !isUnavailable(f)
+          : filter === 'service' ? f.type === 'service'
+            : f.type !== 'service'
+    ));
+    if (sort === 'price-asc') list = [...list].sort((a, b) => priceValue(a.price) - priceValue(b.price));
+    if (sort === 'price-desc') list = [...list].sort((a, b) => priceValue(b.price) - priceValue(a.price));
+    return list;
+  }, [favorites, filter, sort]);
+
+  const sortInfo = SORTS.find((x) => x.value === sort) || SORTS[0];
+  const cycleSort = () => {
+    tap();
+    const i = SORTS.findIndex((x) => x.value === sort);
+    setSort(SORTS[(i + 1) % SORTS.length].value);
   };
-  
 
-  // ─── HEADER ────────────────────────────────────────────────────────────────
-  const renderHeader = () => (
-    <Animated.View style={{ opacity: headerAnim, transform: [{ translateY: headerAnim.interpolate({ inputRange: [0, 1], outputRange: [-20, 0] }) }] }}>
-      <LinearGradient
-        colors={theme.header}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 1 }}
-        style={[s.header, { paddingTop: insets.top + 12 }]}
-      >
-        {/* Accent strip */}
-        <View style={s.headerAccent} />
-
-        <View style={s.headerTop}>
-          <View>
-            <Text style={[s.headerEyebrow, { color: isDark ? P.amber : theme.textMuted }]}>TakTak Niger</Text>
-            <Text style={[s.headerTitle, { color: theme.text }]}>Mes Favoris</Text>
-          </View>
-          <View style={s.headerBadge}>
-            <LinearGradient colors={[P.orange500, P.orange600]} style={s.headerBadgeGrad}>
-              <Text style={s.headerBadgeNum}>{favorites.length}</Text>
-            </LinearGradient>
-          </View>
-        </View>
-
-        {favorites.length > 0 && <StatsBar count={favorites.length} isDark={isDark} theme={theme} />}
-
-        {/* Bottom glow line */}
-        <LinearGradient
-          colors={['transparent', P.terra, 'transparent']}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 0 }}
-          style={s.headerGlowLine}
-        />
-      </LinearGradient>
-    </Animated.View>
-  );
-
-  // ─── RENDU CARTE ───────────────────────────────────────────────────────────
-  const renderItem = ({ item, index }) => (
-    <FavoriteCard
-      item={item}
-      index={index}
-      onPress={() => {
-        openDetail(item)}}
-      onRemove={handleRemoveFavorite}
-    />
-  );
-
-  // ─── GUARD: NON CONNECTÉ ───────────────────────────────────────────────────
+  // ─── Non connecté ──────────────────────────────────────────────────────────
   if (!isAuthenticated) {
     return (
-      <View style={[s.container, { paddingTop: insets.top, backgroundColor: theme.screen }]}>
+      <View style={[styles.container, { paddingTop: insets.top }]}>
         <EmptyState
-          type="auth"
-          onAction={() => navigation.navigate('QuickAuth', {
-            pendingAction: { type: 'favorites' },
-            returnScreen: 'Favorites'
-          })}
+          styles={styles}
+          icon="heart"
+          title="Vos coups de cœur"
+          text="Connectez-vous pour sauvegarder les annonces qui vous plaisent et les retrouver sur tous vos appareils."
+          action="Se connecter"
+          onAction={() => navigation.navigate('QuickAuth', { pendingAction: { type: 'favorites' }, returnScreen: 'Favorites' })}
         />
       </View>
     );
   }
 
-  // ─── GUARD: CHARGEMENT ─────────────────────────────────────────────────────
-  if (loading) {
-    return (
-      <View style={[s.container, { backgroundColor: theme.screen }]}> 
-        {renderHeader()}
-        <View style={s.loadingContainer}>
-          <ActivityIndicator size="large" color={P.terra} />
-          <Text style={s.loadingTxt}>Chargement de vos favoris…</Text>
+  const filters = [
+    { value: 'all', label: 'Tous', count: counts.all },
+    { value: 'available', label: 'Disponibles', count: counts.available },
+    { value: 'product', label: 'Produits', count: counts.product },
+    { value: 'service', label: 'Services', count: counts.service },
+  ];
+
+  const header = (
+    <View style={[styles.header, { paddingTop: insets.top + 10 }]}>
+      <View style={styles.titleRow}>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.headerTitle}>Favoris</Text>
+          <Text style={styles.headerSub}>
+            {favorites.length
+              ? `${counts.available} disponible${counts.available > 1 ? 's' : ''}${counts.sold ? ` · ${counts.sold} vendue${counts.sold > 1 ? 's' : ''}` : ''}`
+              : 'Vos annonces sauvegardées'}
+          </Text>
         </View>
+        {favorites.length > 1 ? (
+          <Pressable onPress={cycleSort} style={({ pressed }) => [styles.sortBtn, pressed && { opacity: 0.8 }]} accessibilityLabel={`Trier : ${sortInfo.label}`}>
+            <Ionicons name={sortInfo.icon} size={15} color={theme.text} />
+            <Text style={styles.sortTxt}>{sortInfo.label}</Text>
+          </Pressable>
+        ) : null}
       </View>
-    );
-  }
 
-  // ─── GUARD: LISTE VIDE ─────────────────────────────────────────────────────
-  if (favorites.length === 0) {
-    return (
-      <View style={[s.container, { backgroundColor: theme.screen }]}> 
-        {renderHeader()}
-        <EmptyState type="empty" onAction={() => navigation.navigate('Home')} />
-      </View>
-    );
-  }
+      {favorites.length > 0 ? (
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips}>
+          {filters.map((f) => {
+            const active = filter === f.value;
+            return (
+              <Pressable
+                key={f.value}
+                onPress={() => { tap(); setFilter(f.value); }}
+                style={[styles.chip, active && styles.chipActive]}
+                accessibilityRole="tab"
+                accessibilityState={{ selected: active }}
+              >
+                <Text style={[styles.chipTxt, active && styles.chipTxtActive]}>{f.label}</Text>
+                <Text style={[styles.chipCount, active && styles.chipTxtActive]}>{f.count}</Text>
+              </Pressable>
+            );
+          })}
+        </ScrollView>
+      ) : null}
+    </View>
+  );
 
-  // ─── LISTE ─────────────────────────────────────────────────────────────────
+  const emptyProps = favorites.length === 0
+    ? { icon: 'heart', title: 'Aucun favori pour l\'instant', text: 'Touchez le cœur ♡ d\'une annonce pour la garder ici et la retrouver en un instant.', action: 'Découvrir les annonces', onAction: () => navigation.navigate('Home') }
+    : { icon: 'funnel-outline', title: 'Rien dans ce filtre', text: 'Aucun favori ne correspond à ce choix.', action: 'Voir tous mes favoris', onAction: () => setFilter('all') };
+
   return (
-    <View style={[s.container, { backgroundColor: theme.screen }]}> 
-      {renderHeader()}
-      <FlatList
-        data={favorites}
-        renderItem={renderItem}
-        keyExtractor={(item, index) => getProductId(item) || `fav-${index}`}
-        contentContainerStyle={s.listContent}
-        numColumns={2}
-        columnWrapperStyle={s.listRow}
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={onRefresh}
-            colors={[P.terra]}
-            tintColor={P.terra}
-          />
-        }
-        onEndReached={loadMore}
-        onEndReachedThreshold={0.5}
-        showsVerticalScrollIndicator={false}
-        ListFooterComponent={
-          loadingMore ? (
-            <View style={s.loadingMore}>
-              <ActivityIndicator size="small" color={P.terra} />
-            </View>
-          ) : null
-        }
-      />
+    <View style={styles.container}>
+      {loading ? (
+        <>
+          {header}
+          <SkeletonGrid width={cardW} styles={styles} />
+        </>
+      ) : (
+        <FlatList
+          data={visible}
+          numColumns={2}
+          key="grid"
+          keyExtractor={(item, index) => getProductId(item) || `fav-${index}`}
+          renderItem={({ item }) => (
+            <FavoriteCard
+              item={item}
+              width={cardW}
+              styles={styles}
+              theme={theme}
+              isMine={String(item?.seller?._id || item?.seller?.id || '') === myId}
+              onOpen={openDetail}
+              onRemove={removeFavorite}
+              onMessage={messageSeller}
+            />
+          )}
+          ListHeaderComponent={header}
+          ListEmptyComponent={<EmptyState styles={styles} {...emptyProps} />}
+          columnWrapperStyle={styles.row}
+          contentContainerStyle={[visible.length === 0 && { flexGrow: 1 }, { paddingBottom: Math.max(insets.bottom, 12) + 120 }]}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[P.terra]} tintColor={P.terra} />}
+          onEndReached={loadMore}
+          onEndReachedThreshold={0.5}
+          showsVerticalScrollIndicator={false}
+          ListFooterComponent={loadingMore ? <ActivityIndicator style={{ marginVertical: 18 }} color={P.terra} /> : null}
+        />
+      )}
+
+      {/* Retrait annulable */}
+      {undo ? (
+        <View style={[styles.snack, { bottom: Math.max(insets.bottom, 12) + 96 }]}>
+          <Ionicons name="heart-dislike-outline" size={17} color="#fff" />
+          <Text style={styles.snackTxt} numberOfLines={1}>Retiré des favoris</Text>
+          <Pressable onPress={cancelRemove} hitSlop={10}>
+            <Text style={styles.snackAction}>ANNULER</Text>
+          </Pressable>
+        </View>
+      ) : null}
 
       <AlertModal
         visible={alert.visible}
@@ -523,324 +454,86 @@ export default function FavoritesScreen({ navigation }) {
         title={alert.title}
         message={alert.message}
         buttons={alert.buttons}
-        onDismiss={() => setAlert({ ...alert, visible: false })}
+        onDismiss={() => setAlert((a) => ({ ...a, visible: false }))}
       />
     </View>
   );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// STYLES
-// ─────────────────────────────────────────────────────────────────────────────
+// ─── Styles ──────────────────────────────────────────────────────────────────
+const createStyles = (theme, isDark) => StyleSheet.create({
+  container: { flex: 1, backgroundColor: theme.screen },
 
-const s = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: P.sand,
+  header: { paddingHorizontal: GUTTER, paddingBottom: 6 },
+  titleRow: { flexDirection: 'row', alignItems: 'flex-end', gap: 12 },
+  headerTitle: { fontSize: 30, fontWeight: '900', color: theme.text, letterSpacing: -0.8 },
+  headerSub: { fontSize: 13, fontWeight: '600', color: theme.textMuted, marginTop: 2 },
+  sortBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 6, height: 36, paddingHorizontal: 12, borderRadius: 18,
+    backgroundColor: isDark ? theme.surface : '#ffffff', borderWidth: 1, borderColor: theme.border,
   },
+  sortTxt: { fontSize: 12.5, fontWeight: '700', color: theme.text },
 
-  // ─── Header ─────────────────────────────────────────────────────────────────
-  header: {
-    paddingHorizontal: 20,
-    paddingBottom: 0,
-    overflow: 'hidden',
+  chips: { gap: 8, paddingTop: 14, paddingBottom: 10, paddingRight: GUTTER },
+  chip: {
+    flexDirection: 'row', alignItems: 'center', gap: 6, height: 36, paddingHorizontal: 14, borderRadius: 18,
+    backgroundColor: isDark ? theme.surface : '#ffffff', borderWidth: 1, borderColor: theme.border,
   },
-  headerAccent: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    height: 3,
-    backgroundColor: P.terra,
-  },
-  headerTop: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 16,
-  },
-  headerEyebrow: {
-    fontSize: 11,
-    fontWeight: '600',
-    color: P.amber,
-    letterSpacing: 2,
-    textTransform: 'uppercase',
-    marginBottom: 4,
-  },
-  headerTitle: {
-    fontSize: 30,
-    fontWeight: '800',
-    color: P.white,
-    letterSpacing: -0.5,
-  },
-  headerBadge: {
-    borderRadius: 20,
-    overflow: 'hidden',
-  },
-  headerBadgeGrad: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  headerBadgeNum: {
-    fontSize: 16,
-    fontWeight: '900',
-    color: P.white,
-  },
-  headerGlowLine: {
-    height: 2,
-    marginTop: 4,
-  },
+  chipActive: { backgroundColor: P.terra, borderColor: P.terra },
+  chipTxt: { fontSize: 13.5, fontWeight: '700', color: theme.textMuted },
+  chipTxtActive: { color: '#fff' },
+  chipCount: { fontSize: 12, fontWeight: '800', color: theme.textSoft },
 
-  // ─── Stats bar ──────────────────────────────────────────────────────────────
-  statsBar: {
-    flexDirection: 'row',
-    alignItems: 'stretch',
-    gap: 10,
-    paddingTop: 12,
-    paddingBottom: 18,
-  },
-  statPill: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    paddingVertical: 12,
-    paddingHorizontal: 14,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.12)',
-  },
-  statPillNum: {
-    fontSize: 26,
-    fontWeight: '900',
-    color: P.white,
-    lineHeight: 30,
-  },
-  statPillLabel: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: 'rgba(255,255,255,0.85)',
-    lineHeight: 16,
-    flexShrink: 1,
-  },
-  statPillGhost: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    paddingVertical: 12,
-    paddingHorizontal: 14,
-    borderRadius: 14,
-    borderWidth: 1.5,
-    borderColor: 'rgba(236,90,19,0.45)',
-    backgroundColor: 'rgba(236,90,19,0.1)',
-  },
-  statPillGhostIcon: {
-    fontSize: 20,
-    color: P.amber,
-    lineHeight: 24,
-  },
-  statPillGhostLabel: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: 'rgba(255,255,255,0.75)',
-    lineHeight: 16,
-  },
+  row: { gap: GAP, paddingHorizontal: GUTTER, marginBottom: 18 },
 
-  // ─── Liste ──────────────────────────────────────────────────────────────────
-  listContent: {
-    padding: 12,
-    paddingBottom: 110,
-  },
-  listRow: {
-    justifyContent: 'space-between',
-  },
-
-  // ─── Carte ──────────────────────────────────────────────────────────────────
-  cardWrapper: {
-    width: CARD_WIDTH,
-    marginBottom: 14,
-  },
-  card: {
-    backgroundColor: P.white,
-    borderRadius: 16,
-    overflow: 'hidden',
-    // Shadow iOS
-    shadowColor: P.charcoal,
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.12,
-    shadowRadius: 14,
-    // Shadow Android
-    elevation: 6,
-  },
-  imageContainer: {
-    position: 'relative',
-    height: 148,
-  },
-  cardImg: {
-    width: '100%',
-    height: '100%',
-    backgroundColor: P.sand,
-  },
-  timeBadge: {
-    position: 'absolute',
-    top: 8,
-    left: 8,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 3,
-    backgroundColor: 'rgba(255,255,255,0.92)',
-    borderRadius: 8,
-    paddingHorizontal: 7,
-    paddingVertical: 4,
-  },
-  timeBadgeTxt: { fontSize: 9, fontWeight: '700', color: P.charcoal },
-  statusBadge: {
-    position: 'absolute',
-    bottom: 8,
-    left: 8,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 6,
-  },
-  statusBadgeTxt: {
-    color: P.white,
-    fontSize: 10,
-    fontWeight: '700',
-  },
+  card: {},
+  imageBox: { borderRadius: 18, overflow: 'hidden', backgroundColor: theme.surfaceAlt },
+  imageEmpty: { alignItems: 'center', justifyContent: 'center' },
+  imageFade: { position: 'absolute', left: 0, right: 0, bottom: 0, height: 56 },
+  soldVeil: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(17,24,39,0.5)', alignItems: 'center', justifyContent: 'center', zIndex: 1 },
+  soldPill: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 14, backgroundColor: 'rgba(17,24,39,0.85)' },
+  soldTxt: { color: '#fff', fontSize: 12.5, fontWeight: '800', letterSpacing: 0.3 },
+  badgesRow: { position: 'absolute', left: 8, bottom: 8, flexDirection: 'row', gap: 5, zIndex: 2 },
+  badge: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 9 },
+  badgeTxt: { color: '#fff', fontSize: 10.5, fontWeight: '800' },
   heartBtn: {
-    position: 'absolute',
-    top: 8,
-    right: 10,
-    borderRadius: 16,
-    overflow: 'hidden',
-    zIndex: 6,
-    elevation: 6,
-  },
-  heartBlur: {
-    width: 34,
-    height: 34,
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderRadius: 17,
-    borderWidth: 1,
-    borderColor: 'rgba(236,90,19,0.2)',
-  },
-  heartIcon: {
-    fontSize: 14,
-    color: P.terra,
-    lineHeight: 16,
+    position: 'absolute', top: 8, right: 8, width: 36, height: 36, borderRadius: 18, zIndex: 2,
+    alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(255,255,255,0.95)',
+    shadowColor: '#000', shadowOpacity: 0.15, shadowRadius: 6, shadowOffset: { width: 0, height: 2 }, elevation: 3,
   },
 
-  // ─── Card content ───────────────────────────────────────────────────────────
-  cardContent: {
-    paddingHorizontal: 10,
-    paddingVertical: 9,
-    gap: 6,
-  },
-  cardTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  typeIconWrap: { width: 18, minWidth: 18, alignItems: 'center', justifyContent: 'center' },
-  typeIcon: { fontSize: 14 },
-  cardTitle: {
-    flex: 1,
-    fontSize: 12,
-    fontWeight: '700',
-    color: P.charcoal,
-  },
-  locationRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-  locationTxt: {
-    flexShrink: 1,
-    maxWidth: CARD_WIDTH * 0.32,
-    fontSize: 10,
-    color: P.muted,
-  },
-  locationSep: { fontSize: 11, color: P.muted },
-  locationKm: { fontSize: 9, color: P.muted, fontWeight: '600' },
-  priceRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: 5 },
-  priceSpacer: { width: 14 },
-  priceTxt: { fontSize: 12, fontWeight: '900', color: P.terra },
+  cardBody: { paddingTop: 9, paddingHorizontal: 2, gap: 3 },
+  price: { fontSize: 16, fontWeight: '900', letterSpacing: -0.3 },
+  priceOff: { color: theme.textSoft, textDecorationLine: 'line-through' },
+  title: { fontSize: 13.5, fontWeight: '600', color: theme.text, lineHeight: 18 },
+  metaRow: { flexDirection: 'row', alignItems: 'center', gap: 3, marginTop: 1 },
+  meta: { flex: 1, fontSize: 11.5, color: theme.textSoft },
+  sellerRow: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 6 },
+  sellerAvatar: { width: 22, height: 22, borderRadius: 11 },
+  sellerAvatarEmpty: { backgroundColor: isDark ? 'rgba(255,255,255,0.1)' : P.orange100, alignItems: 'center', justifyContent: 'center' },
+  sellerInitial: { fontSize: 10, fontWeight: '800', color: P.terra },
+  sellerName: { flexShrink: 1, fontSize: 12, fontWeight: '600', color: theme.textMuted },
+  msgBtn: { marginLeft: 'auto', width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center', backgroundColor: P.terra },
 
-  // ─── Empty state ────────────────────────────────────────────────────────────
-  emptyContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 40,
-    paddingBottom: 60,
-  },
-  emptyIconWrap: {
-    marginBottom: 24,
-    borderRadius: 50,
-    overflow: 'hidden',
-    // Glow effect iOS
-    shadowColor: P.terra,
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.3,
-    shadowRadius: 20,
-    elevation: 10,
-  },
-  emptyIconBg: {
-    width: 100,
-    height: 100,
-    borderRadius: 50,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  emptyIcon: {
-    fontSize: 44,
-    color: P.terra,
-  },
-  emptyTitle: {
-    fontSize: 24,
-    fontWeight: '800',
-    color: P.charcoal,
-    marginBottom: 10,
-    textAlign: 'center',
-  },
-  emptyDesc: {
-    fontSize: 14,
-    color: P.muted,
-    textAlign: 'center',
-    lineHeight: 22,
-    marginBottom: 28,
-  },
-  emptyBtn: {
-    paddingVertical: 15,
-    paddingHorizontal: 36,
-    borderRadius: 14,
-    // Glow
-    shadowColor: P.terra,
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.35,
-    shadowRadius: 12,
-    elevation: 8,
-  },
-  emptyBtnTxt: {
-    fontSize: 15,
-    fontWeight: '800',
-    color: P.white,
-    letterSpacing: 0.3,
-  },
+  skeletonWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: GAP, paddingHorizontal: GUTTER, paddingTop: 14 },
+  skel: { backgroundColor: isDark ? 'rgba(255,255,255,0.08)' : '#e7e9ee' },
 
-  // ─── Loading ────────────────────────────────────────────────────────────────
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    gap: 12,
+  snack: {
+    position: 'absolute', left: GUTTER, right: GUTTER, flexDirection: 'row', alignItems: 'center', gap: 10,
+    paddingHorizontal: 16, height: 50, borderRadius: 16, backgroundColor: 'rgba(17,24,39,0.95)',
+    shadowColor: '#000', shadowOpacity: 0.25, shadowRadius: 12, shadowOffset: { width: 0, height: 6 }, elevation: 8,
   },
-  loadingTxt: {
-    fontSize: 14,
-    color: P.muted,
+  snackTxt: { flex: 1, color: '#fff', fontSize: 14, fontWeight: '600' },
+  snackAction: { color: P.amber, fontSize: 13.5, fontWeight: '900', letterSpacing: 0.5 },
+
+  empty: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 36, paddingVertical: 48 },
+  emptyHalo: {
+    width: 120, height: 120, borderRadius: 60, alignItems: 'center', justifyContent: 'center', marginBottom: 22,
+    backgroundColor: isDark ? 'rgba(236,90,19,0.12)' : '#fff1e8',
   },
-  loadingMore: {
-    paddingVertical: 24,
-    alignItems: 'center',
-  },
+  emptyIcon: { width: 76, height: 76, borderRadius: 26, alignItems: 'center', justifyContent: 'center', transform: [{ rotate: '-8deg' }] },
+  emptyTitle: { fontSize: 21, fontWeight: '900', color: theme.text, textAlign: 'center', letterSpacing: -0.4 },
+  emptyText: { fontSize: 14.5, lineHeight: 21, color: theme.textMuted, textAlign: 'center', marginTop: 8, maxWidth: 300 },
+  emptyBtn: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 24, paddingHorizontal: 22, height: 48, borderRadius: 16, backgroundColor: P.terra },
+  emptyBtnTxt: { color: '#fff', fontSize: 15, fontWeight: '800' },
 });

@@ -11,7 +11,7 @@ import { getCategories } from '../api/categories';
 import { useAppTheme } from '../contexts/ThemeContext';
 import { MOBILE_COLORS as P } from '../theme/colors';
 import PressableScale from '../components/home/PressableScale';
-import { categoryEmoji } from '../components/home/CategoryRail';
+import CategoryIcon from '../components/CategoryIcon';
 import { SkeletonGroup, Bone } from '../components/home/Skeleton';
 
 const GAP = 12;
@@ -36,7 +36,7 @@ function CategoryCard({ cat, width, onPress, query }) {
     >
       <View style={s.cardTop}>
         <View style={[s.emojiBox, { backgroundColor: isDark ? 'rgba(236,90,19,0.14)' : P.orange50 }]}>
-          <Text style={s.emoji}>{categoryEmoji(cat)}</Text>
+          <CategoryIcon item={cat} size={34} />
         </View>
         <View style={[s.countPill, { backgroundColor: theme.glass }]}>
           <Text style={[s.countTxt, { color: theme.textMuted }]}>{count}</Text>

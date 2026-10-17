@@ -10,6 +10,7 @@ import {
   Modal,
   PanResponder,
   Platform,
+  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -45,7 +46,9 @@ import {
 import { checkReviewEligibility, createReview } from '../api/reviews';
 import { useSocket } from '../hooks/useSocket';
 import { MOBILE_COLORS as P } from '../theme/colors';
-import { sizedImage } from '../utils/format';
+import { getInitials, sizedImage } from '../utils/format';
+import * as Haptics from 'expo-haptics';
+import * as Clipboard from 'expo-clipboard';
 
 function normalizeId(value) {
   if (!value) return '';
@@ -117,7 +120,10 @@ function formatDateSeparator(value) {
   const msgDay = new Date(date.getFullYear(), date.getMonth(), date.getDate());
   if (msgDay.getTime() === today.getTime()) return "Aujourd'hui";
   if (msgDay.getTime() === yesterday.getTime()) return 'Hier';
-  return date.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+  const days = ['dimanche', 'lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi'];
+  const months = ['janvier', 'février', 'mars', 'avril', 'mai', 'juin', 'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre'];
+  const label = `${days[date.getDay()]} ${date.getDate()} ${months[date.getMonth()]}`;
+  return date.getFullYear() === now.getFullYear() ? label : `${label} ${date.getFullYear()}`;
 }
 
 function isSameDay(a, b) {
@@ -498,6 +504,15 @@ export default function ConversationScreen({ route, navigation }) {
   messagesRef.current = messages;
   // Liste inversée : le plus récent en premier (affiché en bas)
   const listData = useMemo(() => [...messages].reverse(), [messages]);
+
+  const [toast, setToast] = useState('');
+  const toastTimerRef = useRef(null);
+  const showToast = useCallback((message) => {
+    setToast(message);
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    toastTimerRef.current = setTimeout(() => setToast(''), 1600);
+  }, []);
+  useEffect(() => () => { if (toastTimerRef.current) clearTimeout(toastTimerRef.current); }, []);
   // Dans une liste inversée, « le plus récent » est à l'offset 0
   const scrollToLatest = useCallback((animated = true) => {
     flatListRef.current?.scrollToOffset({ offset: 0, animated });
@@ -897,34 +912,50 @@ export default function ConversationScreen({ route, navigation }) {
   const headerDealStatus = conversation?.deal?.status || 'open';
   const headerDealLabel = (getDealPresentation(headerDealStatus) || {}).label || 'Aucune clôture';
 
-  useEffect(() => {
-    navigation.setOptions({
-      headerShown: true,
-      headerTitle: () => (
-        <View style={styles.headerTitleWrap}>
-          <Text style={styles.headerTitleText} numberOfLines={1}>
-            {peer?.businessName || peer?.name || 'Conversation'}
-          </Text>
-          <View style={styles.headerOnlineRow}>
-            <View style={[styles.headerOnlineDot, peerIsOnline ? styles.headerOnlineDotActive : styles.headerOnlineDotInactive]} />
-            <Text style={[styles.headerOnlineText, peerIsOnline ? styles.headerOnlineTextActive : styles.headerOnlineTextInactive]}>
-              {isConnected ? (peerIsOnline ? 'En ligne' : 'Hors ligne') : 'Connexion...'}
-            </Text>
-          </View>
-        </View>
-      ),
-      headerStyle: {
-        backgroundColor: theme.surface,
-        shadowColor: theme.shadow,
-      },
-      headerTintColor: theme.text,
-    });
-  }, [navigation, peer?.businessName, peer?.name, theme, peerIsOnline, isConnected]);
 
   const typingLabel = Object.values(typingUsers)[0] || '';
   const peerId = peer?.id || peer?._id;
   const peerIsOnline = peerId ? isUserOnline(String(peerId)) : false;
   const conversationItem = conversation?.item || null;
+
+  // En-tête : photo, nom, statut en direct (en ligne / écrit…) ; toucher → profil
+  useEffect(() => {
+    const name = peer?.businessName || peer?.name || 'Conversation';
+    const status = typingLabel ? 'écrit…' : !isConnected ? 'Connexion…' : peerIsOnline ? 'En ligne' : 'Hors ligne';
+    const statusColor = typingLabel ? P.terra : peerIsOnline && isConnected ? '#22c55e' : theme.textSoft;
+    navigation.setOptions({
+      headerShown: true,
+      headerTitleAlign: 'left',
+      headerTitle: () => (
+        <Pressable
+          onPress={() => { if (peerId) navigation.navigate('SellerProfile', { sellerId: String(peerId) }); }}
+          style={styles.headerPeer}
+          accessibilityRole="button"
+          accessibilityLabel={`Voir le profil de ${name}`}
+        >
+          <View>
+            {peer?.avatar ? (
+              <Image source={{ uri: sizedImage(peer.avatar, 40) }} style={styles.headerAvatar} contentFit="cover" />
+            ) : (
+              <LinearGradient colors={[P.orange500, P.orange700]} style={styles.headerAvatar}>
+                <Text style={styles.headerAvatarTxt}>{getInitials(name)}</Text>
+              </LinearGradient>
+            )}
+            {peerIsOnline && isConnected ? <View style={styles.headerAvatarDot} /> : null}
+          </View>
+          <View style={{ flexShrink: 1 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+              <Text style={styles.headerTitleText} numberOfLines={1}>{name}</Text>
+              {peer?.verified ? <Ionicons name="checkmark-circle" size={14} color="#38bdf8" /> : null}
+            </View>
+            <Text style={[styles.headerStatusText, { color: statusColor }]} numberOfLines={1}>{status}</Text>
+          </View>
+        </Pressable>
+      ),
+      headerStyle: { backgroundColor: theme.surface, shadowColor: theme.shadow },
+      headerTintColor: theme.text,
+    });
+  }, [navigation, peer?.businessName, peer?.name, peer?.avatar, peer?.verified, peerId, theme, styles, peerIsOnline, isConnected, typingLabel]);
   const conversationItemId = normalizeId(conversationItem?.id);
   const canOpenConversationItem = Boolean(conversationItemId);
 
@@ -1214,22 +1245,41 @@ export default function ConversationScreen({ route, navigation }) {
     }
   }, [conversationId, dealActionLoading, conversation, applyDealTransition]);
 
-  const renderMessage = ({ item, index }) => {
-    const prevItem = listData[index + 1] || null; // liste inversée
-    const showDateSeparator = !isSameDay(item?.timestamp, prevItem?.timestamp);
+  // Deux messages consécutifs du même auteur, à moins de 5 min, forment un groupe
+  const isSystemItem = (m) => m?.type === 'system' || Boolean(m?.systemId);
+  const sameGroup = (a, b) => Boolean(
+    a && b && !isSystemItem(a) && !isSystemItem(b) &&
+    isCurrentUserMessage(a, user, currentUserIdSet) === isCurrentUserMessage(b, user, currentUserIdSet) &&
+    isSameDay(a.timestamp, b.timestamp) &&
+    Math.abs(new Date(a.timestamp) - new Date(b.timestamp)) < 5 * 60000
+  );
 
-    // Render system messages (closure/reopen) as centered small lines
-    if (item?.type === 'system' || item?.systemId) {
+  const copyMessage = async (content) => {
+    if (!content) return;
+    try {
+      await Clipboard.setStringAsync(String(content));
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+      showToast('Message copié');
+    } catch (e) { /* presse-papiers indisponible */ }
+  };
+
+  const renderDateSeparator = (timestamp) => (
+    <View style={styles.dateSeparatorWrap}>
+      <Text style={styles.dateSeparatorText}>{formatDateSeparator(timestamp)}</Text>
+    </View>
+  );
+
+  const renderMessage = ({ item, index }) => {
+    const older = listData[index + 1] || null; // liste inversée : l'index suivant est plus ancien
+    const newer = index > 0 ? listData[index - 1] : null;
+    const showDateSeparator = !isSameDay(item?.timestamp, older?.timestamp);
+
+    if (isSystemItem(item)) {
       return (
         <View>
-          {showDateSeparator && (
-            <View style={styles.dateSeparatorWrap}>
-              <View style={styles.dateSeparatorLine} />
-              <Text style={styles.dateSeparatorText}>{formatDateSeparator(item.timestamp)}</Text>
-              <View style={styles.dateSeparatorLine} />
-            </View>
-          )}
+          {showDateSeparator ? renderDateSeparator(item.timestamp) : null}
           <View style={styles.systemMessageWrap}>
+            <Ionicons name="information-circle-outline" size={13} color={theme.textMuted} />
             <Text style={styles.systemMessageText}>{item.content || ''}</Text>
           </View>
         </View>
@@ -1238,55 +1288,88 @@ export default function ConversationScreen({ route, navigation }) {
 
     const mine = isCurrentUserMessage(item, user, currentUserIdSet);
     const isAudio = item?.type === 'audio' && item?.attachments?.[0];
+    const first = !sameGroup(item, older);
+    const last = !sameGroup(item, newer);
+    const time = formatTime(item.timestamp);
+    const tick = mine ? (
+      <Ionicons
+        name={item.read || item.delivered ? 'checkmark-done' : 'checkmark'}
+        size={15}
+        color={item.read ? '#bae6fd' : item.delivered ? 'rgba(255,255,255,0.92)' : 'rgba(255,255,255,0.6)'}
+      />
+    ) : null;
+    // Coins arrondis partout, sauf du côté de l'auteur entre deux bulles du même groupe
+    const corners = mine
+      ? { borderTopRightRadius: first ? 20 : 6, borderBottomRightRadius: last ? 4 : 6 }
+      : { borderTopLeftRadius: first ? 20 : 6, borderBottomLeftRadius: last ? 4 : 6 };
+
+    const content = isAudio ? (
+      <>
+        <VoiceMessageBubble
+          message={item}
+          mine={mine}
+          accent={mine ? '#fff' : P.orange500}
+          trackColor={mine ? 'rgba(255,255,255,0.38)' : (isDark ? 'rgba(255,255,255,0.22)' : 'rgba(0,0,0,0.18)')}
+          textStyle={mine ? styles.messageTextMine : styles.messageTextOther}
+          playBtnStyle={mine ? styles.audioPlayBtnMine : styles.audioPlayBtn}
+        />
+        <View style={styles.metaRow}>
+          <Text style={[styles.timeText, mine ? styles.timeTextMine : styles.timeTextOther]}>{time}</Text>
+          {tick}
+        </View>
+      </>
+    ) : (
+      <>
+        {/* Texte + heure : l'heure se cale à droite de la dernière ligne, ou passe dessous */}
+        <View style={styles.textWrap}>
+          <Text style={[styles.messageText, mine ? styles.messageTextMine : styles.messageTextOther]}>
+            {item.content || ''}
+          </Text>
+          <View style={styles.metaInline}>
+            <Text style={[styles.timeText, mine ? styles.timeTextMine : styles.timeTextOther]}>{time}</Text>
+            {tick}
+          </View>
+        </View>
+      </>
+    );
 
     return (
-      <View>
-        {showDateSeparator && (
-          <View style={styles.dateSeparatorWrap}>
-            <View style={styles.dateSeparatorLine} />
-            <Text style={styles.dateSeparatorText}>{formatDateSeparator(item.timestamp)}</Text>
-            <View style={styles.dateSeparatorLine} />
-          </View>
-        )}
+      <View style={{ marginTop: first ? 10 : 2 }}>
+        {showDateSeparator ? renderDateSeparator(item.timestamp) : null}
         <View style={[styles.messageRow, mine ? styles.messageRowMine : styles.messageRowOther]}>
-          <View style={styles.avatarSlot}>
-            {!mine ? (
-              peer?.avatar ? (
-                <Image source={{ uri: sizedImage(peer.avatar, 40) }} style={styles.peerAvatar} />
-              ) : (
-                <View style={styles.peerAvatarFallback}>
-                  <Text style={styles.peerAvatarFallbackText}>{(peer?.name || 'U').slice(0, 1).toUpperCase()}</Text>
-                </View>
-              )
-            ) : null}
-          </View>
-
-          <View style={[styles.bubble, mine ? styles.bubbleMine : styles.bubbleOther]}>
-            {isAudio ? (
-              <VoiceMessageBubble
-                message={item}
-                mine={mine}
-                accent={mine ? '#fff' : P.orange500}
-                trackColor={mine ? 'rgba(255,255,255,0.38)' : (isDark ? 'rgba(255,255,255,0.22)' : 'rgba(0,0,0,0.18)')}
-                textStyle={mine ? styles.messageTextMine : styles.messageTextOther}
-                playBtnStyle={styles.audioPlayBtn}
-              />
-            ) : (
-              <Text style={[styles.messageText, mine ? styles.messageTextMine : styles.messageTextOther]}>
-                {item.content || ''}
-              </Text>
-            )}
-            <View style={styles.metaRow}>
-              <Text style={[styles.timeText, mine ? styles.timeTextMine : styles.timeTextOther]}>{formatTime(item.timestamp)}</Text>
-              {mine ? (
-                <Ionicons
-                  name={item.read ? 'checkmark-done' : item.delivered ? 'checkmark-done' : 'checkmark'}
-                  size={14}
-                  color={item.read ? '#fde68a' : item.delivered ? 'rgba(255,255,255,0.90)' : 'rgba(255,255,255,0.45)'}
-                />
+          {!mine ? (
+            <View style={styles.avatarSlot}>
+              {last ? (
+                peer?.avatar ? (
+                  <Image source={{ uri: sizedImage(peer.avatar, 28) }} style={styles.peerAvatar} contentFit="cover" />
+                ) : (
+                  <LinearGradient colors={[P.orange500, P.orange700]} style={styles.peerAvatarFallback}>
+                    <Text style={styles.peerAvatarFallbackText}>{getInitials(peer?.businessName || peer?.name || 'U')}</Text>
+                  </LinearGradient>
+                )
               ) : null}
             </View>
-          </View>
+          ) : null}
+          <Pressable
+            onLongPress={isAudio ? undefined : () => copyMessage(item.content)}
+            delayLongPress={350}
+            style={styles.bubblePress}
+          >
+            {mine ? (
+              <LinearGradient
+                colors={[P.orange500, P.orange700]}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={[styles.bubble, styles.bubbleMine, corners, isAudio && styles.bubbleAudio]}
+              >
+                {content}
+              </LinearGradient>
+            ) : (
+              <View style={[styles.bubble, styles.bubbleOther, corners, isAudio && styles.bubbleAudio]}>
+                {content}
+              </View>
+            )}
+          </Pressable>
         </View>
       </View>
     );
@@ -1314,31 +1397,52 @@ export default function ConversationScreen({ route, navigation }) {
 
         {/* Carte produit fixe — hors de la zone scrollable */}
         {conversationItem ? (
-          <TouchableOpacity
-            activeOpacity={canOpenConversationItem ? 0.88 : 1}
-            style={[styles.itemCard, !canOpenConversationItem && styles.itemCardDisabled]}
-            onPress={openConversationItem}
-            disabled={!canOpenConversationItem}
-          >
-            <Image
-              source={{
-                uri:
-                  conversationItem?.image ||
-                  'https://via.placeholder.com/160x160/F5E6C8/C1440E?text=Annonce',
-              }}
-              style={styles.itemImage}
-            />
-            <View style={styles.itemMeta}>
-              <Text style={styles.itemOverline}>A propos de cette annonce</Text>
-              <Text numberOfLines={2} style={styles.itemTitle}>
-                {conversationItem?.title || 'Annonce'}
-              </Text>
-              <Text style={styles.itemPrice}>{formatPriceFCFA(conversationItem?.price)}</Text>
-            </View>
-            <View style={styles.itemActionBtn}>
-              <Ionicons name="open-outline" size={16} color={P.orange500} />
-            </View>
-          </TouchableOpacity>
+          <View style={styles.itemCard}>
+            <Pressable
+              style={styles.itemMain}
+              onPress={openConversationItem}
+              disabled={!canOpenConversationItem}
+              accessibilityRole="button"
+              accessibilityLabel={`Voir l'annonce ${conversationItem?.title || ''}`}
+            >
+              {conversationItem?.image ? (
+                <Image source={{ uri: sizedImage(conversationItem.image, 48) }} style={styles.itemImage} contentFit="cover" />
+              ) : (
+                <View style={[styles.itemImage, styles.itemImageEmpty]}>
+                  <Ionicons name="pricetag" size={18} color={P.orange500} />
+                </View>
+              )}
+              <View style={styles.itemMeta}>
+                <Text numberOfLines={1} style={styles.itemTitle}>{conversationItem?.title || 'Annonce'}</Text>
+                <Text style={styles.itemPrice}>{formatPriceFCFA(conversationItem?.price)}</Text>
+              </View>
+            </Pressable>
+            {dealStatus === 'open' && isConversationSeller ? (
+              <Pressable onPress={openDealActions} style={({ pressed }) => [styles.dealCta, pressed && { opacity: 0.85 }]}>
+                <Ionicons name="checkmark-circle" size={15} color="#fff" />
+                <Text style={styles.dealCtaTxt}>Conclure</Text>
+              </Pressable>
+            ) : dealStatus !== 'open' ? (
+              <Pressable
+                onPress={openDealActions}
+                style={[
+                  styles.dealPill,
+                  dealStatus === 'concluded' ? styles.dealPillOk : dealStatus === 'not_concluded' ? styles.dealPillKo : styles.dealPillWait,
+                ]}
+              >
+                <Ionicons
+                  name={dealStatus === 'concluded' ? 'checkmark-circle' : dealStatus === 'not_concluded' ? 'close-circle' : 'hourglass-outline'}
+                  size={13}
+                  color={dealStatus === 'concluded' ? '#16a34a' : dealStatus === 'not_concluded' ? '#dc2626' : '#d97706'}
+                />
+                <Text style={[styles.dealPillTxt, { color: dealStatus === 'concluded' ? '#16a34a' : dealStatus === 'not_concluded' ? '#dc2626' : '#d97706' }]}>
+                  {dealStatus === 'concluded' ? 'Conclue' : dealStatus === 'not_concluded' ? 'Non conclue' : (isDealRequester || isConversationSeller ? 'En attente' : 'À confirmer')}
+                </Text>
+              </Pressable>
+            ) : (
+              <Ionicons name="chevron-forward" size={18} color={theme.iconMuted} />
+            )}
+          </View>
         ) : null}
 
         {/* Invitation à laisser un avis si éligible */}
@@ -1396,11 +1500,7 @@ export default function ConversationScreen({ route, navigation }) {
           // Liste inversée : l'en-tête s'affiche en bas (indicateur de saisie),
           // le pied en haut (chargement des messages plus anciens)
           ListHeaderComponent={
-            typingLabel ? (
-              <View style={styles.typingWrap}>
-                <Text style={styles.typingText}>{typingLabel} est en train d'ecrire...</Text>
-              </View>
-            ) : null
+            typingLabel ? <TypingBubble styles={styles} /> : null
           }
           ListFooterComponent={
             loadingOlder ? (
@@ -1416,6 +1516,13 @@ export default function ConversationScreen({ route, navigation }) {
             ) : null
           }
         />
+
+        {toast ? (
+          <View pointerEvents="none" style={styles.toast}>
+            <Ionicons name="copy-outline" size={14} color="#fff" />
+            <Text style={styles.toastTxt}>{toast}</Text>
+          </View>
+        ) : null}
 
         {/* Zone de saisie façon WhatsApp (texte + message vocal maintenu/verrouillé) */}
         {!reviewModalVisible ? (
@@ -1449,6 +1556,31 @@ export default function ConversationScreen({ route, navigation }) {
         onDismiss={() => setAlert({ ...alert, visible: false })}
       />
     </LinearGradient>
+  );
+}
+
+// Bulle « écrit… » : trois points qui rebondissent
+function TypingBubble({ styles }) {
+  const dots = useRef([0, 1, 2].map(() => new Animated.Value(0.3))).current;
+  useEffect(() => {
+    const anims = dots.map((v, i) => Animated.loop(Animated.sequence([
+      Animated.delay(i * 160),
+      Animated.timing(v, { toValue: 1, duration: 320, useNativeDriver: true }),
+      Animated.timing(v, { toValue: 0.3, duration: 320, useNativeDriver: true }),
+      Animated.delay((2 - i) * 160),
+    ])));
+    anims.forEach((a) => a.start());
+    return () => anims.forEach((a) => a.stop());
+  }, [dots]);
+  return (
+    <View style={styles.typingWrap}>
+      {dots.map((v, i) => (
+        <Animated.View
+          key={i}
+          style={[styles.typingDot, { opacity: v, transform: [{ translateY: v.interpolate({ inputRange: [0.3, 1], outputRange: [0, -3] }) }] }]}
+        />
+      ))}
+    </View>
   );
 }
 
@@ -1525,10 +1657,19 @@ function createStyles(theme, isDark) {
       alignItems: 'flex-start',
       maxWidth: 200,
     },
+    headerPeer: { flexDirection: 'row', alignItems: 'center', gap: 10, maxWidth: 240 },
+    headerAvatar: { width: 38, height: 38, borderRadius: 19, alignItems: 'center', justifyContent: 'center', backgroundColor: theme.surfaceAlt },
+    headerAvatarTxt: { color: '#fff', fontSize: 13, fontWeight: '800' },
+    headerAvatarDot: {
+      position: 'absolute', right: -1, bottom: -1, width: 12, height: 12, borderRadius: 6,
+      backgroundColor: '#22c55e', borderWidth: 2, borderColor: theme.surface,
+    },
+    headerStatusText: { fontSize: 12, fontWeight: '600', marginTop: 1 },
     headerTitleText: {
       color: theme.text,
-      fontSize: 15,
+      fontSize: 16,
       fontWeight: '800',
+      flexShrink: 1,
     },
     headerSubtitleText: {
       color: theme.textMuted,
@@ -1618,52 +1759,38 @@ function createStyles(theme, isDark) {
       flexDirection: 'row',
       alignItems: 'center',
       gap: 10,
-      backgroundColor: theme.cardSoft,
-      borderRadius: 14,
-      padding: 10,
-      marginBottom: 10,
-      borderWidth: 1,
-      borderColor: theme.border,
-    },
-    itemCardDisabled: {
-      opacity: 0.72,
-    },
-    itemImage: {
-      width: 56,
-      height: 56,
-      borderRadius: 10,
-      backgroundColor: theme.surfaceAlt,
-    },
-    itemMeta: {
-      flex: 1,
-      minWidth: 0,
-    },
-    itemOverline: {
-      fontSize: 11,
-      color: theme.textMuted,
+      marginHorizontal: 12,
+      marginTop: 8,
       marginBottom: 2,
-    },
-    itemTitle: {
-      fontSize: 13,
-      fontWeight: '700',
-      color: theme.text,
-    },
-    itemPrice: {
-      marginTop: 4,
-      fontSize: 14,
-      fontWeight: '800',
-      color: P.orange500,
-    },
-    itemActionBtn: {
-      width: 30,
-      height: 30,
-      borderRadius: 15,
-      alignItems: 'center',
-      justifyContent: 'center',
-      backgroundColor: theme.overlay,
+      paddingVertical: 8,
+      paddingLeft: 8,
+      paddingRight: 10,
+      borderRadius: 18,
+      backgroundColor: theme.surface,
       borderWidth: 1,
       borderColor: theme.border,
+      shadowColor: '#0f172a',
+      shadowOpacity: isDark ? 0 : 0.06,
+      shadowRadius: 10,
+      shadowOffset: { width: 0, height: 4 },
+      elevation: isDark ? 0 : 2,
     },
+    itemMain: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10, minWidth: 0 },
+    itemImage: { width: 46, height: 46, borderRadius: 12, backgroundColor: theme.surfaceAlt },
+    itemImageEmpty: { alignItems: 'center', justifyContent: 'center' },
+    itemMeta: { flex: 1, minWidth: 0 },
+    itemTitle: { color: theme.text, fontSize: 14, fontWeight: '700' },
+    itemPrice: { color: P.orange500, fontSize: 13.5, fontWeight: '900', marginTop: 2 },
+    dealCta: {
+      flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 12, height: 34, borderRadius: 17,
+      backgroundColor: '#16a34a',
+    },
+    dealCtaTxt: { color: '#fff', fontSize: 13, fontWeight: '800' },
+    dealPill: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 10, height: 30, borderRadius: 15 },
+    dealPillOk: { backgroundColor: 'rgba(34,197,94,0.14)' },
+    dealPillKo: { backgroundColor: 'rgba(239,68,68,0.12)' },
+    dealPillWait: { backgroundColor: 'rgba(245,158,11,0.15)' },
+    dealPillTxt: { fontSize: 12, fontWeight: '800' },
     dealCard: {
       backgroundColor: theme.cardSoft,
       borderRadius: 16,
@@ -1757,141 +1884,99 @@ function createStyles(theme, isDark) {
     messageRow: {
       flexDirection: 'row',
       alignItems: 'flex-end',
-      gap: 8,
+      gap: 6,
       width: '100%',
     },
-    messageRowMine: {
-      justifyContent: 'flex-start',
-      flexDirection: 'row-reverse',
-    },
-    messageRowOther: {
-      justifyContent: 'flex-start',
-      flexDirection: 'row',
-    },
-    avatarSlot: {
-      width: 30,
-      alignItems: 'center',
-      justifyContent: 'flex-end',
-    },
-    peerAvatar: {
-      width: 28,
-      height: 28,
-      borderRadius: 14,
-      marginBottom: 2,
-    },
-    peerAvatarFallback: {
-      width: 28,
-      height: 28,
-      borderRadius: 14,
-      marginBottom: 2,
-      backgroundColor: theme.overlay,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    peerAvatarFallbackText: {
-      color: theme.text,
-      fontWeight: '700',
-      fontSize: 12,
-    },
+    messageRowMine: { justifyContent: 'flex-end' },
+    messageRowOther: { justifyContent: 'flex-start' },
+    avatarSlot: { width: 28, alignItems: 'center', justifyContent: 'flex-end' },
+    peerAvatar: { width: 28, height: 28, borderRadius: 14 },
+    peerAvatarFallback: { width: 28, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
+    peerAvatarFallbackText: { color: '#fff', fontWeight: '800', fontSize: 10.5 },
+    bubblePress: { maxWidth: '80%' },
     bubble: {
-      maxWidth: '78%',
-      borderRadius: 16,
-      paddingHorizontal: 12,
-      paddingVertical: 8,
-      borderWidth: 1,
+      borderRadius: 20,
+      paddingHorizontal: 13,
+      paddingTop: 8,
+      paddingBottom: 8,
     },
-    bubbleMine: {
-      backgroundColor: mineBubbleColor,
-      borderColor: theme.surface,
-      borderBottomRightRadius: 4,
-    },
+    bubbleMine: {},
     bubbleOther: {
-      backgroundColor: theme.cardSoft,
+      backgroundColor: isDark ? theme.surface : '#ffffff',
+      borderWidth: isDark ? 0 : StyleSheet.hairlineWidth,
       borderColor: theme.border,
-      borderBottomLeftRadius: 4,
     },
-    messageText: {
-      fontSize: 15,
-      lineHeight: 21,
-    },
+    bubbleAudio: { paddingBottom: 6, minWidth: 230 },
+    messageText: { fontSize: 15.5, lineHeight: 21 },
+    messageTextMine: { color: '#fff' },
+    messageTextOther: { color: theme.text },
+    textWrap: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'flex-end', justifyContent: 'flex-end', columnGap: 8 },
+    metaInline: { flexDirection: 'row', alignItems: 'center', gap: 3, marginLeft: 'auto', paddingTop: 2, marginBottom: -1 },
     audioPlayBtn: {
-      width: 36,
-      height: 36,
-      borderRadius: 18,
-      alignItems: 'center',
-      justifyContent: 'center',
-      backgroundColor: theme.overlay,
+      width: 38, height: 38, borderRadius: 19, alignItems: 'center', justifyContent: 'center',
+      backgroundColor: isDark ? 'rgba(255,255,255,0.08)' : P.orange50,
     },
-    messageTextMine: {
-      color: theme.surface,
+    audioPlayBtnMine: {
+      width: 38, height: 38, borderRadius: 19, alignItems: 'center', justifyContent: 'center',
+      backgroundColor: 'rgba(255,255,255,0.22)',
     },
-    messageTextOther: {
-      color: theme.text,
-    },
-    metaRow: {
-      marginTop: 4,
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'flex-end',
-      gap: 8,
-    },
-    timeText: {
-      fontSize: 11,
-    },
-    timeTextMine: {
-      color: theme.surfaceAlt,
-    },
-    timeTextOther: {
-      color: theme.textMuted,
-    },
+    metaRow: { marginTop: 2, flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: 3 },
+    timeText: { fontSize: 11, fontWeight: '500' },
+    timeTextMine: { color: 'rgba(255,255,255,0.82)' },
+    timeTextOther: { color: theme.textSoft },
     typingWrap: {
-      marginTop: 10,
-      marginLeft: 8,
-      marginBottom: 16,
-      paddingHorizontal: 10,
-      paddingVertical: 12,
-      backgroundColor: theme.cardSoft,
-      borderRadius: 12,
-    },
-    typingText: {
-      color: theme.textMuted,
-      fontSize: 13,
-      fontStyle: 'italic',
-    },
-    dateSeparatorWrap: {
       flexDirection: 'row',
       alignItems: 'center',
-      marginVertical: 12,
-      marginHorizontal: 16,
-      gap: 8,
+      gap: 5,
+      alignSelf: 'flex-start',
+      marginLeft: 34,
+      marginTop: 8,
+      marginBottom: 6,
+      paddingHorizontal: 14,
+      paddingVertical: 12,
+      borderRadius: 18,
+      borderBottomLeftRadius: 4,
+      backgroundColor: isDark ? theme.surface : '#ffffff',
     },
-    dateSeparatorLine: {
-      flex: 1,
-      height: 1,
-      backgroundColor: theme.border || 'rgba(0,0,0,0.10)',
-    },
+    typingDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: theme.textMuted },
+    dateSeparatorWrap: { alignItems: 'center', marginTop: 16, marginBottom: 8 },
     dateSeparatorText: {
-      fontSize: 11,
-      fontWeight: '600',
+      fontSize: 12,
+      fontWeight: '700',
       color: theme.textMuted,
-      textTransform: 'uppercase',
-      letterSpacing: 0.5,
+      paddingHorizontal: 12,
+      paddingVertical: 5,
+      borderRadius: 12,
+      overflow: 'hidden',
+      backgroundColor: isDark ? 'rgba(255,255,255,0.07)' : 'rgba(17,24,39,0.06)',
     },
     systemMessageWrap: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 5,
       alignSelf: 'center',
+      maxWidth: '86%',
       marginVertical: 8,
       paddingHorizontal: 12,
       paddingVertical: 6,
       borderRadius: 12,
-      backgroundColor: theme.surfaceAlt,
-      borderWidth: 1,
-      borderColor: theme.border,
+      backgroundColor: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(17,24,39,0.05)',
     },
-    systemMessageText: {
-      color: theme.textMuted,
-      fontSize: 12,
-      fontWeight: '700',
+    systemMessageText: { flexShrink: 1, color: theme.textMuted, fontSize: 12, fontWeight: '600', textAlign: 'center' },
+    toast: {
+      position: 'absolute',
+      alignSelf: 'center',
+      bottom: 96,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+      paddingHorizontal: 14,
+      paddingVertical: 9,
+      borderRadius: 20,
+      backgroundColor: 'rgba(17,24,39,0.92)',
+      zIndex: 10,
     },
+    toastTxt: { color: '#fff', fontSize: 13, fontWeight: '700' },
     composerWrap: {
       borderTopWidth: 1,
       borderTopColor: theme.border,

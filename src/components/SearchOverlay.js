@@ -23,7 +23,7 @@ import { useAppTheme } from '../contexts/ThemeContext';
 import { MOBILE_COLORS as P } from '../theme/colors';
 import { apiClient } from '../api/auth';
 import { formatPrice, getCityName, sizedImage } from '../utils/format';
-import { categoryEmoji } from './home/CategoryRail';
+import CategoryIcon from './CategoryIcon';
 
 const STORAGE_KEY = 'taktak_recent_searches';
 const MAX_RECENT = 8;
@@ -204,7 +204,7 @@ const SearchOverlay = ({ initialQuery = '', onSearch, onClose, navigation, categ
                       onPress={() => openCategory(cat)}
                       style={({ pressed }) => [s.catTile, { backgroundColor: theme.surface, borderColor: theme.border }, pressed && { opacity: 0.7 }]}
                     >
-                      <Text style={s.catEmoji}>{categoryEmoji(cat)}</Text>
+                      <CategoryIcon item={cat} size={32} />
                       <Text style={[s.catName, { color: theme.text }]} numberOfLines={1}>{cat.name}</Text>
                     </Pressable>
                   ))}
@@ -238,7 +238,7 @@ const SearchOverlay = ({ initialQuery = '', onSearch, onClose, navigation, categ
                 {suggestions.categories.map((cat) => (
                   <Pressable key={cat._id} onPress={() => openCategory(cat)} style={({ pressed }) => [s.row, pressed && { backgroundColor: theme.glass }]}>
                     <View style={[s.rowIcon, { backgroundColor: theme.glass }]}>
-                      <Text style={{ fontSize: 16 }}>{categoryEmoji(cat)}</Text>
+                      <CategoryIcon item={cat} size={22} />
                     </View>
                     <Highlight text={cat.name} query={q} style={[s.rowTxt, { color: theme.text }]} strongColor={accent} />
                     <Feather name="chevron-right" size={18} color={theme.textSoft} />

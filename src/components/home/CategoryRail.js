@@ -6,25 +6,16 @@ import PressableScale from './PressableScale';
 import { useAppTheme } from '../../contexts/ThemeContext';
 import { MOBILE_COLORS as P } from '../../theme/colors';
 
-// Icônes Lucide (stockées côté backend) → emoji
-const ICON_TO_EMOJI = {
-  Smartphone: '📱', UtensilsCrossed: '🍔', Home: '🏠', Car: '🚗', Shirt: '👕',
-  Wrench: '🔧', Laptop: '💻', Dumbbell: '🏋️', Baby: '👶', PawPrint: '🐾',
-  Book: '📚', Palette: '🎨', Briefcase: '💼', Gamepad2: '🎮', HardHat: '⛑️',
-  Package: '📦', MoreHorizontal: '✨',
-};
+import CategoryIcon, { categoryEmoji } from '../CategoryIcon';
 
-const isEmoji = (v) => typeof v === 'string' && v.length > 0 && !/^[A-Za-z0-9]+$/.test(v);
-
-export const categoryEmoji = (cat) =>
-  (isEmoji(cat?.emoji) && cat.emoji) || (isEmoji(cat?.icon) && cat.icon) || ICON_TO_EMOJI[cat?.icon] || '📦';
+export { categoryEmoji };
 
 function Tile({ cat, onPress, theme, isDark }) {
   const count = Number(cat.totalCount ?? ((cat.productsCount || 0) + (cat.servicesCount || 0))) || 0;
   return (
     <PressableScale onPress={onPress} scaleTo={0.92} style={s.tile} accessibilityLabel={cat.name}>
       <View style={[s.iconBox, { backgroundColor: isDark ? 'rgba(236,90,19,0.14)' : P.orange50, borderColor: isDark ? 'rgba(236,90,19,0.22)' : P.orange100 }]}>
-        <Text style={s.emoji}>{categoryEmoji(cat)}</Text>
+        <CategoryIcon item={cat} size={40} />
         {count > 0 ? (
           <View style={[s.count, { borderColor: theme.screen }]}>
             <Text style={s.countTxt}>{count > 99 ? '99+' : count}</Text>

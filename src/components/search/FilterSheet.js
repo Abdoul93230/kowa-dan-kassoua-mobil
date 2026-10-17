@@ -7,7 +7,7 @@ import { View, Text, StyleSheet, Pressable, ActivityIndicator } from 'react-nati
 import { Feather } from '@expo/vector-icons';
 import BottomSheet, { SheetTextInput } from '../BottomSheet';
 import PressableScale from '../home/PressableScale';
-import { categoryEmoji } from '../home/CategoryRail';
+import CategoryIcon from '../CategoryIcon';
 import { apiClient } from '../../api/auth';
 import { useAppTheme } from '../../contexts/ThemeContext';
 import { MOBILE_COLORS as P } from '../../theme/colors';
@@ -31,7 +31,7 @@ function Section({ title, children, right }) {
   );
 }
 
-function Chip({ label, active, onPress, icon, emoji, accent }) {
+function Chip({ label, active, onPress, icon, emoji, iconNode, accent }) {
   const { theme, isDark } = useAppTheme();
   return (
     <Pressable
@@ -45,7 +45,7 @@ function Chip({ label, active, onPress, icon, emoji, accent }) {
       accessibilityRole="button"
       accessibilityState={{ selected: active }}
     >
-      {emoji ? <Text style={s.chipEmoji}>{emoji}</Text> : null}
+      {iconNode || (emoji ? <Text style={s.chipEmoji}>{emoji}</Text> : null)}
       {icon ? <Feather name={icon} size={13} color={active ? accent : theme.textMuted} /> : null}
       <Text style={[s.chipTxt, { color: active ? accent : theme.text }, active && { fontWeight: '800' }]} numberOfLines={1}>{label}</Text>
     </Pressable>
@@ -190,7 +190,7 @@ export default function FilterSheet({
                 <Chip
                   key={cat._id || cat.slug}
                   label={cat.name}
-                  emoji={categoryEmoji(cat)}
+                  iconNode={<CategoryIcon item={cat} size={18} />}
                   active={draft.categorySlug === cat.slug}
                   onPress={() => set({ categorySlug: cat.slug, categoryName: cat.name, subcategory: '' })}
                   accent={accent}

@@ -1,11 +1,14 @@
-// ─── PublishScreen v2 PREMIUM ─ TakTak Niger ───────────────────────────────
-// Formulaire de publication — design cohérent, épuré, 3 étapes
+// ─── PublishScreen v3 ─ TakTak ───────────────────────────────────────────────
+// Publication en 3 étapes : l'essentiel (photos d'abord, titre, catégorie),
+// prix & détails, puis aperçu réel de la carte avec un score de qualité.
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
-  View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  TextInput, Image, ActivityIndicator, Platform, Dimensions, Switch, Modal, Keyboard
+  View, Text, StyleSheet, ScrollView, Pressable, Animated,
+  TextInput, Image, ActivityIndicator, Platform, Switch, Modal, Keyboard
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import * as Haptics from 'expo-haptics';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { KeyboardAwareView, KeyboardAwareScrollView, FormKeyboardToolbar } from '../components/Keyboard';
 import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
@@ -17,19 +20,10 @@ import { useAppTheme } from '../contexts/ThemeContext';
 import { getCategories } from '../api/categories';
 import { createProduct, updateProduct, imagesToBase64 } from '../api/products';
 import AlertModal from '../components/AlertModal';
+import CategoryIcon from '../components/CategoryIcon';
+import { filterCategoriesForType, subcategoryAllows } from '../utils/categoryTypes';
 import { MOBILE_COLORS as P } from '../theme/colors';
-
-const { width } = Dimensions.get('window');
-
-const iconToEmoji = {
-  Smartphone:'📱', UtensilsCrossed:'🍔', Home:'🏠', Car:'🚗', Shirt:'👕',
-  Wrench:'🔧', Laptop:'💻', Dumbbell:'🏋️', Baby:'👶', PawPrint:'🐾',
-  Book:'📚', Palette:'🎨', Briefcase:'💼', Gamepad2:'🎮', HardHat:'⛑️', Package:'📦',
-  MoreHorizontal:'•••',
-};
-const getEmoji = (icon) => iconToEmoji[icon] || '📦';
-const CATEGORY_CARD_GAP = 8;
-const CATEGORY_CARD_WIDTH = Math.floor((width - 18 * 2 - CATEGORY_CARD_GAP * 3) / 4);
+import { formatPrice } from '../utils/format';
 
 const normalizeCategoryValue = (value) => {
   if (!value) return '';
@@ -84,82 +78,8 @@ const buildPublishSummary = (form, categories, editItemId = '') => {
   };
 };
 
-// ─── COMPOSANTS RÉUTILISABLES ─────────────────────────────────────────────────
-
-// Variable globale pour stocker le brouillon temporaire pendant l'authentification
+// Brouillon conservé pendant l'authentification
 let temporaryDraftStore = null;
-
-function Field({ label, error, children, inline = false, labelWidth = 88 }) {
-  const { theme } = useAppTheme();
-
-  return (
-    <View style={f.field}>
-      {inline ? (
-        <View style={f.inlineRow}>
-          <Text style={[f.label, f.labelInline, { color: theme.text, width: labelWidth }]}>{label}</Text>
-          <View style={f.inlineControl}>{children}</View>
-        </View>
-      ) : (
-        <>
-          <Text style={[f.label, { color: theme.text }]}>{label}</Text>
-          {children}
-        </>
-      )}
-      {error ? <Text style={f.error}>{error}</Text> : null}
-    </View>
-  );
-}
-
-function StepInput({ placeholder, value, onChangeText, keyboardType, multiline, error }) {
-  const { theme } = useAppTheme();
-
-  return (
-    <TextInput
-      style={[
-        f.input,
-        {
-          backgroundColor: theme.inputBg,
-          borderColor: error ? P.error : theme.border,
-          color: theme.inputText,
-        },
-        multiline && f.textarea,
-      ]}
-      placeholder={placeholder}
-      placeholderTextColor={theme.inputPlaceholder}
-      value={value}
-      onChangeText={onChangeText}
-      keyboardType={keyboardType || 'default'}
-      multiline={multiline}
-      numberOfLines={multiline ? 5 : 1}
-      textAlignVertical={multiline ? 'top' : 'center'}
-    />
-  );
-}
-
-function ChoiceBtn({ label, emoji, active, onPress, accent = P.terra, activeBg = P.peachSoft }) {
-  const { theme } = useAppTheme();
-
-  return (
-    <TouchableOpacity
-      style={[
-        f.choice,
-        {
-          backgroundColor: theme.surface,
-          borderColor: theme.border,
-        },
-        active && {
-          borderColor: accent,
-          backgroundColor: activeBg,
-        },
-      ]}
-      onPress={onPress}
-      activeOpacity={0.8}
-    >
-      {emoji ? <Text style={f.choiceEmoji}>{emoji}</Text> : null}
-      <Text style={[f.choiceTxt, { color: theme.textMuted }, active && { color: accent, fontWeight: '800' }]}>{label}</Text>
-    </TouchableOpacity>
-  );
-}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ÉCRAN PRINCIPAL
@@ -202,7 +122,16 @@ export default function PublishScreen({ navigation, route }) {
   const paramsRef = useRef(route?.params || {});
   const draftAcknowledgedRef = useRef(false);
 
-  const set = (key, val) => setForm(p => ({ ...p, [key]: val }));
+  // Modifier un champ efface son message d'erreur
+  const set = (key, val) => {
+    setForm(p => ({ ...p, [key]: val }));
+    setErrors((e) => (e[key] ? { ...e, [key]: undefined } : e));
+  };
+
+  const progress = useRef(new Animated.Value(1)).current;
+  useEffect(() => {
+    Animated.timing(progress, { toValue: step, duration: 320, useNativeDriver: false }).start();
+  }, [step]);
 
   // Garder les refs synchronisées avec l'état / les params
   useEffect(() => { formRef.current = form; }, [form]);
@@ -314,6 +243,16 @@ export default function PublishScreen({ navigation, route }) {
     }
   }, [isAuthenticated, route?.params?.autoSubmit]);
 
+  // Changement produit ⇄ service : on retire une catégorie ou sous-catégorie qui ne convient plus
+  useEffect(() => {
+    if (!categories.length || !form.category) return;
+    const cat = filterCategoriesForType(categories, form.type).find((c) => c._id === form.category);
+    if (!cat) { setForm((p) => ({ ...p, category: '', subcategory: '' })); return; }
+    const raw = categories.find((c) => c._id === form.category);
+    const sub = raw?.subcategories?.find((x) => x.slug === form.subcategory);
+    if (sub && !subcategoryAllows(sub, raw.slug, form.type)) setForm((p) => ({ ...p, subcategory: '' }));
+  }, [form.type, categories]);
+
   const loadCategories = async () => {
     try {
       const r = await getCategories();
@@ -330,36 +269,52 @@ export default function PublishScreen({ navigation, route }) {
     finally { setLoadingCats(false); }
   };
 
-  const pickImages = async () => {
-    if (form.images.length >= 5) {
-      setAlert({
-        visible: true,
-        type: 'warning',
-        title: 'Limite',
-        message: 'Maximum 5 images',
-        buttons: [{ text: 'OK', onPress: () => {} }],
-      });
+  const pickImages = async (source = 'library') => {
+    const remaining = 5 - form.images.length;
+    if (remaining <= 0) {
+      setAlert({ visible: true, type: 'warning', title: '5 photos maximum', message: 'Retirez une photo pour en ajouter une autre.', buttons: [{ text: 'OK', onPress: () => {} }] });
       return;
     }
-    const r = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      allowsMultipleSelection: true, quality: 0.8,
-    });
-    if (!r.canceled) {
-      const imgs = r.assets.slice(0, 5 - form.images.length).map(a => a.uri);
-      set('images', [...form.images, ...imgs]);
+    try {
+      if (source === 'camera') {
+        const perm = await ImagePicker.requestCameraPermissionsAsync();
+        if (perm.status !== 'granted') {
+          setAlert({ visible: true, type: 'error', title: 'Appareil photo', message: 'Autorisez l\'accès à l\'appareil photo dans les réglages.', buttons: [{ text: 'OK', onPress: () => {} }] });
+          return;
+        }
+        const r = await ImagePicker.launchCameraAsync({ mediaTypes: ['images'], quality: 0.8 });
+        if (!r.canceled && r.assets?.[0]) set('images', [...form.images, r.assets[0].uri]);
+        return;
+      }
+      const r = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        allowsMultipleSelection: true,
+        selectionLimit: remaining,
+        quality: 0.8,
+      });
+      if (!r.canceled) set('images', [...form.images, ...r.assets.slice(0, remaining).map((x) => x.uri)]);
+    } catch {
+      setAlert({ visible: true, type: 'error', title: 'Photos', message: 'Impossible d\'ajouter la photo.', buttons: [{ text: 'OK', onPress: () => {} }] });
     }
+  };
+
+  // La photo touchée devient la couverture (première position)
+  const setCover = (index) => {
+    Haptics.selectionAsync().catch(() => {});
+    const imgs = [...form.images];
+    const [picked] = imgs.splice(index, 1);
+    set('images', [picked, ...imgs]);
   };
 
   const validate = (s) => {
     const e = {};
-    if (s === 1) {
-      if (!form.title.trim() || form.title.length < 5) e.title = 'Minimum 5 caractères';
-      if (!form.category) e.category = 'Catégorie requise';
+    if (s === 1 || s === 'all') {
+      if (form.images.length === 0) e.images = 'Ajoutez au moins une photo';
+      if (!form.title.trim() || form.title.trim().length < 5) e.title = 'Le titre doit faire au moins 5 caractères';
+      if (!form.category) e.category = 'Choisissez une catégorie';
     }
-    if (s === 2) {
-      if (!form.price || isNaN(Number(form.price))) e.price = 'Prix invalide';
-      if (form.images.length === 0) e.images = 'Au moins 1 image requise';
+    if (s === 2 || s === 'all') {
+      if (!form.price || isNaN(Number(form.price)) || Number(form.price) <= 0) e.price = 'Indiquez un prix';
       const wc = form.description.trim().split(/\s+/).filter(Boolean).length;
       if (wc > 150) e.description = 'Maximum 150 mots';
     }
@@ -368,7 +323,10 @@ export default function PublishScreen({ navigation, route }) {
   };
 
   const scrollToTop = () => scrollRef.current?.scrollTo({ y: 0, animated: true });
-  const next = () => { if (validate(step)) { setStep(s => s + 1); scrollToTop(); } };
+  const next = () => {
+    if (validate(step)) { Haptics.selectionAsync().catch(() => {}); setStep(s => s + 1); scrollToTop(); }
+    else Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => {});
+  };
   const prev = () => { setStep(s => s - 1); scrollToTop(); };
 
   const resetPublishState = useCallback(() => {
@@ -543,7 +501,12 @@ export default function PublishScreen({ navigation, route }) {
   };
 
   const submit = async () => {
-    if (!validate(2)) return;
+    if (!validate('all')) {
+      // Une erreur à l'étape 1 (photo, titre, catégorie) : on y retourne
+      if (form.images.length === 0 || form.title.trim().length < 5 || !form.category) { setStep(1); scrollToTop(); }
+      else { setStep(2); scrollToTop(); }
+      return;
+    }
     
     if (!isAuthenticated) {
       // Sauvegarder le brouillon dans le store global
@@ -565,541 +528,492 @@ export default function PublishScreen({ navigation, route }) {
     doSubmit();
   };
 
-  const selectedCat = categories.find(c => c._id === form.category);
+  // Catégories proposées selon le type (produit / service)
+  const typeCategories = filterCategoriesForType(categories, form.type);
+  const selectedCat = typeCategories.find(c => c._id === form.category) || categories.find(c => c._id === form.category);
   const wordCount   = form.description.trim().split(/\s+/).filter(Boolean).length;
   const isService   = form.type === 'service';
   const accent = isService ? P.blue : P.terra;
   const accentSoft = isService ? '#DBEAFE' : P.peachSoft;
   const accentDark = isService ? '#1D4ED8' : P.orange700;
   
-  const d = {
-    headerAccent: { backgroundColor: P.blue },
-    progSegActive: { backgroundColor: '#60A5FA' },
-    progSegDone: { backgroundColor: P.blue },
-    catCardActive: { borderColor: P.blue, backgroundColor: '#DBEAFE' },
-    catIconWrapActive: { backgroundColor: '#DBEAFE' },
-    catEmojiActive: { transform: [{ scale: 1.02 }] },
-    catNameActive: { color: P.blue },
-    dotActive: { backgroundColor: P.blue },
-    subChipActive: { borderColor: P.blue, backgroundColor: '#DBEAFE' },
-    subChipTxtActive: { color: P.blue },
-    pricePreview: { color: P.blue },
-    imgPrimaryBadge: { backgroundColor: P.blue },
-    tagAddBtn: { backgroundColor: P.blue },
-    sellerBoxAccent: { backgroundColor: P.blue },
-    headerBg: { borderBottomColor: 'rgba(59,130,246,0.2)' },
-    btnBack: { borderColor: 'rgba(59,130,246,0.35)', backgroundColor: '#EFF6FF' },
-    btnBackTxt: { color: P.blue },
-    loaderIconWrap: { backgroundColor: P.blue },
-    stepLabelActive: { color: P.blue, fontWeight: '700' },
-    emptyIconBg: { backgroundColor: '#DBEAFE' },
+  // ── Rendu principal ─────────────────────────────────────────────────────────
+  const st = makeStyles(theme, isDark, accent, accentSoft);
+  const STEPS = ['L\'essentiel', 'Prix & détails', 'Aperçu'];
+  const priceNum = Number(form.price) || 0;
+  const titleLen = form.title.trim().length;
+
+  // Qualité de l'annonce : guide le vendeur vers une annonce qui vend
+  const quality = [
+    { ok: form.images.length >= 3, label: '3 photos ou plus', hint: 'Les annonces avec 3 photos reçoivent plus de messages' },
+    { ok: titleLen >= 15, label: 'Un titre précis', hint: 'Marque, modèle, taille…' },
+    { ok: wordCount >= 15, label: 'Une description détaillée', hint: 'Au moins 15 mots' },
+    { ok: Boolean(form.subcategory), label: 'Une sous-catégorie', hint: 'Pour être trouvé plus facilement' },
+  ];
+  const qualityScore = Math.round((quality.filter((q) => q.ok).length / quality.length) * 100);
+
+  const cityChips = NIGER_CITIES.filter((c) => !form.deliveryAreas.includes(c));
+  const toggleDay = (day) => {
+    const days = form.availability.days || [];
+    set('availability', { ...form.availability, days: days.includes(day) ? days.filter((d) => d !== day) : [...days, day] });
   };
 
-  // ── Rendu principal ─────────────────────────────────────────────────────────
   return (
-    <KeyboardAwareView
-      style={[s.container, { backgroundColor: theme.screen }]}
-    >
-
-      {/* ── HEADER ─────────────────────────────────────────────────────── */}
-      <LinearGradient
-        colors={theme.header}
-        style={[s.header, { paddingTop: (insets.top || 0) + 6 }]}
-      >
-        <View style={[s.headerAccent, { backgroundColor: accent }, isService && d.headerAccent]} />
-        <View style={s.headerRow}>
-          <View>
-            <Text style={[s.headerEye, { color: theme.textMuted }]}>TakTak Niger</Text>
-            <Text style={[s.headerTitle, { color: theme.text }]}>Publier une annonce</Text>
+    <KeyboardAwareView style={[st.container]}>
+      {/* ── EN-TÊTE ─────────────────────────────────────────────────────── */}
+      <View style={[st.header, { paddingTop: (insets.top || 0) + 10 }]}>
+        <View style={st.headerRow}>
+          <View style={{ flex: 1 }}>
+            <Text style={st.headerTitle}>{isEditing ? 'Modifier l\'annonce' : 'Nouvelle annonce'}</Text>
+            <Text style={st.headerSub}>Étape {step} sur 3 · {STEPS[step - 1]}</Text>
           </View>
-          <View style={[s.stepBadge, { backgroundColor: theme.glass, borderColor: theme.border }]}>
-            <Text style={[s.stepBadgeTxt, { color: theme.text }]}>{step}/3</Text>
-          </View>
+          {hasPublishContent(form) && !isEditing ? (
+            <Pressable onPress={discardDraft} hitSlop={8} style={st.resetBtn} accessibilityLabel="Recommencer">
+              <Ionicons name="refresh" size={16} color={theme.textMuted} />
+            </Pressable>
+          ) : null}
         </View>
-
-        {/* Barre de progression */}
-        <View style={s.progWrap}>
-          {[1,2,3].map(n => (
-            <View
-              key={n}
-              style={[
-                s.progSeg,
-                { backgroundColor: theme.divider },
-                n <= step && [s.progSegActive, { backgroundColor: accentSoft }],
-                n < step && [s.progSegDone, { backgroundColor: accent }],
-                n <= step && isService && d.progSegActive,
-                n < step && isService && d.progSegDone,
-              ]}
-            />
-          ))}
+        <View style={st.progTrack}>
+          <Animated.View style={[st.progFill, { width: progress.interpolate({ inputRange: [1, 3], outputRange: ['33%', '100%'] }) }]}>
+            <LinearGradient colors={[accent, accentDark]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={StyleSheet.absoluteFill} />
+          </Animated.View>
         </View>
+      </View>
 
-        {/* Labels étapes */}
-        <View style={s.stepLabels}>
-          {['Infos de base','Détails','Résumé'].map((l,i) => (
-            <Text
-              key={i}
-              style={[
-                s.stepLabel,
-                { color: theme.textSoft },
-                i+1 === step && [s.stepLabelActive, { color: accent }],
-                i+1 === step && isService && d.stepLabelActive,
-              ]}
-            >
-              {i+1 === step ? '● ' : ''}{l}
-            </Text>
-          ))}
-        </View>
-
-        <LinearGradient
-          colors={['transparent', accent, 'transparent']}
-          start={{x:0,y:0}} end={{x:1,y:0}}
-          style={s.headerGlow}
-        />
-      </LinearGradient>
-
-      {/* ── SCROLL ─────────────────────────────────────────────────────── */}
       <KeyboardAwareScrollView
         ref={scrollRef}
-        style={{flex:1}}
-        contentContainerStyle={[s.scroll, { paddingBottom: keyboardVisible ? 20 : 24 }]}
+        style={{ flex: 1 }}
+        contentContainerStyle={[st.scroll, { paddingBottom: keyboardVisible ? 20 : 28 }]}
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
         showsVerticalScrollIndicator={false}
       >
         {draftBanner && (
-          <View style={[s.draftBanner, { backgroundColor: theme.surfaceAlt, borderColor: theme.border }]}>
-            <View style={s.draftBannerRow}>
-              <Text style={s.draftBannerIcon}>📝</Text>
-              <View style={{ flex: 1 }}>
-                <Text style={[s.draftBannerTitle, { color: theme.text }]}>Brouillon non publié</Text>
-                <Text style={[s.draftBannerSub, { color: theme.textMuted }]}>
-                  Une annonce non publiée est en cours. Reprenez-la ou repartez de zéro.
-                </Text>
-              </View>
+          <View style={st.draft}>
+            <View style={st.draftIcon}><Ionicons name="document-text" size={18} color={accent} /></View>
+            <View style={{ flex: 1 }}>
+              <Text style={st.draftTitle}>Brouillon retrouvé</Text>
+              <Text style={st.draftSub}>Reprenez là où vous vous êtes arrêté.</Text>
             </View>
-            <View style={s.draftBannerActions}>
-              <TouchableOpacity
-                style={[s.draftBannerBtn, { borderColor: theme.border, backgroundColor: theme.surface }]}
-                onPress={discardDraft}
-                activeOpacity={0.85}
-              >
-                <Text style={[s.draftBannerBtnTxt, { color: theme.textMuted }]}>Effacer</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[s.draftBannerBtn, s.draftBannerBtnPrimary]}
-                onPress={dismissDraftBanner}
-                activeOpacity={0.85}
-              >
-                <Text style={[s.draftBannerBtnTxt, { color: P.white }]}>Reprendre</Text>
-              </TouchableOpacity>
-            </View>
+            <Pressable onPress={discardDraft} hitSlop={6}><Text style={st.draftLink}>Effacer</Text></Pressable>
+            <Pressable onPress={dismissDraftBanner} style={st.draftBtn}><Text style={st.draftBtnTxt}>Reprendre</Text></Pressable>
           </View>
         )}
 
-        {/* ══════════ ÉTAPE 1 ══════════════════════════════════════════ */}
+        {/* ══════════ ÉTAPE 1 — L'ESSENTIEL ═══════════════════════════════ */}
         {step === 1 && (
-          <View>
-            {/* <Text style={[s.sectionTitle, { color: theme.text }]}>Informations de base</Text> */}
+          <View style={st.stack}>
+            {/* Produit / Service */}
+            <View style={st.segment}>
+              {[
+                { value: 'product', label: 'Je vends un produit', icon: 'cube' },
+                { value: 'service', label: 'Je propose un service', icon: 'construct' },
+              ].map((o) => {
+                const active = form.type === o.value;
+                return (
+                  <Pressable key={o.value} onPress={() => { tap(); set('type', o.value); }} style={[st.segItem, active && st.segItemActive]}>
+                    <Ionicons name={o.icon} size={17} color={active ? '#fff' : theme.textMuted} />
+                    <Text style={[st.segTxt, active && { color: '#fff' }]} numberOfLines={1}>{o.label}</Text>
+                  </Pressable>
+                );
+              })}
+            </View>
 
-            {/* Type */}
-            <Field label="Type d'annonce *">
-              <View style={f.row}>
-                  <ChoiceBtn
-                    label="Produit"
-                    emoji="📦"
-                    active={form.type === 'product'}
-                    onPress={() => set('type', 'product')}
-                    accent={form.type === 'service' ? P.blue : P.terra}
-                    activeBg={form.type === 'service' ? '#DBEAFE' : P.peachSoft}
-                  />
-                  <ChoiceBtn
-                    label="Service"
-                    emoji="🛠️"
-                    active={form.type === 'service'}
-                    onPress={() => set('type', 'service')}
-                    accent={form.type === 'service' ? P.blue : P.terra}
-                    activeBg={form.type === 'service' ? '#DBEAFE' : P.peachSoft}
-                  />
-              </View>
-            </Field>
+            {/* Photos */}
+            <Section title="Photos" hint={`${form.images.length}/5 · la première est la couverture`} error={errors.images} st={st}>
+              {form.images.length === 0 ? (
+                <View style={st.dropzone}>
+                  <View style={st.dropIcon}><Ionicons name="images" size={28} color={accent} /></View>
+                  <Text style={st.dropTitle}>Ajoutez vos photos</Text>
+                  <Text style={st.dropSub}>Des photos nettes et lumineuses vendent jusqu'à 2× plus vite.</Text>
+                  <View style={st.dropActions}>
+                    <Pressable onPress={() => pickImages('camera')} style={[st.dropBtn, st.dropBtnPrimary]}>
+                      <Ionicons name="camera" size={17} color="#fff" />
+                      <Text style={[st.dropBtnTxt, { color: '#fff' }]}>Appareil photo</Text>
+                    </Pressable>
+                    <Pressable onPress={() => pickImages('library')} style={st.dropBtn}>
+                      <Ionicons name="images-outline" size={17} color={accent} />
+                      <Text style={st.dropBtnTxt}>Galerie</Text>
+                    </Pressable>
+                  </View>
+                </View>
+              ) : (
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={st.thumbs}>
+                  {form.images.map((uri, i) => (
+                    <Pressable key={`${uri}-${i}`} onPress={() => i > 0 && setCover(i)} style={[st.thumb, i === 0 && st.thumbCover]}>
+                      <Image source={{ uri }} style={st.thumbImg} />
+                      {i === 0 ? (
+                        <View style={st.coverBadge}><Ionicons name="star" size={10} color="#fff" /><Text style={st.coverTxt}>Couverture</Text></View>
+                      ) : (
+                        <View style={st.makeCover}><Text style={st.makeCoverTxt}>Mettre en 1er</Text></View>
+                      )}
+                      <Pressable onPress={() => handleRemoveImage(i)} hitSlop={8} style={st.thumbRemove} accessibilityLabel="Retirer la photo">
+                        <Ionicons name="close" size={14} color="#fff" />
+                      </Pressable>
+                    </Pressable>
+                  ))}
+                  {form.images.length < 5 ? (
+                    <View style={st.addCol}>
+                      <Pressable onPress={() => pickImages('camera')} style={st.addTile}>
+                        <Ionicons name="camera-outline" size={20} color={accent} />
+                      </Pressable>
+                      <Pressable onPress={() => pickImages('library')} style={st.addTile}>
+                        <Ionicons name="add" size={22} color={accent} />
+                      </Pressable>
+                    </View>
+                  ) : null}
+                </ScrollView>
+              )}
+            </Section>
 
             {/* Titre */}
-            <Field label="Titre *" error={errors.title} inline labelWidth={72}>
-              <StepInput
-                placeholder="Ex: iPhone 13 Pro Max 256GB"
+            <Section title="Titre" hint={`${titleLen}/80`} error={errors.title} st={st}>
+              <Input
+                st={st}
+                icon="create-outline"
+                placeholder={isService ? 'Ex : Réparation de téléphones à domicile' : 'Ex : iPhone 13 Pro 256 Go, très bon état'}
                 value={form.title}
-                onChangeText={t => set('title', t)}
+                onChangeText={(t) => set('title', t.slice(0, 80))}
                 error={errors.title}
               />
-            </Field>
+            </Section>
 
-            {/* Catégories */}
-            <Field label="Catégorie *" error={errors.category}>
+            {/* Catégorie */}
+            <Section title="Catégorie" error={errors.category} st={st}>
               {loadingCats ? (
-                <ActivityIndicator color={isService ? P.blue : P.terra} style={{marginVertical:12}} />
+                <ActivityIndicator color={accent} style={{ marginVertical: 18 }} />
               ) : (
-                <>
-                  <ScrollView
-                    horizontal
-                    showsHorizontalScrollIndicator={false}
-                    contentContainerStyle={s.catCarousel}
-                  >
-                    {categories.map(cat => (
-                      <TouchableOpacity
+                <View style={st.catGrid}>
+                  {typeCategories.map((cat) => {
+                    const active = form.category === cat._id;
+                    return (
+                      <Pressable
                         key={cat._id}
-                        style={[
-                          s.catCard,
-                          { backgroundColor: theme.surface, borderColor: theme.border, shadowColor: theme.shadow },
-                          form.category===cat._id && [s.catCardActive, { borderColor: accent, backgroundColor: accentSoft }],
-                          form.category===cat._id && isService && d.catCardActive,
-                        ]}
-                        onPress={() => set('category', cat._id)}
-                        activeOpacity={0.8}
+                        onPress={() => { tap(); setErrors((e) => ({ ...e, category: undefined })); setForm((p) => ({ ...p, category: cat._id, subcategory: p.category === cat._id ? p.subcategory : '' })); }}
+                        style={[st.catTile, active && st.catTileActive]}
                       >
-                        <View style={[s.catIconWrap, { backgroundColor: theme.surfaceAlt }, form.category===cat._id && isService && d.catIconWrapActive, form.category===cat._id && !isService && s.catIconWrapActive]}>
-                          <Text style={[s.catEmoji, form.category===cat._id && isService && d.catEmojiActive]}>{getEmoji(cat.icon)}</Text>
-                        </View>
-                        <Text style={[s.catName, { color: theme.text }, form.category===cat._id && [s.catNameActive, { color: accent }], form.category===cat._id && isService && d.catNameActive]}>
-                          {cat.name}
-                        </Text>
-                      </TouchableOpacity>
-                    ))}
-                  </ScrollView>
-                </>
+                        <CategoryIcon item={cat} size={34} />
+                        <Text style={[st.catName, active && { color: accent, fontWeight: '800' }]} numberOfLines={2}>{cat.name}</Text>
+                        {active ? <View style={st.catCheck}><Ionicons name="checkmark" size={11} color="#fff" /></View> : null}
+                      </Pressable>
+                    );
+                  })}
+                </View>
               )}
-            </Field>
+            </Section>
 
-            {/* Sous-catégories */}
             {selectedCat?.subcategories?.length > 0 && (
-              <Field label={`Type de ${selectedCat.name.toLowerCase()}`}>
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{gap:8}}>
-                  {selectedCat.subcategories.map(sub => (
-                    <TouchableOpacity
-                      key={sub._id}
-                      style={[s.subChip, { backgroundColor: theme.surface, borderColor: theme.border }, form.subcategory===sub.slug && [s.subChipActive, { borderColor: accent, backgroundColor: accentSoft }], form.subcategory===sub.slug && isService && d.subChipActive]}
-                      onPress={() => set('subcategory', sub.slug)}
-                      activeOpacity={0.8}
-                    >
-                      <Text style={{fontSize:16}}>{getEmoji(sub.icon)}</Text>
-                      <Text style={[s.subChipTxt, { color: theme.textMuted }, form.subcategory===sub.slug && [s.subChipTxtActive, { color: accent }], form.subcategory===sub.slug && isService && d.subChipTxtActive]}>
-                        {sub.name}
-                      </Text>
-                    </TouchableOpacity>
-                  ))}
-                </ScrollView>
-              </Field>
+              <Section title={`Précisez : ${selectedCat.name}`} st={st}>
+                <View style={st.chipsWrap}>
+                  {selectedCat.subcategories.map((sub) => {
+                    const active = form.subcategory === sub.slug;
+                    return (
+                      <Pressable key={sub._id || sub.slug} onPress={() => { tap(); set('subcategory', active ? '' : sub.slug); }} style={[st.chip, active && st.chipActive]}>
+                        <CategoryIcon item={sub} parent={selectedCat} size={20} />
+                        <Text style={[st.chipTxt, active && { color: accent, fontWeight: '800' }]}>{sub.name}</Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+              </Section>
             )}
           </View>
         )}
 
-        {/* ══════════ ÉTAPE 2 ══════════════════════════════════════════ */}
+        {/* ══════════ ÉTAPE 2 — PRIX & DÉTAILS ════════════════════════════ */}
         {step === 2 && (
-          <View>
-            {/* <Text style={[s.sectionTitle, { color: theme.text }]}>Détails de l'annonce</Text> */}
-
+          <View style={st.stack}>
             {/* Prix */}
-            <Field label="Prix *" error={errors.price} inline labelWidth={72}>
-              <View style={s.priceWrap}>
-                <StepInput
-                  placeholder="850000"
-                  value={form.price}
-                  onChangeText={t => set('price', t.replace(/\D/g,''))}
-                  keyboardType="numeric"
-                  error={errors.price}
+            <View style={[st.priceCard, errors.price && { borderColor: P.error }]}>
+              <Text style={st.priceLabel}>{isService ? 'Votre tarif' : 'Votre prix'}</Text>
+              <View style={st.priceRow}>
+                <TextInput
+                  style={st.priceInput}
+                  value={priceNum ? groupThousands(priceNum) : ''}
+                  onChangeText={(t) => set('price', t.replace(/\D/g, '').slice(0, 10))}
+                  placeholder="0"
+                  placeholderTextColor={theme.textSoft}
+                  keyboardType="number-pad"
                 />
-                {form.price ? (
-                  <Text style={[s.pricePreview, { color: accent }]}>{parseInt(form.price).toLocaleString('fr-FR')} FCFA</Text>
-                ) : null}
+                <Text style={st.priceCurrency}>FCFA</Text>
               </View>
-            </Field>
+              {errors.price ? <Text style={st.error}>{errors.price}</Text> : (
+                <Text style={st.priceHint}>{isService ? 'Indiquez un prix « à partir de ».' : 'Un prix juste attire plus d\'acheteurs.'}</Text>
+              )}
+            </View>
+
+            {/* État */}
+            {form.type === 'product' && (
+              <Section title="État" st={st}>
+                <View style={st.condRow}>
+                  {[
+                    { value: 'new', label: 'Neuf', icon: 'sparkles' },
+                    { value: 'refurbished', label: 'Reconditionné', icon: 'refresh-circle' },
+                    { value: 'used', label: 'Occasion', icon: 'repeat' },
+                  ].map((o) => {
+                    const active = form.condition === o.value;
+                    return (
+                      <Pressable key={o.value} onPress={() => { tap(); set('condition', o.value); }} style={[st.condItem, active && st.condItemActive]}>
+                        <Ionicons name={o.icon} size={20} color={active ? accent : theme.textMuted} />
+                        <Text style={[st.condTxt, active && { color: accent, fontWeight: '800' }]}>{o.label}</Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+              </Section>
+            )}
 
             {/* Description */}
-            <Field label={`Description (${wordCount}/150 mots)`} error={errors.description}>
-              <StepInput
-                placeholder="Décrivez votre produit ou service..."
+            <Section title="Description" hint={`${wordCount}/150 mots`} error={errors.description} st={st}>
+              <Input
+                st={st}
+                multiline
+                placeholder={isService
+                  ? 'Ce que vous proposez, votre expérience, la zone où vous intervenez…'
+                  : 'État, ancienneté, accessoires fournis, raison de la vente…'}
                 value={form.description}
-                onChangeText={t => {
+                onChangeText={(t) => {
                   const wc = t.trim().split(/\s+/).filter(Boolean).length;
                   if (wc <= 150) set('description', t);
                 }}
-                multiline
                 error={errors.description}
               />
-            </Field>
-
-            {/* Condition (produit) */}
-            {form.type === 'product' && (
-              <Field label="État du produit *">
-                <View style={f.row}>
-                  <ChoiceBtn label="Occasion"  active={form.condition==='used'} onPress={() => set('condition','used')} />
-                  <ChoiceBtn label="Neuf"      active={form.condition==='new'}  onPress={() => set('condition','new')} />
-                </View>
-              </Field>
-            )}
-
-            {/* Images */}
-            <Field label={`Photos (${form.images.length}/5) *`} error={errors.images}>
-              <View style={s.imgGrid}>
-                {form.images.map((uri, i) => (
-                  <View key={i} style={s.imgThumb}>
-                    <Image source={{uri}} style={s.imgThumbImg} />
-                    <TouchableOpacity
-                      style={s.imgRemove}
-                      onPress={() => handleRemoveImage(i)}
-                    >
-                      <Text style={s.imgRemoveTxt}>✕</Text>
-                    </TouchableOpacity>
-                    {i===0 && <View style={[s.imgPrimaryBadge, isService && d.imgPrimaryBadge]}><Text style={s.imgPrimaryTxt}>Principale</Text></View>}
-                  </View>
-                ))}
-                {form.images.length < 5 && (
-                  <TouchableOpacity style={s.imgAdd} onPress={pickImages} activeOpacity={0.8}>
-                    <Text style={s.imgAddIcon}>+</Text>
-                    <Text style={s.imgAddTxt}>Ajouter</Text>
-                  </TouchableOpacity>
-                )}
-              </View>
-            </Field>
+            </Section>
 
             {/* Livraison (produit) */}
             {form.type === 'product' && (
-              <>
-                <View style={[s.switchCard, { backgroundColor: theme.surface, borderColor: theme.border }]}>
-                  <View style={{flex:1}}>
-                    <Text style={[s.switchLabel, { color: theme.text }]}>🚚 Livraison disponible</Text>
-                    <Text style={[s.switchSub, { color: theme.textMuted }]}>Proposez-vous la livraison ?</Text>
+              <View style={st.optCard}>
+                <View style={st.optHead}>
+                  <View style={st.optIcon}><Ionicons name="bicycle" size={18} color={accent} /></View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={st.optTitle}>Livraison</Text>
+                    <Text style={st.optSub}>{form.delivery ? 'Vous livrez vos acheteurs' : 'Proposez-vous la livraison ?'}</Text>
                   </View>
                   <Switch
                     value={form.delivery}
-                    onValueChange={v => set('delivery', v)}
-                    trackColor={{false:theme.divider, true:accentSoft}}
-                    thumbColor={form.delivery ? accent : theme.surface}
+                    onValueChange={(v) => { tap(); set('delivery', v); }}
+                    trackColor={{ false: theme.divider, true: accentSoft }}
+                    thumbColor={form.delivery ? accent : '#f4f4f5'}
                   />
                 </View>
-
                 {form.delivery && (
-                  <>
-                    <Field label="Coût de livraison (FCFA)">
-                      <StepInput
-                        placeholder="Ex: 5000"
-                        value={form.deliveryCost}
-                        onChangeText={t => set('deliveryCost', t.replace(/\D/g,''))}
-                        keyboardType="numeric"
-                      />
-                    </Field>
-                    <Field label="Zones de livraison">
-                      <View style={s.tagInput}>
-                        <TextInput
-                          style={[f.input, {flex:1, marginBottom:0, backgroundColor: theme.inputBg, borderColor: theme.border, color: theme.inputText}]}
-                          placeholder="Ex: Niamey, Maradi…"
-                          placeholderTextColor={theme.inputPlaceholder}
-                          value={delArea}
-                          onChangeText={setDelArea}
-                        />
-                        <TouchableOpacity
-                          style={[s.tagAddBtn, isService && d.tagAddBtn]}
-                          onPress={() => {
-                            if (delArea.trim() && !form.deliveryAreas.includes(delArea.trim())) {
-                              set('deliveryAreas', [...form.deliveryAreas, delArea.trim()]);
-                              setDelArea('');
-                            }
-                          }}
-                        >
-                          <Text style={s.tagAddBtnTxt}>+</Text>
-                        </TouchableOpacity>
+                  <View style={{ gap: 12, marginTop: 14 }}>
+                    <Input
+                      st={st}
+                      icon="cash-outline"
+                      placeholder="Coût de livraison (0 = offerte)"
+                      value={form.deliveryCost}
+                      onChangeText={(t) => set('deliveryCost', t.replace(/\D/g, ''))}
+                      keyboardType="number-pad"
+                      suffix="FCFA"
+                    />
+                    <Text style={st.subLabel}>Zones desservies</Text>
+                    {form.deliveryAreas.length > 0 && (
+                      <View style={st.chipsWrap}>
+                        {form.deliveryAreas.map((a) => (
+                          <Pressable key={a} onPress={() => set('deliveryAreas', form.deliveryAreas.filter((x) => x !== a))} style={[st.chip, st.chipActive]}>
+                            <Ionicons name="location" size={13} color={accent} />
+                            <Text style={[st.chipTxt, { color: accent, fontWeight: '700' }]}>{a}</Text>
+                            <Ionicons name="close" size={13} color={accent} />
+                          </Pressable>
+                        ))}
                       </View>
-                      {form.deliveryAreas.length > 0 && (
-                        <View style={s.tags}>
-                          {form.deliveryAreas.map((a,i) => (
-                            <TouchableOpacity
-                              key={i} style={[s.tag, { backgroundColor: accent }]}
-                              onPress={() => set('deliveryAreas', form.deliveryAreas.filter((_,j) => j!==i))}
-                            >
-                              <Text style={s.tagTxt}>{a} ✕</Text>
-                            </TouchableOpacity>
-                          ))}
-                        </View>
-                      )}
-                    </Field>
-                  </>
-                )}
-
-                {/* Spécifications */}
-                <Field label="📑 Spécifications (optionnel)">
-                  <View style={s.specInputRow}>
-                    <TextInput
-                      style={[f.input, {flex:1, marginBottom:0, backgroundColor: theme.inputBg, borderColor: theme.border, color: theme.inputText}]}
-                      placeholder="Caractéristique"
-                      placeholderTextColor={theme.inputPlaceholder}
-                      value={specKey}
-                      onChangeText={setSpecKey}
-                    />
-                    <TextInput
-                      style={[f.input, {flex:1, marginBottom:0, backgroundColor: theme.inputBg, borderColor: theme.border, color: theme.inputText}]}
-                      placeholder="Valeur"
-                      placeholderTextColor={theme.inputPlaceholder}
-                      value={specVal}
-                      onChangeText={setSpecVal}
-                    />
-                    <TouchableOpacity
-                      style={[s.tagAddBtn, isService && d.tagAddBtn]}
-                      onPress={() => {
-                        if (specKey.trim() && specVal.trim()) {
-                          set('specifications', {...form.specifications, [specKey.trim()]: specVal.trim()});
-                          setSpecKey(''); setSpecVal('');
-                        }
-                      }}
-                    >
-                      <Text style={s.tagAddBtnTxt}>+</Text>
-                    </TouchableOpacity>
-                  </View>
-                  {Object.keys(form.specifications).length > 0 && (
-                    <View style={[s.specsList, { backgroundColor: theme.surfaceAlt }]}> 
-                      {Object.entries(form.specifications).map(([k,v]) => (
-                        <TouchableOpacity
-                          key={k} style={[s.specItem, { backgroundColor: theme.surface, borderColor: theme.border }]}
-                          onPress={() => { const ns={...form.specifications}; delete ns[k]; set('specifications',ns); }}
-                        >
-                          <Text style={[s.specK, { color: theme.text }]}>{k}:</Text>
-                          <Text style={[s.specV, { color: theme.text }]}> {v}</Text>
-                          <Text style={s.specDel}> ✕</Text>
-                        </TouchableOpacity>
+                    )}
+                    <View style={st.chipsWrap}>
+                      {cityChips.slice(0, 8).map((c) => (
+                        <Pressable key={c} onPress={() => { tap(); set('deliveryAreas', [...form.deliveryAreas, c]); }} style={st.chip}>
+                          <Ionicons name="add" size={13} color={theme.textMuted} />
+                          <Text style={st.chipTxt}>{c}</Text>
+                        </Pressable>
                       ))}
                     </View>
-                  )}
-                </Field>
-              </>
+                    <View style={st.inlineAdd}>
+                      <View style={{ flex: 1 }}>
+                        <Input st={st} placeholder="Autre quartier ou ville" value={delArea} onChangeText={setDelArea} />
+                      </View>
+                      <Pressable
+                        style={st.addBtn}
+                        onPress={() => {
+                          const v = delArea.trim();
+                          if (v && !form.deliveryAreas.includes(v)) { set('deliveryAreas', [...form.deliveryAreas, v]); setDelArea(''); }
+                        }}
+                      >
+                        <Ionicons name="add" size={22} color="#fff" />
+                      </Pressable>
+                    </View>
+                  </View>
+                )}
+              </View>
             )}
 
-            {/* Horaires (service) */}
-            {form.type === 'service' && (
-              <Field label="🕒 Horaires de disponibilité">
-                <View style={s.timeRow}>
-                  <View style={{flex:1, marginRight:8}}>
-                    <Text style={[s.timeLabel, { color: theme.textMuted }]}>Ouverture</Text>
-                    <StepInput
-                      placeholder="8h00"
-                      value={form.availability.openingTime}
-                      onChangeText={t => set('availability',{...form.availability, openingTime:t})}
-                    />
-                  </View>
-                  <View style={{flex:1}}>
-                    <Text style={[s.timeLabel, { color: theme.textMuted }]}>Fermeture</Text>
-                    <StepInput
-                      placeholder="18h00"
-                      value={form.availability.closingTime}
-                      onChangeText={t => set('availability',{...form.availability, closingTime:t})}
-                    />
+            {/* Caractéristiques (produit) */}
+            {form.type === 'product' && (
+              <View style={st.optCard}>
+                <View style={st.optHead}>
+                  <View style={st.optIcon}><Ionicons name="list" size={18} color={accent} /></View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={st.optTitle}>Caractéristiques <Text style={st.optional}>· facultatif</Text></Text>
+                    <Text style={st.optSub}>Couleur, taille, capacité, marque…</Text>
                   </View>
                 </View>
-              </Field>
+                {Object.keys(form.specifications).length > 0 && (
+                  <View style={st.specList}>
+                    {Object.entries(form.specifications).map(([k, v]) => (
+                      <View key={k} style={st.specRow}>
+                        <Text style={st.specK} numberOfLines={1}>{k}</Text>
+                        <Text style={st.specV} numberOfLines={1}>{v}</Text>
+                        <Pressable hitSlop={8} onPress={() => { const ns = { ...form.specifications }; delete ns[k]; set('specifications', ns); }}>
+                          <Ionicons name="close-circle" size={18} color={theme.iconMuted} />
+                        </Pressable>
+                      </View>
+                    ))}
+                  </View>
+                )}
+                <View style={[st.inlineAdd, { marginTop: 12 }]}>
+                  <View style={{ flex: 1 }}><Input st={st} placeholder="Ex : Couleur" value={specKey} onChangeText={setSpecKey} /></View>
+                  <View style={{ flex: 1 }}><Input st={st} placeholder="Ex : Noir" value={specVal} onChangeText={setSpecVal} /></View>
+                  <Pressable
+                    style={st.addBtn}
+                    onPress={() => {
+                      if (specKey.trim() && specVal.trim()) {
+                        set('specifications', { ...form.specifications, [specKey.trim()]: specVal.trim() });
+                        setSpecKey(''); setSpecVal('');
+                      }
+                    }}
+                  >
+                    <Ionicons name="add" size={22} color="#fff" />
+                  </Pressable>
+                </View>
+              </View>
+            )}
+
+            {/* Disponibilités (service) */}
+            {form.type === 'service' && (
+              <View style={st.optCard}>
+                <View style={st.optHead}>
+                  <View style={st.optIcon}><Ionicons name="time" size={18} color={accent} /></View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={st.optTitle}>Disponibilités</Text>
+                    <Text style={st.optSub}>Jours et horaires où l'on peut vous solliciter</Text>
+                  </View>
+                </View>
+                <View style={st.daysRow}>
+                  {DAYS.map((d) => {
+                    const active = (form.availability.days || []).includes(d.value);
+                    return (
+                      <Pressable key={d.value} onPress={() => { tap(); toggleDay(d.value); }} style={[st.dayChip, active && st.dayChipActive]}>
+                        <Text style={[st.dayTxt, active && { color: '#fff' }]}>{d.label}</Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+                <View style={[st.inlineAdd, { marginTop: 12 }]}>
+                  <View style={{ flex: 1 }}>
+                    <Input st={st} icon="sunny-outline" placeholder="Ouvre à 8h" value={form.availability.openingTime}
+                      onChangeText={(t) => set('availability', { ...form.availability, openingTime: t })} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Input st={st} icon="moon-outline" placeholder="Ferme à 18h" value={form.availability.closingTime}
+                      onChangeText={(t) => set('availability', { ...form.availability, closingTime: t })} />
+                  </View>
+                </View>
+              </View>
             )}
           </View>
         )}
 
-        {/* ══════════ ÉTAPE 3 — RÉSUMÉ ════════════════════════════════ */}
+        {/* ══════════ ÉTAPE 3 — APERÇU ═════════════════════════════════════ */}
         {step === 3 && (
-          <View>
-            <Text style={[s.sectionTitle, { color: theme.text }]}>Résumé de votre annonce</Text>
+          <View style={st.stack}>
+            <Text style={st.previewKicker}>Votre annonce telle que les acheteurs la verront</Text>
 
-            {/* Preview image principale */}
-            {form.images.length > 0 && (
-              <View style={s.previewImgWrap}>
-                <Image source={{uri:form.images[0]}} style={s.previewImg} resizeMode="cover" />
-                <LinearGradient colors={['transparent','rgba(17,24,39,0.6)']} style={StyleSheet.absoluteFill} />
-                <View style={s.previewBadge}>
-                  <Text style={s.previewBadgeTxt}>
-                    {form.type==='product' ? '📦 Produit' : '🛠 Service'}
+            <View style={st.previewCard}>
+              <View style={st.previewImgBox}>
+                {form.images[0] ? <Image source={{ uri: form.images[0] }} style={StyleSheet.absoluteFill} resizeMode="cover" /> : null}
+                <LinearGradient colors={['transparent', 'rgba(0,0,0,0.55)']} style={StyleSheet.absoluteFill} />
+                <View style={[st.previewType, { backgroundColor: isService ? P.blue600 : 'rgba(17,24,39,0.8)' }]}>
+                  <Ionicons name={isService ? 'construct' : form.condition === 'new' ? 'sparkles' : 'cube'} size={11} color="#fff" />
+                  <Text style={st.previewTypeTxt}>{isService ? 'Service' : CONDITION_LABEL[form.condition] || 'Produit'}</Text>
+                </View>
+                {form.images.length > 1 ? (
+                  <View style={st.previewCount}><Ionicons name="camera" size={11} color="#fff" /><Text style={st.previewTypeTxt}>{form.images.length}</Text></View>
+                ) : null}
+              </View>
+              <View style={st.previewBody}>
+                <Text style={[st.previewPrice, { color: accent }]}>{formatPrice(form.price)}</Text>
+                <Text style={st.previewTitle} numberOfLines={2}>{form.title}</Text>
+                <View style={st.previewMeta}>
+                  <CategoryIcon item={selectedCat} size={16} />
+                  <Text style={st.previewMetaTxt} numberOfLines={1}>
+                    {selectedCat?.name}{form.subcategory ? ` · ${selectedCat?.subcategories?.find((x) => x.slug === form.subcategory)?.name || form.subcategory}` : ''}
                   </Text>
                 </View>
-                <View style={s.previewPrice}>
-                  <Text style={[s.previewPriceTxt, isService && d.pricePreview]}>{parseInt(form.price).toLocaleString('fr-FR')} FCFA</Text>
+                <View style={st.previewMeta}>
+                  <Ionicons name="location-outline" size={14} color={theme.textSoft} />
+                  <Text style={st.previewMetaTxt}>{user?.location || 'Niger'}</Text>
+                  {form.type === 'product' && form.delivery ? (
+                    <>
+                      <Text style={st.previewMetaTxt}> · </Text>
+                      <Ionicons name="bicycle-outline" size={14} color={theme.textSoft} />
+                      <Text style={st.previewMetaTxt}>{Number(form.deliveryCost) ? `Livraison ${formatPrice(form.deliveryCost)}` : 'Livraison offerte'}</Text>
+                    </>
+                  ) : null}
                 </View>
               </View>
-            )}
+            </View>
 
-            {/* Infos résumé */}
-            {[
-              { label:'Titre', value: form.title },
-              { label:'Catégorie', value: selectedCat?.name + (form.subcategory ? ` · ${form.subcategory}` : '') },
-              { label:'Prix', value: `${parseInt(form.price).toLocaleString('fr-FR')} FCFA`, accent: true },
-              form.type==='product' && { label:'État', value: form.condition==='new' ? '✨ Neuf' : '🔄 Occasion' },
-              form.description && { label:'Description', value: form.description },
-              form.type==='product' && form.delivery && { label:'🚚 Livraison', value: form.deliveryCost ? `${parseInt(form.deliveryCost).toLocaleString('fr-FR')} FCFA` : 'Incluse' },
-              form.type==='service' && form.availability.openingTime && { label:'🕒 Horaires', value: `${form.availability.openingTime} — ${form.availability.closingTime}` },
-            ].filter(Boolean).map((row, i) => (
-              <View key={i} style={[s.summaryRow, { backgroundColor: theme.surface, borderColor: theme.border }]}>
-                <Text style={[s.summaryLabel, { color: theme.textMuted }]}>{row.label}</Text>
-                <Text style={[s.summaryVal, { color: theme.text }, row.accent && {color:accent, fontWeight:'900', fontSize:17}]}>
-                  {row.value}
-                </Text>
+            {/* Qualité de l'annonce */}
+            <View style={st.qualityCard}>
+              <View style={st.qualityHead}>
+                <Text style={st.qualityTitle}>Qualité de l'annonce</Text>
+                <Text style={[st.qualityScore, { color: qualityScore >= 75 ? '#16a34a' : qualityScore >= 50 ? '#d97706' : P.error }]}>{qualityScore} %</Text>
               </View>
-            ))}
-
-            {/* Photos miniatures */}
-            {form.images.length > 1 && (
-              <View style={[s.summaryRow, { backgroundColor: theme.surface, borderColor: theme.border }]}>
-                <Text style={[s.summaryLabel, { color: theme.textMuted }]}>Photos</Text>
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{marginTop:6}}>
-                  {form.images.map((uri,i) => (
-                    <Image key={i} source={{uri}} style={s.summaryThumb} />
-                  ))}
-                </ScrollView>
+              <View style={st.qualityTrack}>
+                <View style={[st.qualityFill, { width: `${qualityScore}%`, backgroundColor: qualityScore >= 75 ? '#16a34a' : qualityScore >= 50 ? '#f59e0b' : P.error }]} />
               </View>
-            )}
+              {quality.map((q) => (
+                <View key={q.label} style={st.qualityRow}>
+                  <Ionicons name={q.ok ? 'checkmark-circle' : 'ellipse-outline'} size={18} color={q.ok ? '#16a34a' : theme.iconMuted} />
+                  <View style={{ flex: 1 }}>
+                    <Text style={[st.qualityLabel, q.ok && { color: theme.textMuted }]}>{q.label}</Text>
+                    {!q.ok ? <Text style={st.qualityHint}>{q.hint}</Text> : null}
+                  </View>
+                </View>
+              ))}
+              {qualityScore < 100 ? (
+                <Pressable onPress={() => { setStep(1); scrollToTop(); }} style={st.qualityEdit}>
+                  <Ionicons name="create-outline" size={15} color={accent} />
+                  <Text style={[st.qualityEditTxt, { color: accent }]}>Améliorer mon annonce</Text>
+                </Pressable>
+              ) : null}
+            </View>
 
-            {/* Vendeur info */}
-            <View style={[s.sellerBox, { backgroundColor: theme.surfaceAlt, borderColor: theme.border }]}> 
-              <View style={[s.sellerBoxAccent, isService && d.sellerBoxAccent]} />
-              <Text style={[s.sellerBoxTitle, { color: theme.text }]}>Vos coordonnées</Text>
-              {isAuthenticated && user ? (
-                <>
-                  <Text style={[s.sellerBoxItem, { color: theme.textMuted }]}>📍 {user.location || 'Niger'}</Text>
-                  <Text style={[s.sellerBoxItem, { color: theme.textMuted }]}>👤 {user.name}</Text>
-                  <Text style={[s.sellerBoxItem, { color: theme.textMuted }]}>📞 {user.phone}</Text>
-                </>
-              ) : (
-                <Text style={[s.sellerBoxItem, { color: theme.textMuted }]}>🔒 Vos informations apparaîtront après la connexion</Text>
-              )}
+            {/* Confidentialité : les échanges passent par la messagerie TakTak */}
+            <View style={st.privacy}>
+              <Ionicons name="shield-checkmark" size={20} color="#16a34a" />
+              <Text style={st.privacyTxt}>
+                Les acheteurs vous écrivent dans la messagerie TakTak. Votre numéro de téléphone reste privé.
+              </Text>
             </View>
           </View>
         )}
       </KeyboardAwareScrollView>
 
-      {/* ── FOOTER ─────────────────────────────────────────────────────── */}
-      <View
-        style={[
-          s.footer,
-          { backgroundColor: theme.surface, borderTopColor: theme.border },
-          {
-            // Fixe : le pied de page reste derrière le clavier (pas de saut de mise en page)
-            marginBottom: footerOffset,
-            paddingBottom: Math.max(insets.bottom, 12) + 4,
-          },
-        ]}
-      >
+      {/* ── PIED DE PAGE ─────────────────────────────────────────────────── */}
+      <View style={[st.footer, { marginBottom: footerOffset, paddingBottom: Math.max(insets.bottom, 12) + 4 }]}>
         {step > 1 && (
-          <TouchableOpacity style={[s.btnBack, { borderColor: accent, backgroundColor: theme.surfaceAlt }, isService && d.btnBack]} onPress={prev} activeOpacity={0.8}>
-            <Text style={[s.btnBackTxt, { color: accent }, isService && d.btnBackTxt]}>← Retour</Text>
-          </TouchableOpacity>
+          <Pressable style={st.backBtn} onPress={prev} accessibilityLabel="Étape précédente">
+            <Ionicons name="arrow-back" size={20} color={theme.text} />
+          </Pressable>
         )}
-        <TouchableOpacity
-          style={[s.btnNext, step===1 && {flex:1}]}
-          onPress={step < 3 ? next : submit}
-          disabled={submitting}
-          activeOpacity={0.85}
-        >
-          <LinearGradient
-            colors={[accent, accentDark]}
-            start={{x:0,y:0}} end={{x:1,y:0}}
-            style={s.btnNextGrad}
-          >
-            <Text style={s.btnNextTxt}>
-              {step < 3 ? 'Suivant →' : isEditing ? '✓ Mettre à jour' : '✓ Publier l\'annonce'}
+        <Pressable style={({ pressed }) => [st.nextBtn, pressed && { opacity: 0.9 }]} onPress={step < 3 ? next : submit} disabled={submitting}>
+          <LinearGradient colors={[accent, accentDark]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={st.nextGrad}>
+            <Text style={st.nextTxt}>
+              {step === 1 ? 'Continuer' : step === 2 ? 'Voir l\'aperçu' : isEditing ? 'Enregistrer les modifications' : 'Publier l\'annonce'}
             </Text>
+            <Ionicons name={step < 3 ? 'arrow-forward' : 'rocket'} size={18} color="#fff" />
           </LinearGradient>
-        </TouchableOpacity>
+        </Pressable>
       </View>
 
       <AlertModal
@@ -1111,20 +1025,15 @@ export default function PublishScreen({ navigation, route }) {
         onDismiss={() => setAlert({ ...alert, visible: false })}
       />
 
-      {/* ── LOADER FULL SCREEN BLAZING FAST RENDERING ── */}
       {/* Volontairement non fermable pendant l'envoi de l'annonce (retour Android ignoré) */}
-      <Modal visible={submitting} transparent={true} animationType="fade" statusBarTranslucent onRequestClose={() => {}}>
-        <View style={[s.loaderOverlay, { backgroundColor: theme.overlay }]}> 
-          <View style={[s.loaderBox, { backgroundColor: theme.surface }]}> 
-            <View style={[s.loaderIconWrap, isService && d.loaderIconWrap]}>
-              <ActivityIndicator size="large" color={P.white} />
-            </View>
-            <Text style={[s.loaderTitle, { color: theme.text }]}>{isEditing ? 'Mise a jour en cours...' : 'Creation en cours...'}</Text>
-            <Text style={[s.loaderSub, { color: theme.textMuted }]}>
-              {isEditing
-                ? 'Veuillez patienter pendant la mise a jour de votre annonce'
-                : 'Veuillez patienter pendant la publication de votre annonce'}
-            </Text>
+      <Modal visible={submitting} transparent animationType="fade" statusBarTranslucent onRequestClose={() => {}}>
+        <View style={st.loaderOverlay}>
+          <View style={st.loaderBox}>
+            <LinearGradient colors={[accent, accentDark]} style={st.loaderIcon}>
+              <ActivityIndicator size="large" color="#fff" />
+            </LinearGradient>
+            <Text style={st.loaderTitle}>{isEditing ? 'Mise à jour en cours…' : 'Publication en cours…'}</Text>
+            <Text style={st.loaderSub}>Envoi de vos photos, quelques secondes…</Text>
           </View>
         </View>
       </Modal>
@@ -1134,186 +1043,222 @@ export default function PublishScreen({ navigation, route }) {
   );
 }
 
-// ─── STYLES CHAMPS ────────────────────────────────────────────────────────────
-const f = StyleSheet.create({
-  field:         { marginBottom: 16 },
-  inlineRow:     { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  inlineControl: { flex: 1 },
-  label:         { fontSize: 13, fontWeight: '700', color: P.brown, marginBottom: 8 },
-  labelInline:   { marginBottom: 0 },
-  error:         { fontSize: 12, color: P.error, marginTop: 4 },
-  input:         { backgroundColor: P.white, borderWidth: 1, borderColor: P.dim, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 13, fontSize: 15, color: P.charcoal, marginBottom: 0 },
-  inputErr:      { borderColor: P.error },
-  textarea:      { minHeight: 110, textAlignVertical: 'top' },
-  row:           { flexDirection: 'row', gap: 10 },
-  choice:        { flex: 1, backgroundColor: P.white, borderWidth: 1.5, borderColor: P.dim, borderRadius: 12, paddingVertical: 14, alignItems: 'center', gap: 6 },
-  choiceActive:  { borderColor: P.terra, backgroundColor: P.peachSoft },
-  choiceEmoji:   { fontSize: 26 },
-  choiceTxt:     { fontSize: 14, fontWeight: '600', color: P.muted },
-  choiceTxtActive:{ color: P.terra, fontWeight: '800' },
-});
+// ─── Constantes & composants ─────────────────────────────────────────────────
+const NIGER_CITIES = ['Niamey', 'Zinder', 'Maradi', 'Agadez', 'Tahoua', 'Dosso', 'Diffa', 'Tillabéri', 'Birni-N\'Konni', 'Arlit'];
+const DAYS = [
+  { value: 'lundi', label: 'Lun' }, { value: 'mardi', label: 'Mar' }, { value: 'mercredi', label: 'Mer' },
+  { value: 'jeudi', label: 'Jeu' }, { value: 'vendredi', label: 'Ven' }, { value: 'samedi', label: 'Sam' },
+  { value: 'dimanche', label: 'Dim' },
+];
+const CONDITION_LABEL = { new: 'Neuf', refurbished: 'Reconditionné', used: 'Occasion' };
+const groupThousands = (n) => String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+const tap = () => Haptics.selectionAsync().catch(() => {});
 
-// ─── STYLES PAGE ─────────────────────────────────────────────────────────────
-const s = StyleSheet.create({
-  container:  { flex: 1, backgroundColor: P.surface },
+function Section({ title, hint, error, children, st }) {
+  return (
+    <View style={st.section}>
+      <View style={st.sectionHead}>
+        <Text style={st.sectionTitle}>{title}</Text>
+        {hint ? <Text style={st.sectionHint}>{hint}</Text> : null}
+      </View>
+      {children}
+      {error ? (
+        <View style={st.errorRow}>
+          <Ionicons name="alert-circle" size={14} color={P.error} />
+          <Text style={st.error}>{error}</Text>
+        </View>
+      ) : null}
+    </View>
+  );
+}
 
-  // Header
-  header:       { paddingHorizontal: 20, paddingBottom: 16, overflow: 'hidden', position: 'relative' },
-  headerAccent: { position: 'absolute', top: 0, left: 0, right: 0, height: 3, backgroundColor: P.terra },
-  headerRow:    { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 },
-  headerEye:    { fontSize: 10, fontWeight: '700', color: P.amber, letterSpacing: 2, textTransform: 'uppercase', marginBottom: 3 },
-  headerTitle:  { fontSize: 22, fontWeight: '900', color: P.white, letterSpacing: -0.4 },
-  stepBadge:    { backgroundColor: 'rgba(255,255,255,0.12)', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20, borderWidth: 1, borderColor: 'rgba(255,255,255,0.15)' },
-  stepBadgeTxt: { fontSize: 13, fontWeight: '800', color: P.white },
-  progWrap:     { flexDirection: 'row', gap: 6, marginBottom: 10 },
-  progSeg:      { flex: 1, height: 4, borderRadius: 2, backgroundColor: 'rgba(255,255,255,0.15)' },
-  progSegActive:{ backgroundColor: P.amber },
-  progSegDone:  { backgroundColor: P.terra },
-  stepLabels:   { flexDirection: 'row', justifyContent: 'space-between' },
-  stepLabel:    { fontSize: 10, color: 'rgba(255,255,255,0.38)', fontWeight: '500' },
-  stepLabelActive:{ color: P.amber, fontWeight: '700' },
-  headerGlow:   { height: 1.5, marginTop: 10 },
+function Input({ st, icon, suffix, multiline, error, ...props }) {
+  const [focused, setFocused] = useState(false);
+  return (
+    <View style={[st.inputBox, multiline && st.inputBoxMulti, focused && st.inputBoxFocus, error && { borderColor: P.error }]}>
+      {icon ? <Ionicons name={icon} size={17} color={focused ? st.accentColor.color : st.iconMuted.color} style={multiline ? { marginTop: 2 } : null} /> : null}
+      <TextInput
+        {...props}
+        multiline={multiline}
+        textAlignVertical={multiline ? 'top' : 'center'}
+        placeholderTextColor={st.placeholder.color}
+        onFocus={() => setFocused(true)}
+        onBlur={() => setFocused(false)}
+        style={[st.input, multiline && st.inputMulti]}
+      />
+      {suffix ? <Text style={st.inputSuffix}>{suffix}</Text> : null}
+    </View>
+  );
+}
 
-  // Content
-  scroll:       { padding: 18 },
-  sectionTitle: { fontSize: 18, fontWeight: '900', color: P.charcoal, marginBottom: 20, letterSpacing: -0.3 },
+// ─── Styles ──────────────────────────────────────────────────────────────────
+const styleCache = new Map();
+function makeStyles(theme, isDark, accent, accentSoft) {
+  const key = `${isDark}-${accent}-${theme.screen}`;
+  if (styleCache.has(key)) return styleCache.get(key);
+  const surface = isDark ? theme.surface : '#ffffff';
+  const field = isDark ? theme.surfaceAlt : '#f4f5f8';
+  const softAccent = isDark ? (accent === P.terra ? 'rgba(236,90,19,0.16)' : 'rgba(59,130,246,0.18)') : accentSoft;
+  const styles = StyleSheet.create({
+    container: { flex: 1, backgroundColor: theme.screen },
+    accentColor: { color: accent },
+    iconMuted: { color: theme.iconMuted },
+    placeholder: { color: theme.textSoft },
 
-  // Bannière brouillon non publié
-  draftBanner:        { borderRadius: 14, borderWidth: 1.5, padding: 14, marginBottom: 16 },
-  draftBannerRow:     { flexDirection: 'row', alignItems: 'flex-start', gap: 10 },
-  draftBannerIcon:    { fontSize: 20 },
-  draftBannerTitle:   { fontSize: 14, fontWeight: '800', marginBottom: 2 },
-  draftBannerSub:     { fontSize: 12, lineHeight: 17 },
-  draftBannerActions: { flexDirection: 'row', gap: 8, marginTop: 12 },
-  draftBannerBtn:     { flex: 1, paddingVertical: 10, borderRadius: 10, alignItems: 'center', borderWidth: 1.5, borderColor: 'transparent' },
-  draftBannerBtnPrimary: { backgroundColor: P.terra, borderColor: P.terra },
-  draftBannerBtnTxt:  { fontSize: 13, fontWeight: '700' },
+    header: { paddingHorizontal: 18, paddingBottom: 12, backgroundColor: theme.screen },
+    headerRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 12 },
+    headerTitle: { fontSize: 26, fontWeight: '900', color: theme.text, letterSpacing: -0.6 },
+    headerSub: { fontSize: 13, fontWeight: '600', color: theme.textMuted, marginTop: 2 },
+    resetBtn: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center', backgroundColor: surface, borderWidth: 1, borderColor: theme.border },
+    progTrack: { height: 6, borderRadius: 3, overflow: 'hidden', backgroundColor: isDark ? 'rgba(255,255,255,0.08)' : '#e8eaef' },
+    progFill: { height: '100%', borderRadius: 3, overflow: 'hidden' },
 
-  // Catégories
-  catCarousel:   { paddingRight: 18, gap: CATEGORY_CARD_GAP },
-  catCard:       { width: CATEGORY_CARD_WIDTH, minHeight: 82, backgroundColor: P.white, borderWidth: 1.5, borderColor: P.dim, borderRadius: 12, paddingVertical: 8, paddingHorizontal: 5, alignItems: 'center', justifyContent: 'center', shadowColor: P.charcoal, shadowOpacity: 0.06, shadowOffset: {width:0,height:3}, shadowRadius: 8, elevation: 2, marginRight: 8 },
-  catCardActive: { borderColor: P.terra, backgroundColor: P.peachSoft, borderWidth: 2 },
-  catIconWrap:   { width: 30, height: 30, borderRadius: 15, backgroundColor: P.surface, justifyContent: 'center', alignItems: 'center', marginBottom: 6 },
-  catIconWrapActive: { backgroundColor: P.peachSoft },
-  catEmoji:      { fontSize: 18 },
-  catName:       { fontSize: 9, fontWeight: '800', color: P.charcoal, textAlign: 'center', lineHeight: 11 },
-  catNameActive: { color: P.terra },
-  catDesc:       { fontSize: 10, color: P.muted, textAlign: 'center', lineHeight: 13 },
-  dots:          { flexDirection: 'row', justifyContent: 'center', gap: 4, marginTop: 8, marginBottom: 2 },
-  dot:           { width: 5, height: 5, borderRadius: 2.5, backgroundColor: P.dim },
-  dotActive:     { width: 14, backgroundColor: P.terra },
+    scroll: { paddingHorizontal: 18, paddingTop: 6 },
+    stack: { gap: 22 },
 
-  // Sous-catégories
-  subChip:        { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: P.white, borderWidth: 1.5, borderColor: P.dim, borderRadius: 20, paddingVertical: 9, paddingHorizontal: 14 },
-  subChipActive:  { borderColor: P.terra, backgroundColor: P.peachSoft },
-  subChipTxt:     { fontSize: 13, fontWeight: '600', color: P.muted },
-  subChipTxtActive:{ color: P.terra },
+    draft: {
+      flexDirection: 'row', alignItems: 'center', gap: 10, padding: 12, borderRadius: 16, marginBottom: 18,
+      backgroundColor: surface, borderWidth: 1, borderColor: theme.border,
+    },
+    draftIcon: { width: 36, height: 36, borderRadius: 12, alignItems: 'center', justifyContent: 'center', backgroundColor: softAccent },
+    draftTitle: { fontSize: 14, fontWeight: '800', color: theme.text },
+    draftSub: { fontSize: 12, color: theme.textMuted },
+    draftLink: { fontSize: 13, fontWeight: '700', color: theme.textMuted, marginRight: 4 },
+    draftBtn: { paddingHorizontal: 12, height: 32, borderRadius: 16, justifyContent: 'center', backgroundColor: accent },
+    draftBtnTxt: { color: '#fff', fontSize: 12.5, fontWeight: '800' },
 
-  // Prix
-  priceWrap:    { gap: 6 },
-  pricePreview: { fontSize: 13, color: P.terra, fontWeight: '700' },
+    segment: { flexDirection: 'row', padding: 4, gap: 4, borderRadius: 18, backgroundColor: field },
+    segItem: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, height: 46, borderRadius: 14, paddingHorizontal: 6 },
+    segItemActive: { backgroundColor: accent, shadowColor: accent, shadowOpacity: 0.35, shadowRadius: 8, shadowOffset: { width: 0, height: 3 }, elevation: 3 },
+    segTxt: { fontSize: 13, fontWeight: '800', color: theme.textMuted, flexShrink: 1 },
 
-  // Images
-  imgGrid:      { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
-  imgThumb:     { position: 'relative' },
-  imgThumbImg:  { width: 96, height: 96, borderRadius: 12, backgroundColor: P.sand },
-  imgRemove:    { position: 'absolute', top: 4, right: 4, backgroundColor: P.error, width: 22, height: 22, borderRadius: 11, alignItems: 'center', justifyContent: 'center' },
-  imgRemoveTxt: { color: P.white, fontSize: 11, fontWeight: '900' },
-  imgPrimaryBadge:{ position: 'absolute', bottom: 4, left: 4, backgroundColor: P.terra, paddingHorizontal: 6, paddingVertical: 2, borderRadius: 5 },
-  imgPrimaryTxt:  { color: P.white, fontSize: 9, fontWeight: '800' },
-  imgAdd:       { width: 96, height: 96, borderWidth: 2, borderColor: P.dim, borderStyle: 'dashed', borderRadius: 12, alignItems: 'center', justifyContent: 'center', backgroundColor: P.white },
-  imgAddIcon:   { fontSize: 28, color: P.muted },
-  imgAddTxt:    { fontSize: 11, color: P.muted, marginTop: 2 },
+    section: { gap: 10 },
+    sectionHead: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between' },
+    sectionTitle: { fontSize: 16, fontWeight: '800', color: theme.text },
+    sectionHint: { fontSize: 12, fontWeight: '600', color: theme.textSoft },
+    subLabel: { fontSize: 13, fontWeight: '700', color: theme.textMuted },
+    errorRow: { flexDirection: 'row', alignItems: 'center', gap: 5 },
+    error: { fontSize: 12.5, fontWeight: '600', color: P.error },
 
-  // Switch livraison
-  switchCard:   { flexDirection: 'row', alignItems: 'center', backgroundColor: P.white, borderRadius: 12, borderWidth: 1, borderColor: P.dim, padding: 14, marginBottom: 12 },
-  switchLabel:  { fontSize: 14, fontWeight: '700', color: P.charcoal },
-  switchSub:    { fontSize: 12, color: P.muted, marginTop: 2 },
+    dropzone: {
+      alignItems: 'center', paddingVertical: 24, paddingHorizontal: 18, borderRadius: 20,
+      borderWidth: 1.5, borderStyle: 'dashed', borderColor: isDark ? 'rgba(255,255,255,0.18)' : accent + '66', backgroundColor: softAccent,
+    },
+    dropIcon: { width: 58, height: 58, borderRadius: 20, alignItems: 'center', justifyContent: 'center', backgroundColor: surface, marginBottom: 10 },
+    dropTitle: { fontSize: 16, fontWeight: '800', color: theme.text },
+    dropSub: { fontSize: 13, color: theme.textMuted, textAlign: 'center', marginTop: 4, maxWidth: 260, lineHeight: 18 },
+    dropActions: { flexDirection: 'row', gap: 10, marginTop: 16 },
+    dropBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 16, height: 42, borderRadius: 14, backgroundColor: surface, borderWidth: 1, borderColor: theme.border },
+    dropBtnPrimary: { backgroundColor: accent, borderColor: accent },
+    dropBtnTxt: { fontSize: 13.5, fontWeight: '800', color: accent },
 
-  // Tags
-  tagInput:    { flexDirection: 'row', gap: 8, alignItems: 'center' },
-  tagAddBtn:   { backgroundColor: P.terra, width: 46, height: 46, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
-  tagAddBtnTxt:{ color: P.white, fontSize: 22, fontWeight: '700' },
-  tags:        { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 8 },
-  tag:         { backgroundColor: P.amber, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 14 },
-  tagTxt:      { color: P.white, fontSize: 12, fontWeight: '600' },
+    thumbs: { gap: 10, paddingRight: 4 },
+    thumb: { width: 104, height: 128, borderRadius: 16, overflow: 'hidden', backgroundColor: field },
+    thumbCover: { borderWidth: 2.5, borderColor: accent },
+    thumbImg: { width: '100%', height: '100%' },
+    coverBadge: { position: 'absolute', left: 6, bottom: 6, flexDirection: 'row', alignItems: 'center', gap: 3, paddingHorizontal: 7, paddingVertical: 3, borderRadius: 8, backgroundColor: accent },
+    coverTxt: { color: '#fff', fontSize: 10, fontWeight: '800' },
+    makeCover: { position: 'absolute', left: 6, right: 6, bottom: 6, paddingVertical: 3, borderRadius: 8, backgroundColor: 'rgba(0,0,0,0.55)', alignItems: 'center' },
+    makeCoverTxt: { color: '#fff', fontSize: 9.5, fontWeight: '700' },
+    thumbRemove: { position: 'absolute', top: 6, right: 6, width: 24, height: 24, borderRadius: 12, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(0,0,0,0.6)' },
+    addCol: { gap: 8 },
+    addTile: {
+      width: 60, height: 60, borderRadius: 16, alignItems: 'center', justifyContent: 'center',
+      borderWidth: 1.5, borderStyle: 'dashed', borderColor: isDark ? 'rgba(255,255,255,0.2)' : accent + '66', backgroundColor: softAccent,
+    },
 
-  // Specs
-  specInputRow: { flexDirection: 'row', gap: 8, alignItems: 'center', marginBottom: 8 },
-  specsList:    { backgroundColor: P.surface, borderRadius: 10, padding: 10, gap: 6 },
-  specItem:     { flexDirection: 'row', alignItems: 'center', backgroundColor: P.white, padding: 10, borderRadius: 8, borderWidth: 1, borderColor: P.dim },
-  specK:        { fontSize: 13, fontWeight: '700', color: P.brown },
-  specV:        { fontSize: 13, color: P.charcoal, flex: 1 },
-  specDel:      { fontSize: 14, color: P.error, fontWeight: '700' },
+    inputBox: { flexDirection: 'row', alignItems: 'center', gap: 10, minHeight: 52, paddingHorizontal: 14, borderRadius: 16, backgroundColor: field, borderWidth: 1.5, borderColor: 'transparent' },
+    inputBoxMulti: { alignItems: 'flex-start', paddingTop: 13, minHeight: 130 },
+    inputBoxFocus: { borderColor: accent, backgroundColor: surface },
+    input: { flex: 1, fontSize: 15, color: theme.text, paddingVertical: 13 },
+    inputMulti: { minHeight: 110, paddingTop: 0 },
+    inputSuffix: { fontSize: 13, fontWeight: '800', color: theme.textSoft },
 
-  // Horaires
-  timeRow:   { flexDirection: 'row' },
-  timeLabel: { fontSize: 12, color: P.muted, marginBottom: 6 },
+    catGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+    catTile: {
+      width: '23.4%', aspectRatio: 0.88, borderRadius: 16, alignItems: 'center', justifyContent: 'center', gap: 6, paddingHorizontal: 4,
+      backgroundColor: surface, borderWidth: 1.5, borderColor: theme.border,
+    },
+    catTileActive: { borderColor: accent, backgroundColor: softAccent },
+    catName: { fontSize: 11, fontWeight: '600', color: theme.text, textAlign: 'center', lineHeight: 13 },
+    catCheck: { position: 'absolute', top: 6, right: 6, width: 18, height: 18, borderRadius: 9, alignItems: 'center', justifyContent: 'center', backgroundColor: accent },
 
-  // Résumé
-  previewImgWrap:  { height: 180, borderRadius: 16, overflow: 'hidden', marginBottom: 16, position: 'relative', backgroundColor: P.sand },
-  previewImg:      { width: '100%', height: '100%' },
-  previewBadge:    { position: 'absolute', top: 12, left: 12, backgroundColor: 'rgba(17,24,39,0.7)', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8 },
-  previewBadgeTxt: { fontSize: 11, fontWeight: '800', color: P.white },
-  previewPrice:    { position: 'absolute', bottom: 12, right: 12, backgroundColor: 'rgba(17,24,39,0.8)', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 8 },
-  previewPriceTxt: { fontSize: 14, fontWeight: '900', color: P.amber },
-  summaryRow:      { backgroundColor: P.white, borderRadius: 12, padding: 14, marginBottom: 8, borderWidth: 1, borderColor: P.dim },
-  summaryLabel:    { fontSize: 11, color: P.muted, fontWeight: '600', marginBottom: 4, textTransform: 'uppercase', letterSpacing: 0.5 },
-  summaryVal:      { fontSize: 15, color: P.charcoal, fontWeight: '600', lineHeight: 22 },
-  summaryThumb:    { width: 64, height: 64, borderRadius: 10, marginRight: 8, backgroundColor: P.sand },
-  sellerBox:       { backgroundColor: P.peachSoft, borderRadius: 14, padding: 16, marginTop: 4, position: 'relative', overflow: 'hidden', borderWidth: 1, borderColor: 'rgba(236,90,19,0.18)' },
-  sellerBoxAccent: { position: 'absolute', left: 0, top: 10, bottom: 10, width: 3, backgroundColor: P.terra, borderRadius: 2 },
-  sellerBoxTitle:  { fontSize: 13, fontWeight: '800', color: P.charcoal, marginBottom: 10, marginLeft: 10 },
-  sellerBoxItem:   { fontSize: 13, color: P.brown, marginBottom: 5, marginLeft: 10 },
+    chipsWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+    chip: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12, height: 38, borderRadius: 19, backgroundColor: surface, borderWidth: 1.5, borderColor: theme.border },
+    chipActive: { borderColor: accent, backgroundColor: softAccent },
+    chipTxt: { fontSize: 13, fontWeight: '600', color: theme.textMuted },
 
-  // Footer
-  footer:      { backgroundColor: P.white, borderTopWidth: 1, borderTopColor: P.dim, paddingHorizontal: 16, paddingTop: 12, flexDirection: 'row', gap: 10 },
-  btnBack:     { flex: 1, paddingVertical: 14, borderRadius: 12, alignItems: 'center', borderWidth: 1.5, borderColor: 'rgba(236,90,19,0.4)', backgroundColor: P.peachSoft },
-  btnBackTxt:  { fontSize: 15, fontWeight: '700', color: P.terra },
-  btnNext:     { flex: 1, borderRadius: 12, overflow: 'hidden', shadowColor: P.terra, shadowOpacity: 0.3, shadowOffset: {width:0,height:4}, shadowRadius: 10, elevation: 6 },
-  btnNextGrad: { paddingVertical: 15, alignItems: 'center' },
-  btnNextTxt:  { fontSize: 15, fontWeight: '800', color: P.white, letterSpacing: 0.2 },
+    priceCard: { alignItems: 'center', paddingVertical: 20, paddingHorizontal: 16, borderRadius: 22, backgroundColor: surface, borderWidth: 1.5, borderColor: theme.border },
+    priceLabel: { fontSize: 13, fontWeight: '700', color: theme.textMuted, textTransform: 'uppercase', letterSpacing: 1 },
+    priceRow: { flexDirection: 'row', alignItems: 'baseline', gap: 8, marginTop: 6 },
+    priceInput: { fontSize: 40, fontWeight: '900', color: accent, minWidth: 60, textAlign: 'center', paddingVertical: 2, letterSpacing: -1 },
+    priceCurrency: { fontSize: 18, fontWeight: '800', color: theme.textSoft },
+    priceHint: { fontSize: 12.5, color: theme.textSoft, marginTop: 6 },
 
-  // Loader Overlay
-  loaderOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(17, 24, 39, 0.85)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  loaderBox: {
-    width: '80%',
-    backgroundColor: P.white,
-    borderRadius: 20,
-    padding: 24,
-    alignItems: 'center',
-  },
-  loaderIconWrap: {
-    width: 60,
-    height: 60,
-    borderRadius: 30,
-    backgroundColor: P.terra,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 16,
-  },
-  loaderTitle: {
-    fontSize: 18,
-    fontWeight: '800',
-    color: P.charcoal,
-    marginBottom: 8,
-  },
-  loaderSub: {
-    fontSize: 14,
-    color: P.muted,
-    textAlign: 'center',
-  },
+    condRow: { flexDirection: 'row', gap: 8 },
+    condItem: { flex: 1, alignItems: 'center', gap: 6, paddingVertical: 14, borderRadius: 16, backgroundColor: surface, borderWidth: 1.5, borderColor: theme.border },
+    condItemActive: { borderColor: accent, backgroundColor: softAccent },
+    condTxt: { fontSize: 12.5, fontWeight: '600', color: theme.textMuted },
 
-  // Empty
-  emptyWrap:  { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 40 },
-  emptyIconBg:{ width: 80, height: 80, borderRadius: 40, backgroundColor: P.peachSoft, alignItems: 'center', justifyContent: 'center', marginBottom: 20 },
-  emptyTitle: { fontSize: 22, fontWeight: '800', color: P.charcoal, marginBottom: 8 },
-  emptyDesc:  { fontSize: 14, color: P.muted, textAlign: 'center', lineHeight: 21, marginBottom: 24 },
-  emptyBtn:   { paddingVertical: 14, paddingHorizontal: 28, borderRadius: 12, shadowColor: P.terra, shadowOpacity: 0.3, shadowOffset: {width:0,height:4}, shadowRadius: 10, elevation: 6 },
-  emptyBtnTxt:{ fontSize: 15, fontWeight: '800', color: P.white },
-});
+    optCard: { padding: 14, borderRadius: 20, backgroundColor: surface, borderWidth: 1, borderColor: theme.border },
+    optHead: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+    optIcon: { width: 40, height: 40, borderRadius: 13, alignItems: 'center', justifyContent: 'center', backgroundColor: softAccent },
+    optTitle: { fontSize: 15, fontWeight: '800', color: theme.text },
+    optional: { fontSize: 12, fontWeight: '600', color: theme.textSoft },
+    optSub: { fontSize: 12.5, color: theme.textMuted, marginTop: 1 },
+    inlineAdd: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+    addBtn: { width: 48, height: 48, borderRadius: 15, alignItems: 'center', justifyContent: 'center', backgroundColor: accent },
+    specList: { marginTop: 12, gap: 6 },
+    specRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 12, height: 42, borderRadius: 12, backgroundColor: field },
+    specK: { width: '38%', fontSize: 13, fontWeight: '700', color: theme.textMuted },
+    specV: { flex: 1, fontSize: 13.5, fontWeight: '600', color: theme.text },
+    daysRow: { flexDirection: 'row', gap: 5, marginTop: 12 },
+    dayChip: { flex: 1, height: 40, borderRadius: 12, alignItems: 'center', justifyContent: 'center', backgroundColor: field },
+    dayChipActive: { backgroundColor: accent },
+    dayTxt: { fontSize: 12.5, fontWeight: '800', color: theme.textMuted },
+
+    previewKicker: { fontSize: 13, fontWeight: '700', color: theme.textMuted },
+    previewCard: {
+      borderRadius: 22, overflow: 'hidden', backgroundColor: surface, borderWidth: 1, borderColor: theme.border,
+      shadowColor: '#0f172a', shadowOpacity: isDark ? 0 : 0.08, shadowRadius: 16, shadowOffset: { width: 0, height: 8 }, elevation: isDark ? 0 : 4,
+    },
+    previewImgBox: { height: 230, backgroundColor: field },
+    previewType: { position: 'absolute', left: 12, bottom: 12, flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 9, paddingVertical: 5, borderRadius: 10 },
+    previewCount: { position: 'absolute', right: 12, bottom: 12, flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 9, paddingVertical: 5, borderRadius: 10, backgroundColor: 'rgba(0,0,0,0.55)' },
+    previewTypeTxt: { color: '#fff', fontSize: 11.5, fontWeight: '800' },
+    previewBody: { padding: 14, gap: 5 },
+    previewPrice: { fontSize: 22, fontWeight: '900', letterSpacing: -0.5 },
+    previewTitle: { fontSize: 16, fontWeight: '700', color: theme.text },
+    previewMeta: { flexDirection: 'row', alignItems: 'center', gap: 5 },
+    previewMetaTxt: { fontSize: 12.5, color: theme.textSoft },
+
+    qualityCard: { padding: 16, borderRadius: 20, backgroundColor: surface, borderWidth: 1, borderColor: theme.border, gap: 10 },
+    qualityHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+    qualityTitle: { fontSize: 15, fontWeight: '800', color: theme.text },
+    qualityScore: { fontSize: 16, fontWeight: '900' },
+    qualityTrack: { height: 6, borderRadius: 3, backgroundColor: isDark ? 'rgba(255,255,255,0.08)' : '#eef0f4', overflow: 'hidden' },
+    qualityFill: { height: '100%', borderRadius: 3 },
+    qualityRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 10 },
+    qualityLabel: { fontSize: 14, fontWeight: '700', color: theme.text },
+    qualityHint: { fontSize: 12, color: theme.textSoft, marginTop: 1 },
+    qualityEdit: { flexDirection: 'row', alignItems: 'center', gap: 6, alignSelf: 'flex-start', marginTop: 2 },
+    qualityEditTxt: { fontSize: 13.5, fontWeight: '800' },
+
+    privacy: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 14, borderRadius: 16, backgroundColor: isDark ? 'rgba(34,197,94,0.10)' : '#f0fdf4' },
+    privacyTxt: { flex: 1, fontSize: 13, lineHeight: 19, color: theme.textMuted, fontWeight: '600' },
+
+    footer: { flexDirection: 'row', gap: 10, paddingHorizontal: 18, paddingTop: 12, backgroundColor: theme.screen, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: theme.border },
+    backBtn: { width: 54, height: 54, borderRadius: 18, alignItems: 'center', justifyContent: 'center', backgroundColor: surface, borderWidth: 1, borderColor: theme.border },
+    nextBtn: { flex: 1, borderRadius: 18, overflow: 'hidden', shadowColor: accent, shadowOpacity: 0.35, shadowRadius: 10, shadowOffset: { width: 0, height: 5 }, elevation: 5 },
+    nextGrad: { height: 54, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 },
+    nextTxt: { color: '#fff', fontSize: 16, fontWeight: '900', letterSpacing: -0.2 },
+
+    loaderOverlay: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(0,0,0,0.5)' },
+    loaderBox: { width: 270, alignItems: 'center', padding: 24, borderRadius: 24, backgroundColor: surface },
+    loaderIcon: { width: 72, height: 72, borderRadius: 24, alignItems: 'center', justifyContent: 'center', marginBottom: 14 },
+    loaderTitle: { fontSize: 17, fontWeight: '900', color: theme.text },
+    loaderSub: { fontSize: 13, color: theme.textMuted, marginTop: 4, textAlign: 'center' },
+  });
+  styleCache.set(key, styles);
+  return styles;
+}

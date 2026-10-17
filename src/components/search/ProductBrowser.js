@@ -67,6 +67,7 @@ export default function ProductBrowser({
   title,
   subtitle,
   emoji,
+  icon,
   searchable = false,
   initialQuery = '',
   initialFilters,
@@ -179,7 +180,10 @@ export default function ProductBrowser({
           </Pressable>
         ) : (
           <View style={s.titleBox}>
-            <Text style={[s.title, { color: theme.text }]} numberOfLines={1}>{emoji ? `${emoji}  ` : ''}{title}</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+              {icon || null}
+              <Text style={[s.title, { color: theme.text, flexShrink: 1 }]} numberOfLines={1}>{!icon && emoji ? `${emoji}  ` : ''}{title}</Text>
+            </View>
             {subtitle ? <Text style={[s.subtitle, { color: theme.textSoft }]} numberOfLines={1}>{subtitle}</Text> : null}
           </View>
         )}

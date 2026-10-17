@@ -4,7 +4,7 @@
 import React, { useEffect, useState } from 'react';
 import { ScrollView, Pressable, Text, StyleSheet } from 'react-native';
 import ProductBrowser from '../components/search/ProductBrowser';
-import { categoryEmoji } from '../components/home/CategoryRail';
+import CategoryIcon from '../components/CategoryIcon';
 import { getCategoryBySlug } from '../api/categories';
 import { useAppTheme } from '../contexts/ThemeContext';
 import { MOBILE_COLORS as P } from '../theme/colors';
@@ -12,7 +12,7 @@ import { DEFAULT_FILTERS } from '../utils/searchFilters';
 
 const LOCKED = { categorySlug: true };
 
-function SubcategoryChips({ subcategories, value, onChange, accent }) {
+function SubcategoryChips({ subcategories, parentSlug, value, onChange, accent }) {
   const { theme, isDark } = useAppTheme();
   if (!subcategories.length) return null;
 
@@ -36,7 +36,7 @@ function SubcategoryChips({ subcategories, value, onChange, accent }) {
             accessibilityRole="tab"
             accessibilityState={{ selected: active }}
           >
-            {sub.icon && !/^[A-Za-z0-9]+$/.test(sub.icon) ? <Text style={s.chipEmoji}>{sub.icon}</Text> : null}
+            {sub.slug ? <CategoryIcon item={sub} parent={parentSlug} size={18} /> : null}
             <Text style={[s.chipTxt, { color: active ? P.white : theme.text }]} numberOfLines={1}>{sub.name}</Text>
           </Pressable>
         );
@@ -65,13 +65,14 @@ export default function CategoryProductsScreen({ route, navigation }) {
       key={categorySlug}
       navigation={navigation}
       title={category?.name || categoryName || 'Catégorie'}
-      emoji={categoryEmoji(category || {})}
+      icon={<CategoryIcon item={category || { slug: categorySlug }} size={28} />}
       subtitle={category?.description || (total ? `${total} annonce${total > 1 ? 's' : ''} dans cette catégorie` : undefined)}
       initialFilters={{ ...DEFAULT_FILTERS, categorySlug, categoryName: category?.name || categoryName }}
       locked={LOCKED}
       renderTop={({ filters, patchFilters, accent }) => (
         <SubcategoryChips
           subcategories={subcategories}
+          parentSlug={categorySlug}
           value={filters.subcategory}
           onChange={(slug) => patchFilters({ subcategory: slug })}
           accent={accent}

@@ -105,6 +105,7 @@ export const AuthProvider = ({ children }) => {
         setUser(storedUser);
         setIsAuthenticated(true);
         console.log('✅ Utilisateur chargé:', storedUser.name);
+        refreshUserProfile(); // en arrière-plan : met à jour la copie locale
       } else {
         console.log('ℹ️ Aucun utilisateur connecté');
       }
@@ -239,16 +240,18 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
+  // Recharge le profil depuis le serveur (la copie locale date de la connexion :
+  // e-mail, photo… modifiés ailleurs, par exemple sur le web, n'y figurent pas)
   const refreshUserProfile = async () => {
     try {
       const response = await getProfile();
-      if (response.success) {
-        await saveUserData(response.data);
-        setUser(response.data);
-        console.log('✅ Profil mis à jour');
+      const fresh = response?.data?.user;
+      if (response?.success && fresh?.id) {
+        await saveUserData(fresh);
+        setUser(fresh);
       }
     } catch (error) {
-      console.error('❌ Erreur refresh profil:', error);
+      console.error('❌ Erreur refresh profil:', error?.message || error);
     }
   };
 

@@ -5,16 +5,16 @@ import { COLORS } from '../theme/colors';
 // URL de l'API backend
 // En développement, utiliser l'IP locale de votre machine (pas localhost)
 // Exemple: si backend sur http://localhost:5000, utiliser http://192.168.1.X:5000
-// export const API_BASE_URL = 'https://api.taktak-ne.com/api'; 
-export const API_BASE_URL = 'http://192.168.1.48:5001/api'; // À MODIFIER avec votre IP
+export const API_BASE_URL = 'https://api.taktak-ne.com/api'; 
+// export const API_BASE_URL = 'http://192.168.1.48:5001/api'; // À MODIFIER avec votre IP
 
 // Configuration Socket.IO
-// export const SOCKET_URL = 'https://api.taktak-ne.com';
-export const SOCKET_URL = 'http://192.168.1.48:5001'; // À MODIFIER avec votre IP
+export const SOCKET_URL = 'https://api.taktak-ne.com';
+// export const SOCKET_URL = 'http://192.168.1.48:5001'; // À MODIFIER avec votre IP
 
 // Site web public (liens de partage) — même adresse que les QR codes vendeur du web
 export const WEB_BASE_URL = 'https://api.taktak-ne.com';
-
+// export const WEB_BASE_URL = 'http://192.168.1.48:5001'; // À MODIFIER avec votre IP
 // Couleurs centralisees (source unique)
 export { COLORS };
 

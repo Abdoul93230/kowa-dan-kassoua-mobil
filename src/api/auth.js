@@ -166,7 +166,7 @@ export const login = async (phoneOrEmail, password) => {
  */
 export const getProfile = async () => {
   try {
-    const response = await api.get('/auth/profile');
+    const response = await api.get('/auth/me');
     return response.data;
   } catch (error) {
     console.error('❌ Erreur récupération profil:', error);
