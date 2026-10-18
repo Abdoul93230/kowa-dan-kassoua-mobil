@@ -266,6 +266,19 @@ export default function ProductsListScreen({ navigation }) {
     setRefreshing(false);
   }, [fetchHome, refreshFavorites]);
 
+  // Toucher l'onglet Accueil alors qu'on y est déjà : retour en haut + rechargement
+  const scrollRef = useRef(null);
+  const onRefreshRef = useRef(onRefresh);
+  onRefreshRef.current = onRefresh;
+  useEffect(() => {
+    const unsubscribe = navigation.addListener('tabPress', () => {
+      if (!navigation.isFocused()) return; // simple changement d'onglet : rien à faire
+      scrollRef.current?.scrollTo({ y: 0, animated: true });
+      onRefreshRef.current();
+    });
+    return unsubscribe;
+  }, [navigation]);
+
   // ─── Actions ────────────────────────────────────────────────────────────────
   const openProduct = useCallback((item) => {
     navigation.navigate('ProductDetail', { productId: getProductId(item), preview: item });
@@ -308,6 +321,7 @@ export default function ProductsListScreen({ navigation }) {
     <View style={[s.screen, { backgroundColor: theme.screen }]}>
 
       <Animated.ScrollView
+        ref={scrollRef}
         showsVerticalScrollIndicator={false}
         contentContainerStyle={{ paddingTop: headerH + 6, paddingBottom: 96 + Math.max(insets.bottom, 8) }}
         onScroll={Animated.event([{ nativeEvent: { contentOffset: { y: scrollY } } }], { useNativeDriver: true })}
