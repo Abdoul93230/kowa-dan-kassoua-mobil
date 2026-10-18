@@ -4,7 +4,7 @@
     "slug": "frontend-mobile",
     "version": "1.0.0",
     "runtimeVersion": {
-      "policy": "appVersion"
+      "policy": "fingerprint"
     },
     "orientation": "portrait",
     "icon": "./assets/icon-v2.png",
