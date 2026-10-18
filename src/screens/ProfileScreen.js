@@ -28,27 +28,10 @@ import { useAuth } from '../contexts/AuthContext';
 import { useAppTheme } from '../contexts/ThemeContext';
 import { MOBILE_COLORS as P } from '../theme/colors';
 import AlertModal from '../components/AlertModal';
-import CustomBottomSheet, { SheetTextInput } from '../components/CustomBottomSheet';
+import CustomBottomSheet from '../components/CustomBottomSheet';
 import { updateProfile, apiClient } from '../api/auth';
 import { compressToBase64, getMyStats } from '../api/products';
-import { doneAccessory } from '../components/Keyboard';
 import { sizedImage } from '../utils/format';
-
-const NIGER_CITIES = [
-  'Niamey', 'Zinder', 'Maradi', 'Agadez', 'Tahoua',
-  'Dosso', 'Diffa', 'Tillabéri', 'Birni-N\'Konni', 'Arlit',
-  'Gaya', 'Tessaoua',
-];
-
-const COUNTRIES = [
-  { code: 'NE', name: 'Niger',         dialCode: '+227', flag: '🇳🇪' },
-  { code: 'SN', name: 'Sénégal',       dialCode: '+221', flag: '🇸🇳' },
-  { code: 'CI', name: "Côte d'Ivoire", dialCode: '+225', flag: '🇨🇮' },
-  { code: 'BF', name: 'Burkina Faso',  dialCode: '+226', flag: '🇧🇫' },
-  { code: 'ML', name: 'Mali',          dialCode: '+223', flag: '🇲🇱' },
-  { code: 'TG', name: 'Togo',          dialCode: '+228', flag: '🇹🇬' },
-  { code: 'BJ', name: 'Bénin',         dialCode: '+229', flag: '🇧🇯' },
-];
 
 const THEME_OPTIONS = [
   { value: 'system', label: 'Auto',   icon: 'phone-portrait-outline' },
@@ -56,7 +39,6 @@ const THEME_OPTIONS = [
   { value: 'dark',   label: 'Sombre', icon: 'moon-outline' },
 ];
 
-const BIO_MAX = 1000;
 const HERO_COLORS = ['#060a14', '#10172b', '#2a1307'];
 const RING_COLORS = [P.terra, P.amber, '#8b5cf6', '#22d3ee', P.terra];
 
@@ -76,12 +58,6 @@ const initialsOf = (name) => {
   return n.length >= 2 ? (n[0][0] + n[n.length - 1][0]).toUpperCase() : name.substring(0, 2).toUpperCase();
 };
 
-const splitWhatsapp = (raw) => {
-  if (!raw) return { country: COUNTRIES[0], number: '' };
-  const m = COUNTRIES.find((c) => raw.startsWith(c.dialCode));
-  return m ? { country: m, number: raw.replace(m.dialCode, '').trim() } : { country: COUNTRIES[0], number: raw };
-};
-
 // ─────────────────────────────────────────────────────────────────────────────
 export default function ProfileScreen({ navigation }) {
   const s = useProfileStyles();
@@ -98,14 +74,10 @@ export default function ProfileScreen({ navigation }) {
   });
 
   // Panneaux
-  const [editSheet,    setEditSheet]    = useState(false);
   const [photoSheet,   setPhotoSheet]   = useState(false);
-  const [citySheet,    setCitySheet]    = useState(false);
-  const [countrySheet, setCountrySheet] = useState(false);
 
   // Chargements
   const [loggingOut,    setLoggingOut]    = useState(false);
-  const [savingProfile, setSavingProfile] = useState(false);
   const [savingAvatar,  setSavingAvatar]  = useState(false);
   const [picking,       setPicking]       = useState(false);
 
@@ -116,17 +88,6 @@ export default function ProfileScreen({ navigation }) {
 
   // Photo choisie dans l'éditeur photo (pas encore enregistrée)
   const [pendingAvatar, setPendingAvatar] = useState(null);
-
-  // Champs du formulaire
-  const [editName,         setEditName]         = useState('');
-  const [editCity,         setEditCity]         = useState('');
-  const [editAvatarUri,    setEditAvatarUri]    = useState(null);
-  const [editEmail,        setEditEmail]        = useState('');
-  const [editWhatsapp,     setEditWhatsapp]     = useState('');
-  const [editDescription,  setEditDescription]  = useState('');
-  const [editBusinessType, setEditBusinessType] = useState('individual');
-  const [editBusinessName, setEditBusinessName] = useState('');
-  const [whatsappCountry,  setWhatsappCountry]  = useState(COUNTRIES[0]);
 
   const enter = useRef(new Animated.Value(0)).current;
   const glow = useRef(new Animated.Value(0)).current;
@@ -140,22 +101,6 @@ export default function ProfileScreen({ navigation }) {
     loop.start();
     return () => loop.stop();
   }, []);
-
-  const fillFromUser = useCallback(() => {
-    if (!user) return;
-    setEditName(user.name || '');
-    setEditCity(user.city || user.location || '');
-    setEditAvatarUri(user.avatar || null);
-    setEditEmail(user.email || '');
-    setEditDescription(user.description || '');
-    setEditBusinessType(user.businessType || 'individual');
-    setEditBusinessName(user.businessName || '');
-    const { country, number } = splitWhatsapp(user?.contactInfo?.whatsapp || '');
-    setWhatsappCountry(country);
-    setEditWhatsapp(number);
-  }, [user]);
-
-  useEffect(() => { fillFromUser(); }, [fillFromUser]);
 
   useFocusEffect(useCallback(() => {
     if (!isAuthenticated) return undefined;
@@ -194,25 +139,9 @@ export default function ProfileScreen({ navigation }) {
     Animated.timing(progress, { toValue: completion.percent, duration: 900, delay: 250, easing: Easing.out(Easing.cubic), useNativeDriver: false }).start();
   }, [completion.percent]);
 
-  // ── Formulaire : y a-t-il des modifications ? ────────────────────────────
-  const isDirty = useMemo(() => {
-    if (!user) return false;
-    const { country, number } = splitWhatsapp(user?.contactInfo?.whatsapp || '');
-    return (
-      editName.trim() !== (user.name || '') ||
-      editCity.trim() !== (user.city || user.location || '') ||
-      editAvatarUri !== (user.avatar || null) ||
-      editEmail.trim() !== (user.email || '') ||
-      editDescription.trim() !== (user.description || '') ||
-      editBusinessType !== (user.businessType || 'individual') ||
-      editBusinessName.trim() !== (user.businessName || '') ||
-      editWhatsapp.trim() !== number ||
-      (editWhatsapp.trim() && whatsappCountry.code !== country.code)
-    );
-  }, [user, editName, editCity, editAvatarUri, editEmail, editDescription, editBusinessType, editBusinessName, editWhatsapp, whatsappCountry]);
-
   // ── Handlers ─────────────────────────────────────────────────────────────
-  const openEdit = () => { tap(); fillFromUser(); setEditSheet(true); };
+  // Formulaire : page dédiée (le clavier y est géré comme dans Sécurité et connexion)
+  const openEdit = () => { tap(); navigation.navigate('EditProfile'); };
   const openPhoto = () => { tap(); setPendingAvatar(null); setPhotoSheet(true); };
 
   const handleLogout = () => {
@@ -269,36 +198,6 @@ export default function ProfileScreen({ navigation }) {
     } catch (e) {
       showAlert('error', 'Erreur', e.message || 'Impossible de mettre à jour la photo');
     } finally { setSavingAvatar(false); }
-  };
-
-  const handleSaveProfile = async () => {
-    if (!editName.trim()) { showAlert('error', 'Nom requis', 'Indiquez votre nom complet.'); return; }
-    if (editBusinessType === 'professional' && !editBusinessName.trim()) {
-      showAlert('error', 'Nom de l\'entreprise', 'Indiquez le nom de votre boutique ou entreprise.');
-      return;
-    }
-    setSavingProfile(true);
-    try {
-      const fullWA = editWhatsapp.trim() ? `${whatsappCountry.dialCode} ${editWhatsapp.trim()}` : undefined;
-      const data = {
-        name: editName.trim(), city: editCity.trim(),
-        email: editEmail.trim() || undefined,
-        description: editDescription.trim(),
-        businessType: editBusinessType, whatsapp: fullWA,
-        // La photo n'est renvoyée que si elle a changé (évite de ré-uploader l'actuelle)
-        ...(editAvatarUri && editAvatarUri !== user?.avatar ? { avatar: editAvatarUri } : {}),
-        ...(editBusinessType === 'professional' ? { businessName: editBusinessName.trim() } : {}),
-      };
-      const res = await updateProfile(data);
-      if (res.success) {
-        await updateUserProfile(res?.data?.user || {});
-        success();
-        setEditSheet(false);
-        showAlert('success', 'Profil mis à jour', 'Vos informations ont été enregistrées.');
-      }
-    } catch (e) {
-      showAlert('error', 'Erreur', e.message || 'Impossible de mettre à jour le profil');
-    } finally { setSavingProfile(false); }
   };
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -588,133 +487,6 @@ export default function ProfileScreen({ navigation }) {
         </View>
       </CustomBottomSheet>
 
-      {/* ═══════════════════════════════════════════════════════════════════ */}
-      {/* PANNEAU : ÉDITER LE PROFIL                                         */}
-      {/* ═══════════════════════════════════════════════════════════════════ */}
-      <CustomBottomSheet
-        visible={editSheet}
-        onClose={() => { if (!savingProfile) setEditSheet(false); }}
-        title="Modifier le profil"
-        avoidKeyboard
-        footer={
-          <TouchableOpacity
-            style={[s.primaryBtn, s.saveBtn, (!isDirty || savingProfile) && s.btnDisabled]}
-            onPress={handleSaveProfile}
-            disabled={!isDirty || savingProfile}
-            activeOpacity={0.88}
-          >
-            <LinearGradient colors={[P.orange500, P.orange700]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={s.primaryBtnGrad}>
-              {savingProfile
-                ? <ActivityIndicator color={P.white} />
-                : <>
-                    <Ionicons name={isDirty ? 'checkmark-done' : 'checkmark'} size={20} color={P.white} />
-                    <Text style={s.primaryBtnTxt}>{isDirty ? 'Enregistrer les modifications' : 'Aucune modification'}</Text>
-                  </>}
-            </LinearGradient>
-          </TouchableOpacity>
-        }
-      >
-        {/* Photo */}
-        <View style={s.editPhotoRow}>
-          <AvatarRing uri={editAvatarUri ? (editAvatarUri === user?.avatar ? sizedImage(editAvatarUri, 200) : editAvatarUri) : null} name={editName} size={74} gap={theme.surface} />
-          <View style={{ flex: 1, gap: 8 }}>
-            <Text style={s.editPhotoTitle}>Photo de profil</Text>
-            <View style={{ flexDirection: 'row', gap: 8 }}>
-              <MiniBtn icon="images-outline" label="Galerie" disabled={picking || savingProfile}
-                onPress={async () => { const img = await pickImage('library'); if (img) setEditAvatarUri(img); }} />
-              <MiniBtn icon="camera-outline" label="Caméra" disabled={picking || savingProfile}
-                onPress={async () => { const img = await pickImage('camera'); if (img) setEditAvatarUri(img); }} />
-            </View>
-          </View>
-        </View>
-
-        <SectionTitle icon="finger-print-outline" title="Identité" />
-        <Field icon="person-outline" label="Nom complet" placeholder="Votre nom"
-          value={editName} onChangeText={setEditName} editable={!savingProfile} autoCapitalize="words" />
-        <Field icon="mail-outline" label="Adresse e-mail" placeholder="votre@email.com"
-          value={editEmail} onChangeText={setEditEmail} textContentType="emailAddress" autoComplete="email"
-          keyboardType="email-address" autoCapitalize="none" editable={!savingProfile} />
-        <Text style={s.fieldLabel}>Ville</Text>
-        <TouchableOpacity style={s.fieldBox} onPress={() => setCitySheet(true)} activeOpacity={0.75} disabled={savingProfile}>
-          <Ionicons name="location-outline" size={18} color={theme.iconMuted} />
-          <Text style={[s.selectVal, !editCity && { color: theme.textSoft, fontWeight: '500' }]}>{editCity || 'Sélectionner une ville'}</Text>
-          <Ionicons name="chevron-down" size={18} color={theme.iconMuted} />
-        </TouchableOpacity>
-
-        <SectionTitle icon="call-outline" title="Contact" />
-        <Text style={s.fieldLabel}>Numéro WhatsApp</Text>
-        <View style={s.phoneRow}>
-          <TouchableOpacity style={[s.fieldBox, s.dialPill]} onPress={() => setCountrySheet(true)} activeOpacity={0.8} disabled={savingProfile}>
-            <Text style={{ fontSize: 18 }}>{whatsappCountry.flag}</Text>
-            <Text style={s.dialCode}>{whatsappCountry.dialCode}</Text>
-            <Ionicons name="chevron-down" size={14} color={theme.iconMuted} />
-          </TouchableOpacity>
-          <View style={{ flex: 1 }}>
-            <Field compact icon="logo-whatsapp" placeholder="12 34 56 78"
-              value={editWhatsapp} onChangeText={setEditWhatsapp} {...doneAccessory}
-              textContentType="telephoneNumber" autoComplete="tel" keyboardType="phone-pad" editable={!savingProfile} />
-          </View>
-        </View>
-
-        <SectionTitle icon="storefront-outline" title="Activité" />
-        <View style={s.typeRow}>
-          {[
-            { value: 'individual', icon: 'person-outline', label: 'Particulier', sub: 'Je vends ponctuellement' },
-            { value: 'professional', icon: 'briefcase-outline', label: 'Professionnel', sub: 'Boutique ou entreprise' },
-          ].map((t) => {
-            const active = editBusinessType === t.value;
-            return (
-              <TouchableOpacity key={t.value} style={[s.typeCard, active && s.typeCardActive]} onPress={() => { tap(); setEditBusinessType(t.value); }} activeOpacity={0.85} disabled={savingProfile}>
-                <View style={[s.typeIcon, active && { backgroundColor: P.terra }]}>
-                  <Ionicons name={t.icon} size={18} color={active ? P.white : theme.textMuted} />
-                </View>
-                <Text style={[s.typeLabel, active && { color: P.terra }]}>{t.label}</Text>
-                <Text style={s.typeSub}>{t.sub}</Text>
-                {active ? <Ionicons name="checkmark-circle" size={18} color={P.terra} style={s.typeCheck} /> : null}
-              </TouchableOpacity>
-            );
-          })}
-        </View>
-
-        {editBusinessType === 'professional' ? (
-          <Field icon="business-outline" label="Nom de l'entreprise" placeholder="Nom de votre boutique / entreprise"
-            value={editBusinessName} onChangeText={setEditBusinessName} editable={!savingProfile} />
-        ) : null}
-
-        <Field icon="document-text-outline" label="Bio" placeholder="Présentez-vous en quelques mots : ce que vous vendez, vos horaires…"
-          value={editDescription} onChangeText={setEditDescription} {...doneAccessory}
-          multiline maxLength={BIO_MAX} editable={!savingProfile}
-          counter={`${editDescription.length}/${BIO_MAX}`} />
-
-        {/* Sélecteurs ouverts depuis ce panneau : déclarés À L'INTÉRIEUR pour
-            pouvoir s'afficher par-dessus (iOS n'affiche pas deux Modal sœurs) */}
-        <CustomBottomSheet visible={citySheet} onClose={() => setCitySheet(false)} title="Choisir une ville" avoidKeyboard={false}>
-          {NIGER_CITIES.map((c) => {
-            const active = editCity === c;
-            return (
-              <TouchableOpacity key={c} style={[s.listRow, active && s.listRowActive]} onPress={() => { setEditCity(c); setCitySheet(false); }} activeOpacity={0.75}>
-                <Ionicons name="location-outline" size={18} color={active ? P.terra : theme.iconMuted} />
-                <Text style={[s.listRowTxt, active && { color: P.terra, fontWeight: '800' }]}>{c}, Niger</Text>
-                {active ? <Ionicons name="checkmark" size={18} color={P.terra} /> : null}
-              </TouchableOpacity>
-            );
-          })}
-        </CustomBottomSheet>
-
-        <CustomBottomSheet visible={countrySheet} onClose={() => setCountrySheet(false)} title="Indicatif du pays" avoidKeyboard={false}>
-          {COUNTRIES.map((c) => {
-            const active = whatsappCountry.code === c.code;
-            return (
-              <TouchableOpacity key={c.code} style={[s.listRow, active && s.listRowActive]} onPress={() => { setWhatsappCountry(c); setCountrySheet(false); }} activeOpacity={0.75}>
-                <Text style={{ fontSize: 22 }}>{c.flag}</Text>
-                <Text style={[s.listRowTxt, active && { color: P.terra, fontWeight: '800' }]}>{c.name}</Text>
-                <Text style={s.listRowDial}>{c.dialCode}</Text>
-                {active ? <Ionicons name="checkmark" size={18} color={P.terra} /> : null}
-              </TouchableOpacity>
-            );
-          })}
-        </CustomBottomSheet>
-      </CustomBottomSheet>
     </View>
   );
 }
@@ -833,54 +605,6 @@ function PhotoAction({ icon, label, sub, onPress, disabled }) {
       <Text style={s.photoActionLabel}>{label}</Text>
       <Text style={s.photoActionSub}>{sub}</Text>
     </TouchableOpacity>
-  );
-}
-
-function MiniBtn({ icon, label, onPress, disabled }) {
-  const s = useProfileStyles();
-  return (
-    <TouchableOpacity style={[s.miniBtn, disabled && s.btnDisabled]} onPress={onPress} disabled={disabled} activeOpacity={0.8}>
-      <Ionicons name={icon} size={15} color={P.terra} />
-      <Text style={s.miniBtnTxt}>{label}</Text>
-    </TouchableOpacity>
-  );
-}
-
-function SectionTitle({ icon, title }) {
-  const s = useProfileStyles();
-  return (
-    <View style={s.sectionTitle}>
-      <Ionicons name={icon} size={15} color={P.terra} />
-      <Text style={s.sectionTitleTxt}>{title}</Text>
-      <View style={s.sectionTitleLine} />
-    </View>
-  );
-}
-
-// Champ avec icône ; la bordure s'illumine quand il a le focus.
-// Ne changer que la couleur au focus : ajouter une ombre/elevation (Android) recrée
-// la vue native autour du champ, qui perd alors le focus au profit d'un autre champ.
-function Field({ icon, label, counter, multiline, compact: isCompact, ...inputProps }) {
-  const s = useProfileStyles();
-  const { theme } = useAppTheme();
-  const [focused, setFocused] = useState(false);
-  return (
-    <View style={{ marginBottom: isCompact ? 0 : 14 }}>
-      {label ? <Text style={s.fieldLabel}>{label}</Text> : null}
-      <View collapsable={false} style={[s.fieldBox, multiline && s.fieldBoxMulti, focused && s.fieldBoxFocus]}>
-        <Ionicons name={icon} size={18} color={focused ? P.terra : theme.iconMuted} style={multiline ? { marginTop: 2 } : null} />
-        <SheetTextInput
-          {...inputProps}
-          multiline={multiline}
-          textAlignVertical={multiline ? 'top' : 'center'}
-          placeholderTextColor={theme.textSoft}
-          onFocus={() => setFocused(true)}
-          onBlur={() => setFocused(false)}
-          style={[s.fieldInput, multiline && s.fieldInputMulti]}
-        />
-      </View>
-      {counter ? <Text style={s.counter}>{counter}</Text> : null}
-    </View>
   );
 }
 

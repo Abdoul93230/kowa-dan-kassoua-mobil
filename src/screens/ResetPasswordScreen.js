@@ -190,7 +190,6 @@ export default function ResetPasswordScreen({ navigation, route }) {
                 onChangeText={v => { setNewPassword(v); setError(''); }}
                 textContentType="newPassword" autoComplete="new-password" secureTextEntry={!showNewPwd}
                 autoCapitalize="none"
-                autoFocus
                 editable={!loading}
               />
               <TouchableOpacity style={s.eyeBtn} onPress={() => setShowNewPwd(p => !p)}>

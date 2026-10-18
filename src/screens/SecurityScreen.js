@@ -35,7 +35,7 @@ const STRENGTH = [
   { label: 'Très fort', color: '#0f9f6e' },
 ];
 
-function PasswordField({ label, value, onChangeText, inputRef, returnKeyType, onSubmitEditing, textContentType, error, placeholder, autoFocus }) {
+function PasswordField({ label, value, onChangeText, inputRef, returnKeyType, onSubmitEditing, textContentType, error, placeholder }) {
   const { theme, isDark } = useAppTheme();
   const [visible, setVisible] = useState(false);
   const [focused, setFocused] = useState(false);
@@ -63,7 +63,6 @@ function PasswordField({ label, value, onChangeText, inputRef, returnKeyType, on
           submitBehavior={returnKeyType === 'next' ? 'submit' : 'blurAndSubmit'}
           onFocus={() => setFocused(true)}
           onBlur={() => setFocused(false)}
-          autoFocus={autoFocus}
         />
         <Pressable onPress={() => setVisible((v) => !v)} hitSlop={10} accessibilityLabel={visible ? 'Masquer le mot de passe' : 'Afficher le mot de passe'}>
           <Feather name={visible ? 'eye-off' : 'eye'} size={18} color={theme.textSoft} />
@@ -172,7 +171,6 @@ export default function SecurityScreen({ navigation }) {
             returnKeyType="next"
             onSubmitEditing={() => newRef.current?.focus()}
             error={errors.current}
-            autoFocus
           />
         ) : null}
 
@@ -186,7 +184,6 @@ export default function SecurityScreen({ navigation }) {
           returnKeyType="next"
           onSubmitEditing={() => confirmRef.current?.focus()}
           error={errors.new}
-          autoFocus={mustChange}
         />
 
         {/* Force du mot de passe */}

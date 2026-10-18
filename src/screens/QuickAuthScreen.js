@@ -466,7 +466,6 @@ export default function QuickAuthScreen({ navigation, route }) {
                 autoCapitalize="none"
                 autoComplete="email"
                 textContentType="emailAddress"
-                autoFocus
               />
               <Text style={[s.phoneHelper, { color: theme.textSoft }]}>Le code de vérification vous sera envoyé par email.</Text>
             </View>
@@ -495,7 +494,6 @@ export default function QuickAuthScreen({ navigation, route }) {
                   maxLength={(country?.nationalLength || 8) + ((country?.phoneGroups?.length || 1) - 1)}
                   autoComplete="tel"
                   textContentType="telephoneNumber"
-                  autoFocus
                 />
               </View>
               <Text style={[s.phoneHelper, { color: theme.textSoft }]}>Format attendu: {country.sample} ({country.nationalLength} chiffres)</Text>
@@ -531,7 +529,6 @@ export default function QuickAuthScreen({ navigation, route }) {
                     onChangeText={v => { setPassword(v); setError(''); }}
                     textContentType="password" autoComplete="password" secureTextEntry={!showPwd}
                     autoCapitalize="none"
-                    autoFocus
                   />
                   <TouchableOpacity style={s.eyeBtn} onPress={() => setShowPwd(p => !p)}>
                     <Text style={s.eyeBtnTxt}>{showPwd ? '🙈' : '👁'}</Text>
@@ -577,7 +574,6 @@ export default function QuickAuthScreen({ navigation, route }) {
                   value={name}
                   onChangeText={v => { setName(v); setError(''); }}
                   autoCapitalize="words"
-                  autoFocus
                 />
               </View>
 

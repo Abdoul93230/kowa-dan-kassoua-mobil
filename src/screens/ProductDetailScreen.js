@@ -16,6 +16,7 @@ import * as Haptics from 'expo-haptics';
 import { apiClient } from '../api/auth';
 import { createReview, getProductReviews, markReviewHelpful, checkReviewEligibility } from '../api/reviews';
 import { toggleProductStatus } from '../api/products';
+import { reportProduct, REPORT_REASONS } from '../api/reports';
 import { useAuth } from '../contexts/AuthContext';
 import { useAppTheme } from '../contexts/ThemeContext';
 import { useFavorites } from '../hooks/useFavorites';
@@ -144,6 +145,11 @@ export default function ProductDetailScreen({ route, navigation }) {
   const [loadingReviews, setLoadingReviews] = useState(false);
   const [reviewEligible, setReviewEligible] = useState(false);
   const [reviewOpen, setReviewOpen] = useState(false);
+  // Signalement
+  const [reportOpen, setReportOpen] = useState(false);
+  const [reportReason, setReportReason] = useState('');
+  const [reportDetails, setReportDetails] = useState('');
+  const [sendingReport, setSendingReport] = useState(false);
   const [reviewRating, setReviewRating] = useState(0);
   const [reviewComment, setReviewComment] = useState('');
   const [submittingReview, setSubmittingReview] = useState(false);
@@ -303,6 +309,30 @@ export default function ProductDetailScreen({ route, navigation }) {
   const currentUserId = String(user?.id || user?._id || '');
   const isOwnListing = Boolean(isAuthenticated && sellerId && currentUserId && sellerId === currentUserId);
 
+  // Signaler l'annonce : connexion requise (un signalement par personne et par annonce)
+  const openReport = () => {
+    if (!isValidProductId) return;
+    if (!isAuthenticated) return requireAuth({ type: 'report', productId });
+    setReportReason('');
+    setReportDetails('');
+    setReportOpen(true);
+  };
+
+  const submitReport = async () => {
+    if (!reportReason || sendingReport) return;
+    setSendingReport(true);
+    try {
+      const res = await reportProduct(productId, reportReason, reportDetails.trim());
+      setReportOpen(false);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+      showAlert('success', 'Signalement envoyé', res?.message || 'Merci ! Notre équipe va examiner cette annonce.');
+    } catch (e) {
+      showAlert('error', 'Signalement', e.message);
+    } finally {
+      setSendingReport(false);
+    }
+  };
+
   // Contact uniquement via la messagerie de l'app (pas de WhatsApp ni d'appel direct)
   const handleMessage = () => {
     if (!isValidProductId || !sellerId) return;
@@ -441,7 +471,8 @@ export default function ProductDetailScreen({ route, navigation }) {
   const rating = Number(product.rating || 0);
   const totalReviews = Number(product.totalReviews || 0);
   const statusBanner = product.status && product.status !== 'active' ? STATUS_BANNERS[product.status] : null;
-  const hasPrice = formatPrice(product.price) !== 'Prix à discuter';
+  // Un vrai montant (ni « Gratuit » ni « Prix à discuter »)
+  const hasPrice = Number(String(product.price ?? '').replace(/[^\d]/g, '')) > 0;
 
   const tiles = (isService ? [
     categoryName && { icon: 'grid', label: 'Catégorie', value: product.subcategory ? `${categoryName} · ${product.subcategory}` : categoryName },
@@ -672,6 +703,14 @@ export default function ProductDetailScreen({ route, navigation }) {
             ))}
           </View>
 
+          {/* ── Signaler ───────────────────────────────────────────────────── */}
+          {!isOwnListing ? (
+            <Pressable onPress={openReport} style={({ pressed }) => [s.reportBtn, { borderColor: theme.border }, pressed && { opacity: 0.7 }]} accessibilityRole="button">
+              <Ionicons name="flag-outline" size={16} color={theme.textMuted} />
+              <Text style={[s.reportTxt, { color: theme.textMuted }]}>Signaler cette annonce</Text>
+            </Pressable>
+          ) : null}
+
           {/* ── Avis ───────────────────────────────────────────────────────── */}
           <Card theme={theme}>
             <SectionTitle
@@ -883,6 +922,50 @@ export default function ProductDetailScreen({ route, navigation }) {
         <Text style={[s.counter, { color: theme.textSoft }]}>{reviewComment.length}/{REVIEW_MAX}</Text>
       </Sheet>
 
+      {/* ══ Signalement ═══════════════════════════════════════════════════════ */}
+      <Sheet
+        visible={reportOpen}
+        onClose={() => { if (!sendingReport) setReportOpen(false); }}
+        title="Signaler l'annonce"
+        footer={(
+          <PressableScale onPress={submitReport} disabled={!reportReason || sendingReport}>
+            <View style={[s.mainBtn, { backgroundColor: P.error, opacity: !reportReason ? 0.5 : 1 }]}>
+              {sendingReport ? <ActivityIndicator color="#fff" /> : <Text style={s.mainBtnTxt}>Envoyer le signalement</Text>}
+            </View>
+          </PressableScale>
+        )}
+      >
+        <Text style={[s.sheetSub, { color: theme.textMuted }]}>
+          Qu'est-ce qui ne va pas ? Votre signalement est anonyme pour l'annonceur.
+        </Text>
+        <View style={{ gap: 8, marginTop: 4 }}>
+          {REPORT_REASONS.map((r) => {
+            const active = reportReason === r.value;
+            return (
+              <Pressable
+                key={r.value}
+                onPress={() => { tap(); setReportReason(r.value); }}
+                style={[s.reasonRow, { borderColor: active ? P.error : theme.border, backgroundColor: active ? (isDark ? 'rgba(239,68,68,0.12)' : '#fef2f2') : theme.surfaceAlt }]}
+              >
+                <Ionicons name={r.icon} size={19} color={active ? P.error : theme.textMuted} />
+                <Text style={[s.reasonTxt, { color: active ? P.error : theme.text }]}>{r.label}</Text>
+                <Ionicons name={active ? 'radio-button-on' : 'radio-button-off'} size={19} color={active ? P.error : theme.iconMuted} />
+              </Pressable>
+            );
+          })}
+        </View>
+        <SheetTextInput
+          value={reportDetails}
+          onChangeText={setReportDetails}
+          placeholder="Précisions (facultatif)"
+          placeholderTextColor={theme.inputPlaceholder}
+          multiline
+          maxLength={500}
+          editable={!sendingReport}
+          style={[s.reviewInput, { color: theme.text, backgroundColor: theme.surfaceAlt, borderColor: theme.border, marginTop: 14, minHeight: 80 }]}
+        />
+      </Sheet>
+
       <AlertModal
         visible={alert.visible}
         type={alert.type}
@@ -961,6 +1044,10 @@ const s = StyleSheet.create({
   hoursTxt: { fontSize: 15, fontWeight: '800' },
 
   safety: { borderRadius: 20, borderWidth: 1, padding: 16, gap: 8 },
+  reportBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, alignSelf: 'center', paddingHorizontal: 16, height: 40, borderRadius: 20, borderWidth: 1 },
+  reportTxt: { fontSize: 13.5, fontWeight: '700' },
+  reasonRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 14, height: 50, borderRadius: 14, borderWidth: 1.5 },
+  reasonTxt: { flex: 1, fontSize: 14.5, fontWeight: '600' },
   safetyHead: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 2 },
   safetyTitle: { fontSize: 15, fontWeight: '900', letterSpacing: -0.2 },
   safetyRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 8 },

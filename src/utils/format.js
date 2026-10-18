@@ -7,7 +7,8 @@ const groupThousands = (n) => String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
 export const formatPrice = (price) => {
   const digits = String(price ?? '').replace(/[^\d]/g, '');
   const n = Number(digits);
-  if (!digits || !Number.isFinite(n) || n <= 0) return 'Prix à discuter';
+  if (!digits || !Number.isFinite(n) || n < 0) return 'Prix à discuter';
+  if (n === 0) return 'Gratuit'; // annonce publiée à 0 F
   return `${groupThousands(n)} FCFA`;
 };
 

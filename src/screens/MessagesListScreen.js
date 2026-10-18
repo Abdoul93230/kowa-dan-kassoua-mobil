@@ -25,6 +25,7 @@ import { createOrGetConversation, getConversations } from '../api/messaging';
 import { peekCache, writeCache } from '../api/cache';
 import { MOBILE_COLORS as P } from '../theme/colors';
 import { useSocket } from '../hooks/useSocket';
+import GuestWelcome from '../components/GuestWelcome';
 import { formatPrice, getInitials, sizedImage } from '../utils/format';
 
 const PAGE_SIZE = 30;
@@ -425,16 +426,19 @@ export default function MessagesListScreen({ navigation, route }) {
 
   if (!isAuthenticated) {
     return (
-      <View style={[styles.container, { paddingTop: insets.top }]}>
-        <EmptyState
-          styles={styles}
-          icon="chatbubbles"
-          title="Vos messages"
-          text="Connectez-vous pour discuter avec les vendeurs et les acheteurs, sans partager votre numéro."
-          action="Se connecter"
-          onAction={() => navigation.navigate('QuickAuth', { pendingAction: { type: 'messages' }, returnScreen: 'Messages' })}
-        />
-      </View>
+      <GuestWelcome
+        icon="chatbubbles"
+        title="Discutez en toute confiance"
+        text="Posez vos questions, négociez et organisez la remise directement dans TakTak."
+        benefits={[
+          { icon: 'shield-checkmark-outline', label: 'Votre numéro de téléphone reste privé' },
+          { icon: 'mic-outline', label: 'Messages écrits et vocaux, en direct' },
+          { icon: 'checkmark-done-outline', label: 'Suivez vos achats et vos ventes au même endroit' },
+        ]}
+        onAuth={() => navigation.navigate('QuickAuth', { pendingAction: { type: 'messages' }, returnScreen: 'Messages' })}
+        onBrowse={() => navigation.navigate('Home')}
+        browseLabel="Découvrir les annonces"
+      />
     );
   }
 
@@ -598,7 +602,7 @@ const ConversationRow = memo(function ConversationRow({ conv, peer, online, mine
             </View>
             <Text style={styles.itemLine} numberOfLines={1}>
               {conv.item.title}
-              {Number(String(price || '').replace(/[^\d]/g, '')) > 0 ? <Text style={styles.price}>{`  ·  ${formatPrice(price)}`}</Text> : null}
+              {String(price ?? '').replace(/[^\d]/g, '') !== '' ? <Text style={styles.price}>{`  ·  ${formatPrice(price)}`}</Text> : null}
             </Text>
           </View>
         ) : null}

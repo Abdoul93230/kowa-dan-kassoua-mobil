@@ -28,6 +28,7 @@ import { getMyFavorites } from '../api/favorites';
 import { useFavorites } from '../hooks/useFavorites';
 import { MOBILE_COLORS as P } from '../theme/colors';
 import AlertModal from '../components/AlertModal';
+import GuestWelcome from '../components/GuestWelcome';
 import { formatPrice, getCityName, getProductId, sizedImage, timeAgo } from '../utils/format';
 
 const GUTTER = 16;
@@ -335,16 +336,19 @@ export default function FavoritesScreen({ navigation }) {
   // ─── Non connecté ──────────────────────────────────────────────────────────
   if (!isAuthenticated) {
     return (
-      <View style={[styles.container, { paddingTop: insets.top }]}>
-        <EmptyState
-          styles={styles}
-          icon="heart"
-          title="Vos coups de cœur"
-          text="Connectez-vous pour sauvegarder les annonces qui vous plaisent et les retrouver sur tous vos appareils."
-          action="Se connecter"
-          onAction={() => navigation.navigate('QuickAuth', { pendingAction: { type: 'favorites' }, returnScreen: 'Favorites' })}
-        />
-      </View>
+      <GuestWelcome
+        icon="heart"
+        title="Gardez vos coups de cœur"
+        text="Une annonce vous plaît ? Touchez le ♡ et retrouvez-la ici, à tout moment, sur tous vos appareils."
+        benefits={[
+          { icon: 'heart-outline', label: 'Sauvegardez les annonces qui vous intéressent' },
+          { icon: 'pricetag-outline', label: "Voyez d'un coup d'œil celles qui sont encore disponibles" },
+          { icon: 'chatbubble-ellipses-outline', label: 'Écrivez au vendeur en un toucher' },
+        ]}
+        onAuth={() => navigation.navigate('QuickAuth', { pendingAction: { type: 'favorites' }, returnScreen: 'Favorites' })}
+        onBrowse={() => navigation.navigate('Home')}
+        browseLabel="Découvrir les annonces"
+      />
     );
   }
 

@@ -163,7 +163,7 @@ export default function ProductsListScreen({ navigation }) {
   const headerH = insets.top + HEADER_BODY_H;
   const cardW = (width - 16 * 2 - GRID_GAP) / 2;
   const locationParam = city !== 'all' ? city : undefined;
-  const firstName = (user?.name || '').trim().split(/\s+/)[0];
+  const fullName = (user?.name || '').trim();
 
   // ─── Données ────────────────────────────────────────────────────────────────
   // Applique une réponse d'accueil ; une section absente garde sa valeur précédente
@@ -326,8 +326,10 @@ export default function ProductsListScreen({ navigation }) {
         {/* ── Accueil personnalisé ── */}
         <View style={s.hello}>
           <View style={{ flex: 1 }}>
-            <Text style={[s.helloTitle, { color: theme.text }]} numberOfLines={1}>
-              {greeting()}{firstName ? `, ${firstName}` : ''} 👋
+            {/* Salutation discrète, nom complet mis en avant */}
+            <Text style={[s.helloSmall, { color: theme.textMuted }]}>{greeting()} 👋</Text>
+            <Text style={[s.helloTitle, { color: theme.text }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.75}>
+              {fullName || 'Bienvenue sur TakTak'}
             </Text>
             <View style={s.liveRow}>
               <View style={s.liveDot} />
@@ -456,7 +458,7 @@ export default function ProductsListScreen({ navigation }) {
             <View style={[s.trust, { borderColor: theme.border }]}>
               {[
                 { icon: 'shield', label: 'Membres vérifiés' },
-                { icon: 'message-circle', label: 'Contact direct' },
+                { icon: 'message-circle', label: 'Messagerie sécurisée' },
                 { icon: 'gift', label: '100 % gratuit' },
               ].map((t) => (
                 <View key={t.icon} style={s.trustItem}>
@@ -493,7 +495,8 @@ const s = StyleSheet.create({
   ambient: { position: 'absolute', top: 0, left: 0, right: 0 },
 
   hello: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingTop: 6, paddingBottom: 18, gap: 12 },
-  helloTitle: { fontSize: 24, fontWeight: '900', letterSpacing: -0.6 },
+  helloSmall: { fontSize: 14, fontWeight: '700', marginBottom: 1 },
+  helloTitle: { fontSize: 22, fontWeight: '900', letterSpacing: -0.5 },
   liveRow: { flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: 5 },
   liveDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: P.green },
   liveTxt: { fontSize: 13, flexShrink: 1 },

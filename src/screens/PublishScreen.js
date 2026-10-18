@@ -163,7 +163,8 @@ export default function PublishScreen({ navigation, route }) {
     setForm({
       type: editItem.type || 'product',
       title: editItem.title || '',
-      category: normalizeCategoryValue(editItem.category),
+      // L'identifiant d'abord : editItem.category contient le NOM de la catégorie
+      category: editItem.categoryId || normalizeCategoryValue(editItem.category) || editItem.categorySlug || '',
       subcategory: normalizeSubcategoryValue(editItem.subcategory),
       price: editItem.price?.toString().replace(/[^\d]/g, '') || '',
       description: editItem.description || '',
@@ -243,15 +244,20 @@ export default function PublishScreen({ navigation, route }) {
     }
   }, [isAuthenticated, route?.params?.autoSubmit]);
 
-  // Changement produit ⇄ service : on retire une catégorie ou sous-catégorie qui ne convient plus
-  useEffect(() => {
-    if (!categories.length || !form.category) return;
-    const cat = filterCategoriesForType(categories, form.type).find((c) => c._id === form.category);
-    if (!cat) { setForm((p) => ({ ...p, category: '', subcategory: '' })); return; }
-    const raw = categories.find((c) => c._id === form.category);
-    const sub = raw?.subcategories?.find((x) => x.slug === form.subcategory);
-    if (sub && !subcategoryAllows(sub, raw.slug, form.type)) setForm((p) => ({ ...p, subcategory: '' }));
-  }, [form.type, categories]);
+  // Changement produit ⇄ service par l'utilisateur : on retire une catégorie ou
+  // sous-catégorie qui ne convient plus au nouveau type. (Jamais au chargement
+  // d'une annonce à modifier : sa catégorie doit être conservée.)
+  const changeType = (type) => {
+    setForm((p) => {
+      if (p.type === type) return p;
+      const raw = categories.find((c) => String(c._id) === String(p.category));
+      if (!raw) return { ...p, type };
+      if (!filterCategoriesForType([raw], type).length) return { ...p, type, category: '', subcategory: '' };
+      const sub = raw.subcategories?.find((x) => x.slug === p.subcategory);
+      if (sub && !subcategoryAllows(sub, raw.slug, type)) return { ...p, type, subcategory: '' };
+      return { ...p, type };
+    });
+  };
 
   const loadCategories = async () => {
     try {
@@ -314,7 +320,6 @@ export default function PublishScreen({ navigation, route }) {
       if (!form.category) e.category = 'Choisissez une catégorie';
     }
     if (s === 2 || s === 'all') {
-      if (!form.price || isNaN(Number(form.price)) || Number(form.price) <= 0) e.price = 'Indiquez un prix';
       const wc = form.description.trim().split(/\s+/).filter(Boolean).length;
       if (wc > 150) e.description = 'Maximum 150 mots';
     }
@@ -402,7 +407,8 @@ export default function PublishScreen({ navigation, route }) {
       const data = {
         title: form.title, description: form.description,
         category: form.category, subcategory: form.subcategory || '',
-        type: form.type, price: form.price,
+        // Prix facultatif : vide = 0 F
+        type: form.type, price: form.price || "0",
         location: user?.location || 'Niger', quantity: '1',
             delivery: { available: form.delivery, cost: form.deliveryCost, areas: form.deliveryAreas, estimatedTime: '' },
             availability: form.availability,
@@ -428,7 +434,8 @@ export default function PublishScreen({ navigation, route }) {
           } else {
             navigation.navigate('MainTabs', {
               screen: 'Profile',
-              params: { screen: 'MyListingsTab' },
+              // initial: false : le profil reste dessous, l'onglet Profil y ramène
+              params: { screen: 'MyListingsTab', initial: false },
             });
           }
         } catch (e) {
@@ -448,7 +455,7 @@ export default function PublishScreen({ navigation, route }) {
       const data = {
         title: draftForm.title, description: draftForm.description,
         category: draftForm.category, subcategory: draftForm.subcategory || '',
-        type: draftForm.type, price: draftForm.price,
+        type: draftForm.type, price: draftForm.price || "0",
         location: user?.location || 'Niger', quantity: '1',
         delivery: { available: draftForm.delivery, cost: draftForm.deliveryCost, areas: draftForm.deliveryAreas, estimatedTime: '' },
         availability: draftForm.availability,
@@ -483,7 +490,8 @@ export default function PublishScreen({ navigation, route }) {
             } else {
               navigation.navigate('MainTabs', {
                 screen: 'Profile',
-                params: { screen: 'MyListingsTab' },
+                // initial: false : le profil reste dessous, l'onglet Profil y ramène
+              params: { screen: 'MyListingsTab', initial: false },
               });
             }
           }
@@ -611,7 +619,7 @@ export default function PublishScreen({ navigation, route }) {
               ].map((o) => {
                 const active = form.type === o.value;
                 return (
-                  <Pressable key={o.value} onPress={() => { tap(); set('type', o.value); }} style={[st.segItem, active && st.segItemActive]}>
+                  <Pressable key={o.value} onPress={() => { tap(); changeType(o.value); }} style={[st.segItem, active && st.segItemActive]}>
                     <Ionicons name={o.icon} size={17} color={active ? '#fff' : theme.textMuted} />
                     <Text style={[st.segTxt, active && { color: '#fff' }]} numberOfLines={1}>{o.label}</Text>
                   </Pressable>
@@ -654,11 +662,11 @@ export default function PublishScreen({ navigation, route }) {
                   ))}
                   {form.images.length < 5 ? (
                     <View style={st.addCol}>
-                      <Pressable onPress={() => pickImages('camera')} style={st.addTile}>
+                      <Pressable onPress={() => pickImages('camera')} style={st.addTile} accessibilityLabel="Prendre une photo">
                         <Ionicons name="camera-outline" size={20} color={accent} />
                       </Pressable>
-                      <Pressable onPress={() => pickImages('library')} style={st.addTile}>
-                        <Ionicons name="add" size={22} color={accent} />
+                      <Pressable onPress={() => pickImages('library')} style={st.addTile} accessibilityLabel="Ajouter depuis la galerie">
+                        <Ionicons name="images-outline" size={21} color={accent} />
                       </Pressable>
                     </View>
                   ) : null}
@@ -724,8 +732,8 @@ export default function PublishScreen({ navigation, route }) {
         {step === 2 && (
           <View style={st.stack}>
             {/* Prix */}
-            <View style={[st.priceCard, errors.price && { borderColor: P.error }]}>
-              <Text style={st.priceLabel}>{isService ? 'Votre tarif' : 'Votre prix'}</Text>
+            <View style={st.priceCard}>
+              <Text style={st.priceLabel}>{isService ? 'Votre tarif' : 'Votre prix'} · facultatif</Text>
               <View style={st.priceRow}>
                 <TextInput
                   style={st.priceInput}
@@ -737,9 +745,11 @@ export default function PublishScreen({ navigation, route }) {
                 />
                 <Text style={st.priceCurrency}>FCFA</Text>
               </View>
-              {errors.price ? <Text style={st.error}>{errors.price}</Text> : (
-                <Text style={st.priceHint}>{isService ? 'Indiquez un prix « à partir de ».' : 'Un prix juste attire plus d\'acheteurs.'}</Text>
-              )}
+              <Text style={st.priceHint}>
+                {!priceNum
+                  ? 'Laissez vide pour publier à 0 F.'
+                  : isService ? 'Indiquez un prix « à partir de ».' : 'Un prix juste attire plus d\'acheteurs.'}
+              </Text>
             </View>
 
             {/* État */}
@@ -940,7 +950,7 @@ export default function PublishScreen({ navigation, route }) {
                 ) : null}
               </View>
               <View style={st.previewBody}>
-                <Text style={[st.previewPrice, { color: accent }]}>{formatPrice(form.price)}</Text>
+                <Text style={[st.previewPrice, { color: accent }]}>{formatPrice(form.price || '0')}</Text>
                 <Text style={st.previewTitle} numberOfLines={2}>{form.title}</Text>
                 <View style={st.previewMeta}>
                   <CategoryIcon item={selectedCat} size={16} />

@@ -148,7 +148,8 @@ function extractMongoId(raw) {
 
 function formatPriceFCFA(value) {
   const numeric = Number(String(value || '').replace(/[^\d.-]/g, ''));
-  if (!Number.isFinite(numeric) || numeric <= 0) return 'Prix a discuter';
+  if (!Number.isFinite(numeric) || numeric < 0) return 'Prix à discuter';
+  if (numeric === 0) return 'Gratuit';
   return `${Math.round(numeric).toLocaleString('fr-FR')} FCFA`;
 }
 

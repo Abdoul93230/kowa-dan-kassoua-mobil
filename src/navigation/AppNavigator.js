@@ -49,6 +49,7 @@ import CategoryProductsScreen from '../screens/CategoryProductsScreen';
 import AllProductsScreen from '../screens/AllProductsScreen';
 import SearchScreen from '../screens/SearchScreen';
 import SecurityScreen from '../screens/SecurityScreen';
+import EditProfileScreen from '../screens/EditProfileScreen';
 import ProductDetailScreen from '../screens/ProductDetailScreen';
 import SellerProfileScreen from '../screens/SellerProfileScreen';
 import MessagesListScreen from '../screens/MessagesListScreen';
@@ -243,33 +244,11 @@ function MainTabs() {
       <Tab.Screen
         name="Favorites"
         component={FavoritesScreen}
-        listeners={({ navigation }) => ({
-          tabPress: (e) => {
-            if (!isAuthenticated) {
-              e.preventDefault();
-              navigation.navigate('QuickAuth', {
-                pendingAction: { type: 'favorites' },
-                returnScreen: 'Favorites',
-              });
-            }
-          },
-        })}
       />
       <Tab.Screen name="Publish" component={PublishScreen} />
       <Tab.Screen
         name="Messages"
         component={MessagesNavigator}
-        listeners={({ navigation }) => ({
-          tabPress: (e) => {
-            if (!isAuthenticated) {
-              e.preventDefault();
-              navigation.navigate('QuickAuth', {
-                pendingAction: { type: 'messages_list' },
-                returnScreen: 'Messages',
-              });
-            }
-          },
-        })}
         options={({ route }) => {
           const routeName = getFocusedRouteNameFromRoute(route) || 'MessagesList';
           // Barre masquée dans une conversation (clavier + zone de saisie)
@@ -335,6 +314,7 @@ export default function AppNavigator() {
           <Stack.Screen name="AllProducts" component={AllProductsScreen} options={{ headerShown: false }} />
           {/* Sécurité et connexion — hors onglets pour que la barre d'onglets ne couvre pas le bouton */}
           <Stack.Screen name="Security" component={SecurityScreen} options={{ headerShown: false }} />
+          <Stack.Screen name="EditProfile" component={EditProfileScreen} options={{ headerShown: false }} />
           {/* Page Recherche plein écran (loupe de l'accueil) — apparition en fondu montant */}
           <Stack.Screen
             name="Search"

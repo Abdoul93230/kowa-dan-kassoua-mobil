@@ -1,4 +1,5 @@
-// Carrousel "À la une" — défilement automatique, pause au toucher
+// Carrousel "À la une" — défilement automatique en aller-retour (jusqu'au bout,
+// puis retour vers le début, en boucle), pause au toucher
 import React, { useEffect, useRef, useCallback } from 'react';
 import { View, Text, StyleSheet, Animated } from 'react-native';
 import { Image } from 'expo-image';
@@ -17,6 +18,7 @@ export default function HeroCarousel({ items, width, onPressItem }) {
   const listRef = useRef(null);
   const scrollX = useRef(new Animated.Value(0)).current;
   const indexRef = useRef(0);
+  const directionRef = useRef(1); // 1 : vers la droite, -1 : retour vers la gauche
   const dragging = useRef(false);
 
   // Autoplay — s'arrête pendant que l'utilisateur fait défiler
@@ -24,7 +26,10 @@ export default function HeroCarousel({ items, width, onPressItem }) {
     if (items.length < 2) return undefined;
     const timer = setInterval(() => {
       if (dragging.current) return;
-      const next = (indexRef.current + 1) % items.length;
+      // Aller-retour : on change de sens en arrivant à une extrémité
+      let next = indexRef.current + directionRef.current;
+      if (next >= items.length) { directionRef.current = -1; next = items.length - 2; }
+      else if (next < 0) { directionRef.current = 1; next = 1; }
       listRef.current?.scrollToOffset({ offset: next * step, animated: true });
       indexRef.current = next;
     }, AUTOPLAY_MS);
@@ -33,8 +38,11 @@ export default function HeroCarousel({ items, width, onPressItem }) {
 
   const onMomentumEnd = useCallback((e) => {
     indexRef.current = Math.round(e.nativeEvent.contentOffset.x / step);
+    // Repart dans le bon sens après un défilement manuel jusqu'à une extrémité
+    if (indexRef.current >= items.length - 1) directionRef.current = -1;
+    else if (indexRef.current <= 0) directionRef.current = 1;
     dragging.current = false;
-  }, [step]);
+  }, [step, items.length]);
 
   const renderItem = useCallback(({ item }) => {
     const isService = item.type === 'service';

@@ -282,7 +282,6 @@ export default function ForgotPasswordScreen({ navigation, route }) {
                   onChangeText={handlePhoneChange}
                   textContentType="telephoneNumber" autoComplete="tel" keyboardType="phone-pad"
                   maxLength={(country?.nationalLength || 8) + ((country?.phoneGroups?.length || 1) - 1)}
-                  autoFocus
                   editable={!loading}
                 />
               </View>
@@ -297,7 +296,6 @@ export default function ForgotPasswordScreen({ navigation, route }) {
                 onChangeText={v => { setEmail(v); setError(''); }}
                 textContentType="emailAddress" autoComplete="email" keyboardType="email-address"
                 autoCapitalize="none"
-                autoFocus
                 editable={!loading}
               />
             )}
