@@ -1,4 +1,4 @@
-// ─── API Catégories — MarketHub Niger ───────────────────────────────────────
+// ─── API Catégories — TakTak ───────────────────────────────────────
 // Récupération des catégories et sous-catégories
 
 import api from './auth';

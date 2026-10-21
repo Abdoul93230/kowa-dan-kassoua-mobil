@@ -1,4 +1,4 @@
-// ─── API Favoris — MarketHub Niger ─────────────────────────────────────────
+// ─── API Favoris — TakTak ─────────────────────────────────────────
 // Gestion des favoris (ajout, suppression, liste)
 
 import api from './auth';

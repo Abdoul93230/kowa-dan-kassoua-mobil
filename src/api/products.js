@@ -1,4 +1,4 @@
-// ─── API Produits — MarketHub Niger ─────────────────────────────────────────
+// ─── API Produits — TakTak ─────────────────────────────────────────
 // Gestion des produits/services (CRUD)
 
 import { ImageManipulator, SaveFormat } from 'expo-image-manipulator';
