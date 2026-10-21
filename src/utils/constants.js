@@ -13,8 +13,8 @@ export const SOCKET_URL = 'https://api.taktak-ne.com';
 // export const SOCKET_URL = 'http://192.168.1.48:5001'; // À MODIFIER avec votre IP
 
 // Site web public (liens de partage) — même adresse que les QR codes vendeur du web
-export const WEB_BASE_URL = 'https://api.taktak-ne.com';
-// export const WEB_BASE_URL = 'http://192.168.1.48:5001'; // À MODIFIER avec votre IP
+export const WEB_BASE_URL = 'https://taktak-ne.com';
+// En local : l'adresse du site Next.js (ex. http://192.168.1.48:3000), pas celle de l'API
 // Couleurs centralisees (source unique)
 export { COLORS };
 
